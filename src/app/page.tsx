@@ -1,6 +1,7 @@
 'use client';
 
 import React, { useState, useEffect } from 'react';
+import Link from 'next/link';
 import {
   Inbox,
   Copy,
@@ -30,6 +31,7 @@ import {
   Clock,
   CalendarCheck,
   ExternalLink,
+  Briefcase,
 } from 'lucide-react';
 import EmailDocumentViewer from '@/components/EmailDocumentViewer';
 import CalendarScheduleView from '@/components/CalendarScheduleView';
@@ -210,6 +212,12 @@ export default function DispatchDashboard() {
 
   useEffect(() => {
     fetchLiveBids();
+    if (typeof window !== 'undefined') {
+      const params = new URLSearchParams(window.location.search);
+      if (params.get('view') === 'calendar') {
+        setViewMode('calendar');
+      }
+    }
   }, []);
 
   // Distinct list of active ITBs that have generated Bid Numbers (for linking Addendums/Wons/Losses)
@@ -458,6 +466,17 @@ export default function DispatchDashboard() {
               {bids.filter((b) => (b.bidDueDate || b.normalizedAiDueDate) && b.sticker !== 'Spam').length} Scheduled
             </span>
           </button>
+
+          <Link
+            href="/estimator"
+            className="px-4 py-2 rounded-xl text-xs font-bold transition-all flex items-center gap-2 bg-indigo-50 hover:bg-indigo-100 text-indigo-700 border border-indigo-200 shadow-2xs"
+          >
+            <Briefcase className="w-4 h-4 text-indigo-600" />
+            <span>Estimator Portal</span>
+            <span className="px-1.5 py-0.5 rounded-full text-[10px] bg-indigo-200/60 text-indigo-900 font-mono">
+              {bids.filter((b) => b.assignedEstimator).length} Assigned
+            </span>
+          </Link>
         </div>
 
         <div className="hidden sm:flex items-center gap-2 text-xs text-slate-500 pr-2">

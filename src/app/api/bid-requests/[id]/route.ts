@@ -7,6 +7,8 @@ interface UpdatePayload {
   assignedEstimator?: string | null;
   bidDueDate?: string | null;
   triageStatus?: string | null;
+  estimatorStatus?: 'unassigned' | 'assigned' | 'in_progress' | 'bid_submitted' | 'won' | 'lost' | 'no_bid' | null;
+  estimatorNotes?: string | null;
 }
 
 export async function PATCH(
@@ -54,6 +56,22 @@ export async function PATCH(
         const parsed = new Date(body.bidDueDate);
         updates.bid_due_date = !isNaN(parsed.getTime()) ? parsed.toISOString() : null;
       }
+    }
+
+    // 2c. Handle Estimator Workflow Status Update
+    if (body.estimatorStatus !== undefined) {
+      updates.estimator_status = body.estimatorStatus;
+      if (body.estimatorStatus === 'won') {
+        updates.priority = 'urgent';
+      }
+    }
+
+    // 2d. Handle Estimator Notes Update
+    if (body.estimatorNotes !== undefined) {
+      updates.raw_payload = {
+        ...(updates.raw_payload || currentRecord.raw_payload),
+        estimator_notes: body.estimatorNotes,
+      };
     }
 
     // 3. Handle Sticker Reclassification & Workflow Transitions
