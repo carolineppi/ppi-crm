@@ -8,9 +8,11 @@ import {
   Paperclip,
   Check,
   Copy,
-  Layers,
   Code,
-  Eye,
+  Download,
+  Image,
+  FileArchive,
+  FileSpreadsheet,
 } from 'lucide-react';
 
 interface AttachmentItem {
@@ -18,6 +20,7 @@ interface AttachmentItem {
   size?: number;
   contentType?: string;
   storageUrl?: string;
+  checksum?: string;
 }
 
 interface EmailDocumentViewerProps {
@@ -79,7 +82,7 @@ export default function EmailDocumentViewer({
   // Synthesize or enhance HTML document for high-fidelity PDF/Document rendering
   const documentHtml = React.useMemo(() => {
     const printStyles = `
-      <style>
+      <style id="ppi-doc-styles">
         @page {
           size: letter;
           margin: 15mm;
@@ -104,14 +107,48 @@ export default function EmailDocumentViewer({
       <base target="_blank">
     `;
 
+    // Embed an attachment header inside the iframe document
+    const attachmentsBarHtml =
+      attachments && attachments.length > 0
+        ? `
+      <div id="ppi-iframe-attachments" style="background: #f8fafc; border: 1px solid #e2e8f0; border-radius: 8px; padding: 10px 14px; margin-bottom: 20px; font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif; font-size: 13px;">
+        <div style="font-weight: 700; color: #1e293b; margin-bottom: 6px; display: flex; align-items: center; gap: 6px;">
+          <span>📎</span> Attached Files (${attachments.length}):
+        </div>
+        <div style="display: flex; flex-wrap: wrap; gap: 8px;">
+          ${attachments
+            .map((a) => {
+              const encoded = encodeURIComponent(a.filename);
+              const fileUrl = a.storageUrl || `/api/bid-requests/${id}/attachments/${encoded}`;
+              return `
+              <a href="${fileUrl}" target="_blank" rel="noopener noreferrer" style="display: inline-flex; align-items: center; gap: 4px; padding: 5px 10px; background: #ffffff; border: 1px solid #cbd5e1; border-radius: 6px; color: #1d4ed8; text-decoration: none; font-size: 12px; font-weight: 500; box-shadow: 0 1px 2px rgba(0,0,0,0.05);">
+                📄 <span style="text-decoration: underline;">${escapeHtml(a.filename)}</span>
+                ${a.size ? `<span style="color: #64748b; font-size: 11px;">(${formatBytes(a.size)})</span>` : ''}
+              </a>
+            `;
+            })
+            .join('')}
+        </div>
+      </div>
+    `
+        : '';
+
     if (hasHtml && bodyHtml) {
-      if (bodyHtml.includes('<head>')) {
-        return bodyHtml.replace('<head>', `<head>${printStyles}`);
-      } else if (bodyHtml.includes('<html>')) {
-        return bodyHtml.replace('<html>', `<html><head>${printStyles}</head>`);
+      let finalHtml = bodyHtml;
+      if (finalHtml.includes('<head>')) {
+        finalHtml = finalHtml.replace('<head>', `<head>${printStyles}`);
+      } else if (finalHtml.includes('<html>')) {
+        finalHtml = finalHtml.replace('<html>', `<html><head>${printStyles}</head>`);
       } else {
-        return `<!DOCTYPE html><html><head><meta charset="utf-8">${printStyles}</head><body>${bodyHtml}</body></html>`;
+        finalHtml = `<!DOCTYPE html><html><head><meta charset="utf-8">${printStyles}</head><body>${finalHtml}</body></html>`;
       }
+
+      // Prepend attachments bar inside body if attachments exist
+      if (attachmentsBarHtml && finalHtml.includes('<body')) {
+        finalHtml = finalHtml.replace(/<body[^>]*>/, (match) => `${match}${attachmentsBarHtml}`);
+      }
+
+      return finalHtml;
     }
 
     // High-fidelity synthesized document layout for plain-text emails
@@ -191,10 +228,25 @@ export default function EmailDocumentViewer({
       </tr>
     </table>
   </div>
+  ${attachmentsBarHtml}
   <div class="content-box">${escapeHtml(bodyText || '(No email content available)')}</div>
 </body>
 </html>`;
-  }, [hasHtml, bodyHtml, bodyText, subject, senderName, senderEmail, receivedAt, isForwarded, forwardedBy, originalSenderName, originalSenderEmail]);
+  }, [
+    hasHtml,
+    bodyHtml,
+    bodyText,
+    subject,
+    senderName,
+    senderEmail,
+    receivedAt,
+    isForwarded,
+    forwardedBy,
+    originalSenderName,
+    originalSenderEmail,
+    attachments,
+    id,
+  ]);
 
   const handlePrint = () => {
     if (iframeRef.current && iframeRef.current.contentWindow) {
@@ -308,34 +360,94 @@ export default function EmailDocumentViewer({
           </div>
         ) : (
           /* Plain Text Fallback View */
-          <div className={`w-full ${maxHeight} overflow-y-auto p-4 bg-slate-900 text-slate-100 rounded-lg font-mono text-[11px] leading-relaxed whitespace-pre-wrap select-text border border-slate-800 shadow-inner`}>
+          <div
+            className={`w-full ${maxHeight} overflow-y-auto p-4 bg-slate-900 text-slate-100 rounded-lg font-mono text-[11px] leading-relaxed whitespace-pre-wrap select-text border border-slate-800 shadow-inner`}
+          >
             {bodyText || bodyHtml || '(No text content available)'}
           </div>
         )}
 
-        {/* Attachments Footer Banner */}
+        {/* Attachments Footer Banner with Direct Open & Download Links */}
         {attachments && attachments.length > 0 && (
-          <div className="w-full mt-2.5 pt-2 border-t border-slate-300/80 flex items-center justify-between flex-wrap gap-2 text-xs">
+          <div className="w-full mt-2.5 pt-2.5 border-t border-slate-300/80 flex items-center justify-between flex-wrap gap-2 text-xs">
             <div className="flex items-center gap-1.5 font-bold text-slate-700">
               <Paperclip className="w-3.5 h-3.5 text-blue-600" />
               <span>Attached Documents ({attachments.length}):</span>
             </div>
 
-            <div className="flex flex-wrap gap-1.5">
-              {attachments.map((att, idx) => (
-                <span
-                  key={idx}
-                  className="inline-flex items-center gap-1 px-2.5 py-1 rounded-md bg-white border border-slate-300 text-[11px] text-slate-800 font-medium shadow-2xs"
-                >
-                  <FileText className="w-3 h-3 text-blue-600" />
-                  <span className="truncate max-w-[220px]">{att.filename}</span>
-                  {att.size ? (
-                    <span className="text-[10px] text-slate-400 font-normal">
-                      ({formatBytes(att.size)})
-                    </span>
-                  ) : null}
-                </span>
-              ))}
+            <div className="flex flex-wrap items-center gap-2">
+              {attachments.map((att, idx) => {
+                const encodedFilename = encodeURIComponent(att.filename);
+                const fileUrl =
+                  att.storageUrl || `/api/bid-requests/${id}/attachments/${encodedFilename}`;
+                const downloadUrl =
+                  att.storageUrl || `/api/bid-requests/${id}/attachments/${encodedFilename}?download=1`;
+                const ext = att.filename.split('.').pop()?.toLowerCase();
+
+                let IconComponent = FileText;
+                let iconColor = 'text-blue-600';
+                let badgeBorder = 'border-slate-300 hover:border-blue-400';
+                let badgeBg = 'bg-white hover:bg-blue-50/70';
+
+                if (ext === 'pdf') {
+                  IconComponent = FileText;
+                  iconColor = 'text-rose-600';
+                  badgeBorder = 'border-slate-300 hover:border-rose-400';
+                  badgeBg = 'bg-white hover:bg-rose-50/70';
+                } else if (['jpg', 'jpeg', 'png', 'gif', 'webp', 'svg'].includes(ext || '')) {
+                  IconComponent = Image;
+                  iconColor = 'text-indigo-600';
+                  badgeBorder = 'border-slate-300 hover:border-indigo-400';
+                  badgeBg = 'bg-white hover:bg-indigo-50/70';
+                } else if (['zip', 'rar', '7z', 'tar', 'gz'].includes(ext || '')) {
+                  IconComponent = FileArchive;
+                  iconColor = 'text-amber-600';
+                  badgeBorder = 'border-slate-300 hover:border-amber-400';
+                  badgeBg = 'bg-white hover:bg-amber-50/70';
+                } else if (['xlsx', 'xls', 'csv'].includes(ext || '')) {
+                  IconComponent = FileSpreadsheet;
+                  iconColor = 'text-emerald-600';
+                  badgeBorder = 'border-slate-300 hover:border-emerald-400';
+                  badgeBg = 'bg-white hover:bg-emerald-50/70';
+                }
+
+                return (
+                  <div
+                    key={idx}
+                    className={`inline-flex items-center rounded-md border text-[11px] font-medium shadow-2xs transition-all group overflow-hidden ${badgeBg} ${badgeBorder}`}
+                  >
+                    {/* Main Clickable Preview Link */}
+                    <a
+                      href={fileUrl}
+                      target="_blank"
+                      rel="noopener noreferrer"
+                      className="inline-flex items-center gap-1.5 px-2.5 py-1 text-slate-800 hover:text-blue-700 transition-colors"
+                      title={`Click to preview / open ${att.filename}`}
+                    >
+                      <IconComponent className={`w-3.5 h-3.5 flex-shrink-0 ${iconColor}`} />
+                      <span className="truncate max-w-[200px] sm:max-w-[280px] font-semibold underline-offset-2 hover:underline">
+                        {att.filename}
+                      </span>
+                      {att.size ? (
+                        <span className="text-[10px] text-slate-400 font-normal">
+                          ({formatBytes(att.size)})
+                        </span>
+                      ) : null}
+                      <ExternalLink className="w-3 h-3 text-slate-400 group-hover:text-blue-600 opacity-60 group-hover:opacity-100 transition-opacity ml-0.5" />
+                    </a>
+
+                    {/* Quick Direct Download Button */}
+                    <a
+                      href={downloadUrl}
+                      download
+                      className="px-1.5 py-1 text-slate-400 hover:text-slate-800 hover:bg-slate-200/70 border-l border-slate-200 transition-colors flex items-center justify-center"
+                      title="Download file directly"
+                    >
+                      <Download className="w-3 h-3" />
+                    </a>
+                  </div>
+                );
+              })}
             </div>
           </div>
         )}

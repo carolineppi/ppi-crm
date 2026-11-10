@@ -10,6 +10,14 @@ function escapeHtml(str: string): string {
     .replace(/'/g, '&#039;');
 }
 
+function formatBytes(bytes?: number): string {
+  if (!bytes || bytes === 0) return '0 B';
+  const k = 1024;
+  const sizes = ['B', 'KB', 'MB', 'GB'];
+  const i = Math.floor(Math.log(bytes) / Math.log(k));
+  return `${parseFloat((bytes / Math.pow(k, i)).toFixed(1))} ${sizes[i]}`;
+}
+
 export async function GET(
   request: NextRequest,
   { params }: { params: Promise<{ id: string }> }
@@ -39,6 +47,32 @@ export async function GET(
     const htmlBody = bid.email_body_html || '';
     const textBody = bid.email_body_text || bid.raw_payload?.bodyText || bid.raw_payload?.body || '';
 
+    const attachmentsList: any[] = Array.isArray(bid.attachments) && bid.attachments.length > 0
+      ? bid.attachments
+      : Array.isArray(bid.raw_payload?.attachments)
+      ? bid.raw_payload.attachments
+      : [];
+
+    const attachmentsBannerHtml = attachmentsList.length > 0 ? `
+      <div id="ppi-attachments-bar" style="background: #f8fafc; border: 1px solid #e2e8f0; border-radius: 8px; padding: 10px 14px; margin-bottom: 20px; font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif; font-size: 13px;">
+        <div style="font-weight: 700; color: #1e293b; margin-bottom: 6px; display: flex; align-items: center; gap: 6px;">
+          <span>📎</span> Attached Files (${attachmentsList.length}):
+        </div>
+        <div style="display: flex; flex-wrap: wrap; gap: 8px;">
+          ${attachmentsList.map((a: any) => {
+            const encoded = encodeURIComponent(a.filename);
+            const downloadUrl = `/api/bid-requests/${id}/attachments/${encoded}`;
+            return `
+              <a href="${downloadUrl}" target="_blank" rel="noopener noreferrer" style="display: inline-flex; align-items: center; gap: 4px; padding: 5px 10px; background: #ffffff; border: 1px solid #cbd5e1; border-radius: 6px; color: #1d4ed8; text-decoration: none; font-size: 12px; font-weight: 500; box-shadow: 0 1px 2px rgba(0,0,0,0.05);">
+                📄 <span style="text-decoration: underline;">${escapeHtml(a.filename)}</span>
+                ${a.size ? `<span style="color: #64748b; font-size: 11px;">(${formatBytes(a.size)})</span>` : ''}
+              </a>
+            `;
+          }).join('')}
+        </div>
+      </div>
+    ` : '';
+
     // If original HTML exists, embed it with print / document enhancements
     if (htmlBody && htmlBody.trim().length > 0) {
       const printStyles = `
@@ -62,6 +96,11 @@ export async function GET(
           table {
             max-width: 100% !important;
           }
+          @media print {
+            #ppi-attachments-bar {
+              border-color: #cbd5e1 !important;
+            }
+          }
         </style>
         <base target="_blank">
       `;
@@ -73,6 +112,11 @@ export async function GET(
         finalHtml = finalHtml.replace('<html>', `<html><head>${printStyles}</head>`);
       } else {
         finalHtml = `<!DOCTYPE html><html><head><meta charset="utf-8">${printStyles}</head><body>${finalHtml}</body></html>`;
+      }
+
+      // If attachments exist, insert the attachments bar right after <body>
+      if (attachmentsBannerHtml && finalHtml.includes('<body')) {
+        finalHtml = finalHtml.replace(/<body[^>]*>/, (match: string) => `${match}${attachmentsBannerHtml}`);
       }
 
       return new NextResponse(finalHtml, {
@@ -173,6 +217,7 @@ export async function GET(
       }
     </table>
   </div>
+  ${attachmentsBannerHtml}
   <div class="content-box">${escapeHtml(textBody || '(No text body content available)')}</div>
 </body>
 </html>`;

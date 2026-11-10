@@ -29,6 +29,7 @@ import {
   Calendar as CalendarIcon,
   Clock,
   CalendarCheck,
+  ExternalLink,
 } from 'lucide-react';
 import EmailDocumentViewer from '@/components/EmailDocumentViewer';
 import CalendarScheduleView from '@/components/CalendarScheduleView';
@@ -59,7 +60,7 @@ interface DisplayBidRequest {
   rawAiDueDate?: string | null;
   normalizedAiDueDate?: string | null;
   attachmentsCount: number;
-  attachments?: Array<{ filename: string; size?: number; contentType?: string }>;
+  attachments?: Array<{ filename: string; size?: number; contentType?: string; storageUrl?: string }>;
 
   // Email Body Content
   bodyText?: string | null;
@@ -960,6 +961,34 @@ export default function DispatchDashboard() {
                         <Sparkles className="w-3.5 h-3.5 text-indigo-600" /> AI Scope Summary:
                       </span>
                       <p className="mt-0.5 text-[11px] leading-relaxed">{reviewingBid.scopeSummary}</p>
+                    </div>
+                  )}
+
+                  {reviewingBid.attachments && reviewingBid.attachments.length > 0 && (
+                    <div className="mt-2.5 pt-2 border-t border-slate-200 flex flex-wrap items-center gap-1.5 text-xs">
+                      <span className="text-slate-600 font-semibold flex items-center gap-1 text-[11px]">
+                        <Paperclip className="w-3 h-3 text-blue-600" />
+                        Attached Files ({reviewingBid.attachments.length}):
+                      </span>
+                      {reviewingBid.attachments.map((att, idx) => {
+                        const fileUrl =
+                          att.storageUrl ||
+                          `/api/bid-requests/${reviewingBid.id}/attachments/${encodeURIComponent(att.filename)}`;
+                        return (
+                          <a
+                            key={idx}
+                            href={fileUrl}
+                            target="_blank"
+                            rel="noopener noreferrer"
+                            className="inline-flex items-center gap-1 px-2 py-0.5 rounded bg-white hover:bg-blue-50 text-slate-700 hover:text-blue-700 border border-slate-300 hover:border-blue-300 text-[11px] font-medium transition-colors shadow-2xs group"
+                            title={`Open / preview ${att.filename}`}
+                          >
+                            <FileText className="w-3 h-3 text-blue-600" />
+                            <span className="truncate max-w-[180px]">{att.filename}</span>
+                            <ExternalLink className="w-2.5 h-2.5 text-slate-400 group-hover:text-blue-600 opacity-60" />
+                          </a>
+                        );
+                      })}
                     </div>
                   )}
                 </div>
