@@ -5,18 +5,19 @@ import {
   Inbox,
   Copy,
   Users,
-  Clock,
   AlertCircle,
   Paperclip,
-  Send,
-  ChevronDown,
-  ChevronRight,
   RefreshCw,
   Database,
   Trophy,
   FileSpreadsheet,
   ShieldAlert,
   CheckCircle,
+  Sparkles,
+  ArrowRight,
+  UserCheck,
+  ChevronDown,
+  ChevronRight,
 } from 'lucide-react';
 
 interface DisplayBidRequest {
@@ -35,14 +36,24 @@ interface DisplayBidRequest {
   attachmentsCount: number;
   emailIntent: 'invitation_to_bid' | 'bid_won' | 'bid_lost' | 'addendum_update' | 'bid_confirmation' | 'spam_noise' | 'general_inquiry';
   filterStatus: 'inbox' | 'auto_filtered' | 'promoted_to_job' | 'archived';
+
+  // AI & Forwarding Enrichment
+  isForwarded?: boolean;
+  forwardedBy?: string | null;
+  originalSenderEmail?: string | null;
+  originalSenderName?: string | null;
+  scopeSummary?: string | null;
+  recommendedAction?: string | null;
+  aiReasoning?: string | null;
+  aiConfidence?: number | null;
 }
 
 const FALLBACK_DATA: DisplayBidRequest[] = [
   {
     id: 'bid_101',
-    subject: '26-0208ST - TEST DAVID - Architectural Plans & Bid Request',
-    senderEmail: 'purchasing@apexcontractors.com',
-    senderName: 'David Miller',
+    subject: 'FW: St. Jude Medical Clinic - Interior Finish Package',
+    senderEmail: 'sjenkins@apexcontractors.com',
+    senderName: 'Sarah Jenkins (Apex Contractors)',
     receivedAt: 'Today at 8:15 AM',
     jobCode: '26-0208ST',
     duplicateGroupId: 'group_apex_001',
@@ -54,12 +65,20 @@ const FALLBACK_DATA: DisplayBidRequest[] = [
     attachmentsCount: 2,
     emailIntent: 'invitation_to_bid',
     filterStatus: 'inbox',
+    isForwarded: true,
+    forwardedBy: 'John Coworker <john.coworker@ppi.com>',
+    originalSenderEmail: 'sjenkins@apexcontractors.com',
+    originalSenderName: 'Sarah Jenkins',
+    scopeSummary: 'Custom casework, reception desk, and solid surface counter surfaces as part of the interior finish package. Bid due Nov 20.',
+    recommendedAction: 'CREATE_NEW_BID',
+    aiReasoning: 'Forwarded by coworker from external GC Apex Contractors. Clear ITB with drawings attached.',
+    aiConfidence: 0.98,
   },
   {
     id: 'bid_102',
-    subject: 'FW: 26-0208ST - TEST DAVID - Architectural Plans & Bid Request',
-    senderEmail: 'pm-assist@apexcontractors.com',
-    senderName: 'Apex PM Assistant',
+    subject: 'FW: 26-0208ST - St. Jude Medical Clinic - Addendum #1',
+    senderEmail: 'sjenkins@apexcontractors.com',
+    senderName: 'Sarah Jenkins (Apex Contractors)',
     receivedAt: 'Today at 8:42 AM',
     jobCode: '26-0208ST',
     duplicateGroupId: 'group_apex_001',
@@ -67,14 +86,19 @@ const FALLBACK_DATA: DisplayBidRequest[] = [
     duplicateReasons: [
       'Identical attachment checksum matched (Apex_Plans_v2.pdf)',
       'Exact job code match: 26-0208ST',
-      'High subject keyword overlap (85%)',
     ],
     triageStatus: 'pending_triage',
     priority: 'normal',
     assignedEstimator: null,
-    attachmentsCount: 2,
-    emailIntent: 'invitation_to_bid',
+    attachmentsCount: 1,
+    emailIntent: 'addendum_update',
     filterStatus: 'inbox',
+    isForwarded: true,
+    forwardedBy: 'Another Coworker <mike@ppi.com>',
+    scopeSummary: 'Revised casework elevation drawings in Addendum #1.',
+    recommendedAction: 'ATTACH_TO_EXISTING_BID',
+    aiReasoning: 'Addendum containing updated drawings for existing project 26-0208ST. Auto-linked without separate assignment.',
+    aiConfidence: 0.95,
   },
   {
     id: 'bid_103',
@@ -92,40 +116,10 @@ const FALLBACK_DATA: DisplayBidRequest[] = [
     attachmentsCount: 1,
     emailIntent: 'bid_won',
     filterStatus: 'inbox',
-  },
-  {
-    id: 'bid_104',
-    subject: '25-0803ST - TEST JOB - Addendum #1 Specification Revisions',
-    senderEmail: 'bids@turnerconstruction.com',
-    senderName: 'Steven Gross',
-    receivedAt: 'Yesterday at 4:30 PM',
-    jobCode: '25-0803ST',
-    duplicateGroupId: 'group_turner_003',
-    isFlaggedDuplicate: false,
-    duplicateReasons: [],
-    triageStatus: 'in_triage',
-    priority: 'normal',
-    assignedEstimator: 'Steven Gross',
-    attachmentsCount: 3,
-    emailIntent: 'addendum_update',
-    filterStatus: 'inbox',
-  },
-  {
-    id: 'bid_105',
-    subject: 'Special Offer: Working Capital & Financing for Contractors - Unsubscribe',
-    senderEmail: 'offers@growthcap.com',
-    senderName: 'Growth Capital',
-    receivedAt: 'Yesterday at 2:10 PM',
-    jobCode: null,
-    duplicateGroupId: 'group_spam_004',
-    isFlaggedDuplicate: false,
-    duplicateReasons: [],
-    triageStatus: 'archived',
-    priority: 'low',
-    assignedEstimator: null,
-    attachmentsCount: 0,
-    emailIntent: 'spam_noise',
-    filterStatus: 'auto_filtered',
+    scopeSummary: 'Official Notice of Award and Subcontract agreement for signature.',
+    recommendedAction: 'PROMOTE_TO_JOB',
+    aiReasoning: 'Award letter received. Eligible to promote to Active Job phase.',
+    aiConfidence: 0.99,
   },
 ];
 
@@ -167,6 +161,15 @@ export default function DispatchDashboard() {
           attachmentsCount: Array.isArray(r.attachments) ? r.attachments.length : 0,
           emailIntent: r.email_intent || 'invitation_to_bid',
           filterStatus: r.filter_status || 'inbox',
+
+          isForwarded: r.is_forwarded,
+          forwardedBy: r.forwarded_by,
+          originalSenderEmail: r.original_sender_email,
+          originalSenderName: r.original_sender_name,
+          scopeSummary: r.scope_summary,
+          recommendedAction: r.recommended_action,
+          aiReasoning: r.intent_explanation,
+          aiConfidence: r.intent_confidence,
         }));
         setBids(mapped);
         setIsUsingLiveDb(true);
@@ -182,7 +185,6 @@ export default function DispatchDashboard() {
     fetchLiveBids();
   }, []);
 
-  // Filter based on active tab
   const filteredBids = bids.filter((b) => {
     if (activeTab === 'actionable') {
       return b.filterStatus !== 'auto_filtered' && b.emailIntent !== 'spam_noise' && b.emailIntent !== 'bid_won';
@@ -222,21 +224,33 @@ export default function DispatchDashboard() {
     );
   };
 
-  const handleSimulateWebhook = async (type: 'itb' | 'won' | 'addendum' | 'spam') => {
+  const handleSimulateWebhook = async (type: 'itb_forwarded' | 'won' | 'addendum' | 'spam') => {
     setIsSimulating(true);
 
     const payloads = {
-      itb: {
+      itb_forwarded: {
         messageId: `sim_itb_${Date.now()}`,
-        subject: '26-0208ST - TEST DAVID - Additional Plans & Bid Request',
-        sender: 'David Miller <purchasing@apexcontractors.com>',
-        bodyText: 'Please see attached plans for 26-0208ST. Bid due next Friday.',
+        subject: 'FW: Riverside High School - Casework Bid Request',
+        sender: 'Mike Coworker <mike.pm@ppi.com>',
+        bodyText: `Hey Estimating, forwarding this over for pricing.
+
+---------- Forwarded message ---------
+From: David Miller <dmiller@turnerconstruction.com>
+Date: Tue, Nov 10, 2026 at 9:15 AM
+Subject: ITB: Riverside High School Phase 2 - Millwork
+To: Mike Coworker <mike.pm@ppi.com>
+
+Hello Bidders,
+
+Turner Construction is requesting pricing for Riverside High School.
+Bid due date is December 4, 2026 at 2:00 PM.
+Job code: 26-0209ST.
+Scope includes science lab casework and architectural wall panels.
+
+Thank you,
+David Miller | Turner Construction`,
         attachments: [
-          {
-            filename: 'Apex_Plans_v2.pdf',
-            size: 4512030,
-            checksum: 'f9b2a45f5c05e9ee8f89b1c89e16cb77e854f90b237441fe08bdf42f1013162f',
-          },
+          { filename: 'Riverside_Lab_Casework.pdf', size: 3512030 },
         ],
       },
       won: {
@@ -250,20 +264,20 @@ export default function DispatchDashboard() {
         messageId: `sim_add_${Date.now()}`,
         subject: '26-0208ST - Addendum #2 Structural Revisions',
         sender: 'Architect <architect@apexcontractors.com>',
-        bodyText: 'Please review revised drawings in Addendum #2.',
+        bodyText: 'Please review revised drawings in Addendum #2 for 26-0208ST.',
         attachments: [{ filename: 'Addendum_2_Drawings.pdf', size: 2048576 }],
       },
       spam: {
         messageId: `sim_spam_${Date.now()}`,
-        subject: 'SEO & Web Design Services for Construction Companies - Unsubscribe',
-        sender: 'Marketing <spam@webleads.com>',
-        bodyText: 'We can improve your Google rank. Click here to unsubscribe.',
+        subject: 'Working Capital & Financing for Construction - Unsubscribe',
+        sender: 'Marketing <spam@growthloans.com>',
+        bodyText: 'Get fast cash flow. Click here to unsubscribe.',
         attachments: [],
       },
     };
 
     const simulatedPayload = payloads[type];
-    setSimulationLog(`Sending ${type.toUpperCase()} payload to /api/webhooks/email...`);
+    setSimulationLog(`Analyzing with Gemini AI & posting to webhook...`);
 
     try {
       const res = await fetch('/api/webhooks/email', {
@@ -275,7 +289,7 @@ export default function DispatchDashboard() {
       const json = await res.json();
       if (res.ok) {
         setSimulationLog(
-          `✔ Webhook Success! Intent: [${json.intent.toUpperCase()}] -> ${json.explanation} (Filter: ${json.filterStatus})`
+          `✔ AI Analysis Complete! [${json.ai?.intent?.toUpperCase()}] -> Client: ${json.ai?.originalSender || 'Direct'} (${Math.round((json.ai?.confidence || 1) * 100)}% confidence)`
         );
         await fetchLiveBids();
       } else {
@@ -293,41 +307,6 @@ export default function DispatchDashboard() {
   const wonCount = bids.filter((b) => b.emailIntent === 'bid_won').length;
   const spamCount = bids.filter((b) => b.filterStatus === 'auto_filtered').length;
 
-  const getIntentBadge = (intent: DisplayBidRequest['emailIntent']) => {
-    switch (intent) {
-      case 'bid_won':
-        return (
-          <span className="px-2 py-0.5 rounded text-xs font-semibold bg-emerald-100 text-emerald-800 flex items-center gap-1">
-            <Trophy className="w-3 h-3 text-emerald-600" /> Won / Awarded
-          </span>
-        );
-      case 'bid_lost':
-        return (
-          <span className="px-2 py-0.5 rounded text-xs font-semibold bg-rose-100 text-rose-800">
-            Lost
-          </span>
-        );
-      case 'addendum_update':
-        return (
-          <span className="px-2 py-0.5 rounded text-xs font-semibold bg-purple-100 text-purple-800 flex items-center gap-1">
-            <FileSpreadsheet className="w-3 h-3" /> Addendum
-          </span>
-        );
-      case 'spam_noise':
-        return (
-          <span className="px-2 py-0.5 rounded text-xs font-semibold bg-slate-100 text-slate-600 flex items-center gap-1">
-            <ShieldAlert className="w-3 h-3 text-slate-400" /> Auto-Filtered Noise
-          </span>
-        );
-      default:
-        return (
-          <span className="px-2 py-0.5 rounded text-xs font-semibold bg-blue-100 text-blue-800">
-            ITB / Bid Request
-          </span>
-        );
-    }
-  };
-
   return (
     <div className="space-y-6">
       {/* Top Banner */}
@@ -344,8 +323,9 @@ export default function DispatchDashboard() {
                 </span>
               )}
             </div>
-            <p className="text-blue-200 text-sm">
-              Smart email intent classification: Automatically isolates ITBs, awards, addendums, and filters out spam.
+            <p className="text-blue-200 text-sm flex items-center gap-1.5">
+              <Sparkles className="w-4 h-4 text-amber-300" />
+              Powered by <strong>Gemini AI</strong>: Automatically unpacks coworker forwards, isolates true GCs, and groups addendums.
             </p>
           </div>
 
@@ -361,11 +341,12 @@ export default function DispatchDashboard() {
             </button>
             <div className="bg-white/10 p-1 rounded-lg flex items-center gap-1">
               <button
-                onClick={() => handleSimulateWebhook('itb')}
+                onClick={() => handleSimulateWebhook('itb_forwarded')}
                 disabled={isSimulating}
-                className="px-2.5 py-1.5 rounded text-xs font-medium bg-blue-500 hover:bg-blue-600 text-white transition-colors"
+                className="px-2.5 py-1.5 rounded text-xs font-medium bg-blue-500 hover:bg-blue-600 text-white transition-colors flex items-center gap-1"
+                title="Simulates coworker forwarding an RFP from a General Contractor"
               >
-                + ITB
+                <Sparkles className="w-3 h-3" /> Test Forwarded ITB
               </button>
               <button
                 onClick={() => handleSimulateWebhook('won')}
@@ -515,13 +496,13 @@ export default function DispatchDashboard() {
         <div className="p-5 border-b border-slate-200 flex items-center justify-between">
           <div>
             <h3 className="text-base font-semibold text-slate-900">
-              {activeTab === 'actionable' && 'Inbound Bid Requests (Grouped by Project)'}
+              {activeTab === 'actionable' && 'Inbound Bid Opportunities (Grouped by Project)'}
               {activeTab === 'won' && 'Won Bids (Ready for Promotion to Active Job Entity)'}
               {activeTab === 'addendums' && 'Addendums, Bulletins & Scope Changes'}
               {activeTab === 'spam' && 'Auto-Filtered Solicitations & Newsletters'}
             </h3>
             <p className="text-xs text-slate-500">
-              {activeTab === 'actionable' && 'Triage bids, assign estimators, and resolve grouped duplicates.'}
+              {activeTab === 'actionable' && 'Triage bids, assign estimators, and review AI-extracted scope.'}
               {activeTab === 'won' && 'These trigger parallel Contract Review, Install Scheduling, and Accounting.'}
               {activeTab === 'spam' && 'These emails were detected as noise and kept out of your primary inbox.'}
             </p>
@@ -543,7 +524,7 @@ export default function DispatchDashboard() {
               const duplicates = groupItems.filter((b) => b.id !== primary.id);
 
               return (
-                <div key={groupId} className="p-4 hover:bg-slate-50/50 transition-colors">
+                <div key={groupId} className="p-5 hover:bg-slate-50/50 transition-colors space-y-3">
                   <div className="flex items-start justify-between gap-4">
                     <div className="flex items-start gap-3 flex-1">
                       <button
@@ -557,40 +538,70 @@ export default function DispatchDashboard() {
                         )}
                       </button>
 
-                      <div className="space-y-1 flex-1">
+                      <div className="space-y-1.5 flex-1">
+                        {/* Tags & Badges */}
                         <div className="flex items-center gap-2 flex-wrap">
-                          {getIntentBadge(primary.emailIntent)}
                           {primary.jobCode && (
                             <span className="px-2 py-0.5 rounded text-xs font-semibold bg-blue-100 text-blue-800">
                               {primary.jobCode}
                             </span>
                           )}
-                          <span className="font-semibold text-slate-900 text-sm">
+
+                          <span className="font-semibold text-slate-900 text-base">
                             {primary.subject}
                           </span>
+
                           {duplicates.length > 0 && (
                             <span className="px-2 py-0.5 rounded-full text-xs font-medium bg-amber-100 text-amber-800 flex items-center gap-1">
                               <Copy className="w-3 h-3" />
-                              {duplicates.length} Grouped Duplicate{duplicates.length > 1 ? 's' : ''}
+                              {duplicates.length} Grouped Inquiry
                             </span>
                           )}
                         </div>
 
-                        <div className="text-xs text-slate-500 flex items-center gap-4 flex-wrap">
-                          <span>From: <strong>{primary.senderName}</strong> &lt;{primary.senderEmail}&gt;</span>
+                        {/* Forwarding / Client Notice */}
+                        <div className="text-xs text-slate-600 flex items-center gap-3 flex-wrap">
+                          {primary.isForwarded ? (
+                            <span className="inline-flex items-center gap-1 text-indigo-700 bg-indigo-50 px-2 py-0.5 rounded font-medium border border-indigo-100">
+                              <UserCheck className="w-3.5 h-3.5 text-indigo-500" />
+                              True Client: <strong>{primary.originalSenderName || primary.senderName}</strong> &lt;{primary.originalSenderEmail || primary.senderEmail}&gt;
+                              <span className="text-indigo-400 font-normal">↳ (via {primary.forwardedBy || 'Coworker'})</span>
+                            </span>
+                          ) : (
+                            <span>Client: <strong>{primary.senderName}</strong> &lt;{primary.senderEmail}&gt;</span>
+                          )}
+
+                          <span className="text-slate-400">•</span>
                           <span>Received: {primary.receivedAt}</span>
+                          <span className="text-slate-400">•</span>
                           <span className="flex items-center gap-1">
                             <Paperclip className="w-3.5 h-3.5" />
                             {primary.attachmentsCount} Attachment{primary.attachmentsCount > 1 ? 's' : ''}
                           </span>
                         </div>
+
+                        {/* AI Scope Summary Card */}
+                        {primary.scopeSummary && (
+                          <div className="mt-2 p-3 bg-slate-50 rounded-lg border border-slate-200 text-xs text-slate-700 space-y-1">
+                            <div className="flex items-center gap-1.5 text-indigo-700 font-semibold">
+                              <Sparkles className="w-3.5 h-3.5" />
+                              AI Scope Summary:
+                            </div>
+                            <p className="leading-relaxed">{primary.scopeSummary}</p>
+                            {primary.aiReasoning && (
+                              <p className="text-[11px] text-slate-500 italic mt-0.5">
+                                Reason: {primary.aiReasoning}
+                              </p>
+                            )}
+                          </div>
+                        )}
                       </div>
                     </div>
 
                     {/* Action Controls */}
                     <div className="flex items-center gap-3">
                       {primary.emailIntent === 'bid_won' ? (
-                        <button className="px-3 py-1.5 rounded-lg text-xs font-semibold bg-emerald-600 hover:bg-emerald-700 text-white transition-colors shadow-sm flex items-center gap-1">
+                        <button className="px-3.5 py-2 rounded-lg text-xs font-semibold bg-emerald-600 hover:bg-emerald-700 text-white transition-colors shadow-sm flex items-center gap-1.5">
                           <CheckCircle className="w-3.5 h-3.5" /> Promote to Active Job
                         </button>
                       ) : (
@@ -618,7 +629,7 @@ export default function DispatchDashboard() {
                     <div className="mt-4 ml-8 pl-4 border-l-2 border-amber-300 space-y-3">
                       <p className="text-xs font-semibold text-amber-900 uppercase tracking-wider flex items-center gap-1">
                         <AlertCircle className="w-3.5 h-3.5 text-amber-600" />
-                        Auto-Grouped Inbound Inquiries
+                        Auto-Grouped Related Inquiries / Forwarded Copies
                       </p>
 
                       {duplicates.map((dup) => (
@@ -641,7 +652,7 @@ export default function DispatchDashboard() {
 
                           <div className="bg-white/80 p-2 rounded border border-amber-100">
                             <p className="font-semibold text-slate-700 text-[11px] mb-1">
-                              Detection Flags:
+                              Grouped Reasons:
                             </p>
                             <ul className="list-disc list-inside space-y-0.5 text-slate-600 text-[11px]">
                               {dup.duplicateReasons.map((reason, idx) => (

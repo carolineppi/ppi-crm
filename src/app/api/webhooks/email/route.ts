@@ -6,7 +6,7 @@ import {
   computeAttachmentHash,
   extractJobCode,
 } from '@/lib/email-parser/deduplication';
-import { classifyEmailIntent } from '@/lib/email-parser/classifier';
+import { analyzeEmailWithAI } from '@/lib/email-parser/ai-classifier';
 import type { EmailAttachmentPayload } from '@/types/bid-request';
 
 const attachmentSchema = z.object({
@@ -94,7 +94,7 @@ export async function POST(request: NextRequest) {
     }
 
     const payload = parseResult.data;
-    const { email: senderEmail, name: senderName } = parseSender(
+    const { email: directSenderEmail, name: directSenderName } = parseSender(
       payload.sender,
       payload.senderEmail,
       payload.senderName
@@ -102,12 +102,8 @@ export async function POST(request: NextRequest) {
 
     const bodyText = payload.bodyText || payload.body || '';
     const bodyHtml = payload.bodyHtml || null;
-    const jobCode = extractJobCode(payload.subject) || extractJobCode(bodyText);
 
-    // 1. Classify Email Intent (ITB, Won, Lost, Addendum, Spam)
-    const classification = classifyEmailIntent(payload.subject, bodyText, senderEmail);
-
-    // 2. Compute checksums for attachments
+    // Process attachments & compute hashes
     const processedAttachments: EmailAttachmentPayload[] = (payload.attachments || []).map(
       (att) => ({
         filename: att.filename,
@@ -117,50 +113,76 @@ export async function POST(request: NextRequest) {
         storageUrl: att.storageUrl,
       })
     );
-
     const attachmentHashes = processedAttachments.map((a) => a.checksum!).filter(Boolean);
+    const attachmentFilenames = processedAttachments.map((a) => a.filename);
+
+    // 1. Run Gemini AI Classifier & Forwarder Unpacker
+    const ai = await analyzeEmailWithAI({
+      subject: payload.subject,
+      bodyText,
+      senderEmail: directSenderEmail,
+      senderName: directSenderName,
+      attachmentFilenames,
+    });
+
+    // 2. Identify the true client (if forwarded by coworker, use original GC)
+    const effectiveSenderEmail = ai.isForwarded && ai.originalSenderEmail
+      ? ai.originalSenderEmail.toLowerCase().trim()
+      : directSenderEmail;
+    const effectiveSenderName = ai.isForwarded && ai.originalSenderName
+      ? ai.originalSenderName
+      : directSenderName;
+    const effectiveJobCode = ai.jobCode || extractJobCode(payload.subject) || extractJobCode(bodyText);
+    const effectiveProjectName = ai.projectName || payload.projectName || null;
+    const effectiveClientCompany = ai.clientCompany || payload.clientCompany || null;
+
     const supabase = createServerSupabaseClient();
 
     // 3. Deduplication & Grouping Heuristics
     const duplicateEvaluation = await detectAndGroupDuplicates(
       {
-        subject: payload.subject,
-        senderEmail,
-        senderName,
+        subject: ai.originalSubject || payload.subject,
+        senderEmail: effectiveSenderEmail,
+        senderName: effectiveSenderName,
         bodyText,
         attachments: processedAttachments,
       },
       supabase
     );
 
-    // 4. Determine initial statuses based on classification
+    // 4. Initial Triage and Estimator States based on AI analysis
     let triageStatus = 'pending_triage';
     let estimatorStatus = 'unassigned';
+    let filterStatus = 'inbox';
 
-    if (classification.intent === 'spam_noise') {
+    if (ai.intent === 'spam_noise') {
       triageStatus = 'archived';
-    } else if (classification.intent === 'bid_won') {
+      filterStatus = 'auto_filtered';
+    } else if (ai.intent === 'bid_won') {
       estimatorStatus = 'won';
       triageStatus = 'assigned';
-    } else if (classification.intent === 'bid_lost') {
+    } else if (ai.intent === 'bid_lost') {
       estimatorStatus = 'lost';
+    } else if (ai.intent === 'addendum_update') {
+      // Addendums are automatically linked to the existing project
+      triageStatus = 'ready_for_assignment';
     }
 
     // 5. Insert Record into Supabase
     const bidRequestRecord = {
       source_email_id: payload.messageId || null,
-      sender_email: senderEmail,
-      sender_name: senderName,
+      sender_email: effectiveSenderEmail,
+      sender_name: effectiveSenderName,
       email_subject: payload.subject,
       email_body_text: bodyText,
       email_body_html: bodyHtml,
       email_received_at: payload.receivedAt || new Date().toISOString(),
       raw_payload: rawBody,
 
-      project_name: payload.projectName || null,
-      client_company: payload.clientCompany || null,
-      job_code: jobCode,
-      bid_due_date: payload.bidDueDate || null,
+      project_name: effectiveProjectName,
+      client_company: effectiveClientCompany,
+      job_code: effectiveJobCode,
+      bid_due_date: ai.bidDueDate || payload.bidDueDate || null,
 
       attachments: processedAttachments,
       attachment_hashes: attachmentHashes,
@@ -173,14 +195,23 @@ export async function POST(request: NextRequest) {
       duplicate_reasons: duplicateEvaluation.reasons,
       duplicate_resolution: 'unreviewed',
 
-      // Intent & Filtering
-      email_intent: classification.intent,
-      intent_confidence: classification.confidence,
-      intent_explanation: classification.explanation,
-      filter_status: classification.filterStatus,
+      // Intent & AI Extraction
+      email_intent: ai.intent,
+      intent_confidence: ai.confidence,
+      intent_explanation: ai.reasoning,
+      filter_status: filterStatus,
+
+      // Forwarding & AI Metadata
+      is_forwarded: ai.isForwarded,
+      forwarded_by: ai.forwardedBy || (ai.isForwarded ? directSenderEmail : null),
+      original_sender_email: ai.originalSenderEmail,
+      original_sender_name: ai.originalSenderName,
+      scope_summary: ai.scopeSummary,
+      recommended_action: ai.recommendedAction,
+      ai_analysis: ai,
 
       triage_status: triageStatus,
-      priority: classification.intent === 'bid_won' ? 'urgent' : 'normal',
+      priority: ai.intent === 'bid_won' ? 'urgent' : 'normal',
       estimator_status: estimatorStatus,
     };
 
@@ -203,12 +234,20 @@ export async function POST(request: NextRequest) {
         success: true,
         bidRequestId: inserted.id,
         intent: inserted.email_intent,
-        filterStatus: inserted.filter_status,
-        isFlaggedDuplicate: inserted.is_flagged_duplicate,
+        ai: {
+          intent: ai.intent,
+          confidence: ai.confidence,
+          reasoning: ai.reasoning,
+          isForwarded: ai.isForwarded,
+          forwardedBy: ai.forwardedBy,
+          originalSender: ai.originalSenderEmail,
+          projectName: effectiveProjectName,
+          jobCode: effectiveJobCode,
+          scopeSummary: ai.scopeSummary,
+          recommendedAction: ai.recommendedAction,
+        },
         duplicateGroupId: inserted.duplicate_group_id,
-        explanation: classification.explanation,
-        reasons: duplicateEvaluation.reasons,
-        triageStatus: inserted.triage_status,
+        isFlaggedDuplicate: inserted.is_flagged_duplicate,
       },
       { status: 201 }
     );
