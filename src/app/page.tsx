@@ -19,6 +19,10 @@ import {
   Link as LinkIcon,
   XCircle,
   Hash,
+  Edit3,
+  X,
+  Search,
+  Check,
 } from 'lucide-react';
 
 interface DisplayBidRequest {
@@ -57,114 +61,43 @@ interface DisplayBidRequest {
   matchStatus?: string | null;
 }
 
-const FALLBACK_DATA: DisplayBidRequest[] = [
-  {
-    id: 'bid_101',
-    bidNumber: 'BID-26-0001',
-    subject: 'FW: St. Jude Medical Clinic - Interior Finish Package',
-    senderEmail: 'sjenkins@apexcontractors.com',
-    senderName: 'Sarah Jenkins (Apex Contractors)',
-    receivedAt: 'Today at 8:15 AM',
-    jobCode: '26-0208ST',
-    duplicateGroupId: 'group_apex_001',
-    isFlaggedDuplicate: false,
-    duplicateReasons: [],
-    triageStatus: 'ready_for_assignment',
-    priority: 'high',
-    assignedEstimator: null,
-    attachmentsCount: 2,
-    sticker: 'ITB',
-    filterStatus: 'inbox',
-    isForwarded: true,
-    forwardedBy: 'John Coworker <john.coworker@ppi.com>',
-    originalSenderEmail: 'sjenkins@apexcontractors.com',
-    originalSenderName: 'Sarah Jenkins',
-    scopeSummary: 'Custom casework, reception desk, and solid surface counter surfaces as part of the interior finish package. Bid due Nov 20.',
-    aiReasoning: 'New RFP forwarded by coworker from external GC Apex Contractors. Requires estimator assignment.',
-    aiConfidence: 0.98,
-  },
-  {
-    id: 'bid_102',
-    bidNumber: null,
-    subject: 'Addendum #1: St. Jude Medical Clinic - Casework Elevations',
-    senderEmail: 'sjenkins@apexcontractors.com',
-    senderName: 'Sarah Jenkins (Apex Contractors)',
-    receivedAt: 'Today at 8:42 AM',
-    jobCode: '26-0208ST',
-    duplicateGroupId: 'group_apex_001',
-    isFlaggedDuplicate: true,
-    duplicateReasons: [
-      'Identical attachment checksum matched (Apex_Plans_v2.pdf)',
-      'Exact job code match: 26-0208ST',
-    ],
-    triageStatus: 'ready_for_assignment',
-    priority: 'normal',
-    assignedEstimator: null,
-    attachmentsCount: 1,
-    sticker: 'Addendum',
-    filterStatus: 'inbox',
-    isForwarded: false,
-    scopeSummary: 'Revised casework elevation drawings in Addendum #1 for ongoing St. Jude Clinic bid.',
-    aiReasoning: 'Scope revision for existing bid. Auto-matched to BID-26-0001.',
-    aiConfidence: 0.95,
-    matchedBidNumber: 'BID-26-0001',
-    matchConfidence: 0.97,
-    matchReason: 'Matches project name St. Jude Clinic and contractor Apex Contractors',
-    matchStatus: 'confirmed',
-  },
-  {
-    id: 'bid_103',
-    bidNumber: null,
-    subject: 'Notice of Award: St. Jude Medical Clinic - Subcontract Agreement',
-    senderEmail: 'contracts@apexcontractors.com',
-    senderName: 'Contracts Dept (Apex)',
-    receivedAt: 'Today at 7:50 AM',
-    jobCode: '26-0208ST',
-    duplicateGroupId: 'group_apex_001',
-    isFlaggedDuplicate: false,
-    duplicateReasons: [],
-    triageStatus: 'assigned',
-    priority: 'urgent',
-    assignedEstimator: 'Steven Gross',
-    attachmentsCount: 1,
-    sticker: 'Won',
-    filterStatus: 'inbox',
-    scopeSummary: 'Official Notice of Award and Subcontract agreement for signature.',
-    aiReasoning: 'Award letter received. Matched to BID-26-0001 to promote to Active Job phase.',
-    aiConfidence: 0.99,
-    matchedBidNumber: 'BID-26-0001',
-    matchConfidence: 0.99,
-    matchReason: 'Award matches active bid BID-26-0001',
-    matchStatus: 'confirmed',
-  },
-];
-
 const ESTIMATORS = ['Steven Gross', 'Jaxson Farnholtz', 'Matt Magnani', 'Mariam Azab'];
 
 export default function DispatchDashboard() {
-  const [bids, setBids] = useState<DisplayBidRequest[]>(FALLBACK_DATA);
+  const [bids, setBids] = useState<DisplayBidRequest[]>([]);
   const [activeFilter, setActiveFilter] = useState<'ALL' | 'ITB' | 'Addendum' | 'Won' | 'Lost' | 'Spam'>('ALL');
   const [isUsingLiveDb, setIsUsingLiveDb] = useState(false);
   const [isLoading, setIsLoading] = useState(false);
-  const [expandedGroups, setExpandedGroups] = useState<Record<string, boolean>>({
-    group_apex_001: true,
-  });
-  const [isSimulating, setIsSimulating] = useState(false);
-  const [simulationLog, setSimulationLog] = useState<string | null>(null);
+  const [expandedGroups, setExpandedGroups] = useState<Record<string, boolean>>({});
+  const [toastMessage, setToastMessage] = useState<string | null>(null);
+
+  // Review & Reclassification Modal State
+  const [reviewingBid, setReviewingBid] = useState<DisplayBidRequest | null>(null);
+  const [targetSticker, setTargetSticker] = useState<DisplayBidRequest['sticker']>('ITB');
+  const [selectedBidNumberToLink, setSelectedBidNumberToLink] = useState<string>('');
+  const [selectedEstimatorForITB, setSelectedEstimatorForITB] = useState<string>('');
+  const [bidSearchQuery, setBidSearchQuery] = useState('');
+  const [isSavingReclassification, setIsSavingReclassification] = useState(false);
+
+  const showToast = (msg: string) => {
+    setToastMessage(msg);
+    setTimeout(() => setToastMessage(null), 4000);
+  };
 
   const fetchLiveBids = async () => {
     setIsLoading(true);
     try {
       const res = await fetch('/api/bid-requests');
       const data = await res.json();
-      if (data.bidRequests && data.bidRequests.length > 0) {
+      if (data.bidRequests && Array.isArray(data.bidRequests)) {
         const mapped: DisplayBidRequest[] = data.bidRequests.map((r: any) => {
-          // Map DB intent to definitive sticker
           let sticker: DisplayBidRequest['sticker'] = 'ITB';
           if (r.email_intent === 'addendum_update') sticker = 'Addendum';
           else if (r.email_intent === 'bid_won') sticker = 'Won';
           else if (r.email_intent === 'bid_lost') sticker = 'Lost';
           else if (r.email_intent === 'spam_noise') sticker = 'Spam';
+
+          const assignedName = r.raw_payload?.assigned_estimator_name || (r.assigned_estimator_id ? 'Assigned' : null);
 
           return {
             id: r.id,
@@ -182,7 +115,7 @@ export default function DispatchDashboard() {
             duplicateReasons: r.duplicate_reasons || [],
             triageStatus: r.triage_status || 'pending_triage',
             priority: r.priority || 'normal',
-            assignedEstimator: r.assigned_estimator_id ? 'Assigned' : null,
+            assignedEstimator: assignedName,
             attachmentsCount: Array.isArray(r.attachments) ? r.attachments.length : 0,
             sticker,
             filterStatus: r.filter_status || 'inbox',
@@ -215,7 +148,23 @@ export default function DispatchDashboard() {
     fetchLiveBids();
   }, []);
 
-  // Filter based on active sticker filter
+  // Distinct list of active ITBs that have generated Bid Numbers (for linking Addendums/Wons/Losses)
+  const activeITBsWithNumbers = bids.filter(
+    (b) => b.bidNumber && b.sticker === 'ITB'
+  );
+
+  const filteredBidsForLinking = activeITBsWithNumbers.filter((b) => {
+    if (!bidSearchQuery.trim()) return true;
+    const q = bidSearchQuery.toLowerCase();
+    return (
+      b.bidNumber?.toLowerCase().includes(q) ||
+      b.subject.toLowerCase().includes(q) ||
+      b.senderName.toLowerCase().includes(q) ||
+      b.jobCode?.toLowerCase().includes(q)
+    );
+  });
+
+  // Filter based on active sticker filter bar
   const filteredBids = bids.filter((b) => {
     if (activeFilter === 'ALL') {
       return b.sticker !== 'Spam' && b.filterStatus !== 'auto_filtered';
@@ -236,14 +185,78 @@ export default function DispatchDashboard() {
     }));
   };
 
-  const handleAssignEstimator = (bidId: string, estimator: string) => {
+  // 1. Direct Estimator Assignment from Dropdown (Persisted to Supabase)
+  const handleAssignEstimator = async (bidId: string, estimator: string) => {
+    // Optimistic UI update
     setBids((prev) =>
       prev.map((b) =>
         b.id === bidId
-          ? { ...b, assignedEstimator: estimator, triageStatus: 'assigned' }
+          ? { ...b, assignedEstimator: estimator || null, triageStatus: estimator ? 'assigned' : 'ready_for_assignment' }
           : b
       )
     );
+
+    try {
+      const res = await fetch(`/api/bid-requests/${bidId}`, {
+        method: 'PATCH',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ assignedEstimator: estimator || null }),
+      });
+      if (res.ok) {
+        showToast(estimator ? `Assigned to ${estimator} (Saved)` : 'Estimator unassigned (Saved)');
+      } else {
+        showToast('Error saving assignment to database');
+        await fetchLiveBids();
+      }
+    } catch {
+      showToast('Network error updating assignment');
+    }
+  };
+
+  // 2. Open Human-in-the-Loop Review Modal
+  const openReviewModal = (bid: DisplayBidRequest) => {
+    setReviewingBid(bid);
+    setTargetSticker(bid.sticker);
+    setSelectedBidNumberToLink(bid.matchedBidNumber || (activeITBsWithNumbers[0]?.bidNumber || ''));
+    setSelectedEstimatorForITB(bid.assignedEstimator || '');
+    setBidSearchQuery('');
+  };
+
+  // 3. Save Reclassification & Workflow Transition
+  const handleSaveReclassification = async () => {
+    if (!reviewingBid) return;
+    setIsSavingReclassification(true);
+
+    try {
+      const payload: any = {
+        newSticker: targetSticker,
+      };
+
+      if (targetSticker === 'ITB') {
+        payload.assignedEstimator = selectedEstimatorForITB || null;
+      } else if (targetSticker === 'Addendum' || targetSticker === 'Won' || targetSticker === 'Lost') {
+        payload.matchedBidNumber = selectedBidNumberToLink || null;
+      }
+
+      const res = await fetch(`/api/bid-requests/${reviewingBid.id}`, {
+        method: 'PATCH',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(payload),
+      });
+
+      if (res.ok) {
+        showToast(`✔ Reclassified to [${targetSticker}] and workflow updated!`);
+        setReviewingBid(null);
+        await fetchLiveBids();
+      } else {
+        const err = await res.json();
+        showToast(`Failed to update: ${err.error || 'Server error'}`);
+      }
+    } catch (e: any) {
+      showToast(`Error: ${e.message}`);
+    } finally {
+      setIsSavingReclassification(false);
+    }
   };
 
   // Sticker counts
@@ -253,49 +266,52 @@ export default function DispatchDashboard() {
   const countLost = bids.filter((b) => b.sticker === 'Lost').length;
   const countSpam = bids.filter((b) => b.sticker === 'Spam').length;
 
-  const renderStickerBadge = (sticker: DisplayBidRequest['sticker']) => {
-    switch (sticker) {
-      case 'ITB':
-        return (
-          <span className="px-2.5 py-1 rounded font-black text-[11px] uppercase tracking-wider bg-blue-600 text-white shadow-sm flex items-center gap-1">
-            ITB
-          </span>
-        );
-      case 'Addendum':
-        return (
-          <span className="px-2.5 py-1 rounded font-black text-[11px] uppercase tracking-wider bg-purple-600 text-white shadow-sm flex items-center gap-1">
-            <FileSpreadsheet className="w-3 h-3" /> Addendum
-          </span>
-        );
-      case 'Won':
-        return (
-          <span className="px-2.5 py-1 rounded font-black text-[11px] uppercase tracking-wider bg-emerald-600 text-white shadow-sm flex items-center gap-1">
-            <Trophy className="w-3 h-3" /> Won
-          </span>
-        );
-      case 'Lost':
-        return (
-          <span className="px-2.5 py-1 rounded font-black text-[11px] uppercase tracking-wider bg-rose-600 text-white shadow-sm flex items-center gap-1">
-            <XCircle className="w-3 h-3" /> Lost
-          </span>
-        );
-      case 'Spam':
-        return (
-          <span className="px-2.5 py-1 rounded font-black text-[11px] uppercase tracking-wider bg-slate-500 text-white shadow-sm flex items-center gap-1">
-            <ShieldAlert className="w-3 h-3" /> Spam
-          </span>
-        );
-      default:
-        return (
-          <span className="px-2.5 py-1 rounded font-black text-[11px] uppercase tracking-wider bg-slate-600 text-white">
-            General
-          </span>
-        );
+  const renderStickerBadge = (sticker: DisplayBidRequest['sticker'], bid: DisplayBidRequest) => {
+    let badgeClass = 'bg-blue-600 text-white';
+    let icon = null;
+
+    if (sticker === 'Addendum') {
+      badgeClass = 'bg-purple-600 text-white';
+      icon = <FileSpreadsheet className="w-3 h-3" />;
+    } else if (sticker === 'Won') {
+      badgeClass = 'bg-emerald-600 text-white';
+      icon = <Trophy className="w-3 h-3" />;
+    } else if (sticker === 'Lost') {
+      badgeClass = 'bg-rose-600 text-white';
+      icon = <XCircle className="w-3 h-3" />;
+    } else if (sticker === 'Spam') {
+      badgeClass = 'bg-slate-500 text-white';
+      icon = <ShieldAlert className="w-3 h-3" />;
     }
+
+    return (
+      <div className="inline-flex items-center gap-1 group">
+        <span className={`px-2.5 py-1 rounded font-black text-[11px] uppercase tracking-wider shadow-sm flex items-center gap-1 ${badgeClass}`}>
+          {icon}
+          {sticker === 'ITB' ? 'ITB' : sticker}
+        </span>
+        <button
+          onClick={() => openReviewModal(bid)}
+          title="Calendar Manager: Review or Change Classification"
+          className="p-1 rounded bg-slate-100 hover:bg-slate-200 text-slate-500 hover:text-slate-800 transition-colors border border-slate-300 text-[10px] font-semibold flex items-center gap-0.5"
+        >
+          <Edit3 className="w-3 h-3" />
+          <span>Edit</span>
+        </button>
+      </div>
+    );
   };
 
   return (
     <div className="space-y-6">
+      {/* Toast Notification */}
+      {toastMessage && (
+        <div className="fixed bottom-6 right-6 z-50 px-4 py-3 bg-slate-900 text-white rounded-xl shadow-xl flex items-center gap-2 text-xs font-semibold animate-in fade-in slide-in-from-bottom-3 border border-slate-700">
+          <CheckCircle className="w-4 h-4 text-emerald-400" />
+          <span>{toastMessage}</span>
+        </div>
+      )}
+
       {/* Top Banner */}
       <div className="bg-gradient-to-r from-blue-900 via-indigo-900 to-slate-900 rounded-2xl p-6 text-white shadow-md">
         <div className="flex flex-col md:flex-row md:items-center justify-between gap-4">
@@ -306,13 +322,13 @@ export default function DispatchDashboard() {
               </h2>
               {isUsingLiveDb && (
                 <span className="px-2 py-0.5 rounded text-[11px] font-semibold bg-emerald-500/20 text-emerald-300 border border-emerald-500/30 flex items-center gap-1">
-                  <Database className="w-3 h-3" /> Supabase Live ({bids.length} Loaded)
+                  <Database className="w-3 h-3" /> Supabase Live ({bids.length} Ingested)
                 </span>
               )}
             </div>
             <p className="text-blue-200 text-sm flex items-center gap-1.5">
               <Sparkles className="w-4 h-4 text-amber-300" />
-              <strong>AI Triage Active:</strong> ITBs generate internal Bid Numbers and get assigned to estimators. Addendums, Wons, and Losses auto-match to existing bid folders.
+              <strong>Human-in-the-Loop Triage:</strong> Review and adjust AI classifications anytime. ITBs generate Bid Numbers and assign estimators; Addendums & Awards link directly to existing project folders.
             </p>
           </div>
 
@@ -328,13 +344,6 @@ export default function DispatchDashboard() {
             </button>
           </div>
         </div>
-
-        {simulationLog && (
-          <div className="mt-4 p-3 rounded-lg bg-white/10 text-xs text-blue-100 font-mono flex items-center justify-between">
-            <span>{simulationLog}</span>
-            <button onClick={() => setSimulationLog(null)} className="text-white/60 hover:text-white">✕</button>
-          </div>
-        )}
       </div>
 
       {/* QUICK CATEGORIZATION STICKER FILTER BAR */}
@@ -441,7 +450,7 @@ export default function DispatchDashboard() {
             </h3>
             <p className="text-xs text-slate-500">
               {activeFilter === 'ITB' && 'Every unique ITB receives an internal Bid Number (BID-26-XXXX) and requires an assigned estimator.'}
-              {activeFilter !== 'ITB' && activeFilter !== 'Spam' && 'These do not get assigned separately. AI matches them to existing internal bid numbers.'}
+              {activeFilter !== 'ITB' && activeFilter !== 'Spam' && 'These do not get assigned separately. They attach directly to an active Bid Number.'}
             </p>
           </div>
           <span className="text-xs text-slate-400 font-medium">
@@ -478,7 +487,7 @@ export default function DispatchDashboard() {
                       <div className="space-y-2 flex-1">
                         {/* Categorization Sticker + Bid # + Subject */}
                         <div className="flex items-center gap-2.5 flex-wrap">
-                          {renderStickerBadge(primary.sticker)}
+                          {renderStickerBadge(primary.sticker, primary)}
 
                           {/* Internal Bid Number for ITBs */}
                           {primary.sticker === 'ITB' && primary.bidNumber && (
@@ -490,7 +499,7 @@ export default function DispatchDashboard() {
                           {/* Matched Bid Number for Addendum / Won / Lost */}
                           {primary.sticker !== 'ITB' && primary.matchedBidNumber && (
                             <span className="px-2.5 py-0.5 rounded text-xs font-mono font-bold bg-purple-100 text-purple-900 border border-purple-200 flex items-center gap-1">
-                              <LinkIcon className="w-3 h-3 text-purple-600" /> Linked to {primary.matchedBidNumber}
+                              <LinkIcon className="w-3 h-3 text-purple-600" /> Attached to {primary.matchedBidNumber}
                             </span>
                           )}
 
@@ -539,12 +548,15 @@ export default function DispatchDashboard() {
                             <div className="flex items-center gap-2">
                               <Sparkles className="w-4 h-4 text-purple-600 flex-shrink-0" />
                               <span>
-                                <strong>AI Bid Match:</strong> Matched to <strong>{primary.matchedBidNumber}</strong> ({Math.round((primary.matchConfidence || 0.95) * 100)}% match) — {primary.matchReason || 'Project & scope match'}
+                                <strong>Linked Bid Folder:</strong> Attached to <strong>{primary.matchedBidNumber}</strong> {primary.matchReason ? `(${primary.matchReason})` : ''}
                               </span>
                             </div>
-                            <span className="px-2 py-0.5 rounded text-[11px] font-bold bg-purple-200 text-purple-800">
-                              Folder Linked
-                            </span>
+                            <button
+                              onClick={() => openReviewModal(primary)}
+                              className="text-[11px] font-bold text-purple-700 hover:text-purple-900 underline"
+                            >
+                              Change Link
+                            </button>
                           </div>
                         )}
 
@@ -622,7 +634,7 @@ export default function DispatchDashboard() {
                         >
                           <div className="flex items-center justify-between">
                             <div className="font-medium text-slate-800 flex items-center gap-2">
-                              {renderStickerBadge(dup.sticker)}
+                              {renderStickerBadge(dup.sticker, dup)}
                               <span className="text-amber-700">↳</span>
                               {dup.subject}
                             </div>
@@ -649,6 +661,225 @@ export default function DispatchDashboard() {
           </div>
         )}
       </div>
+
+      {/* HUMAN-IN-THE-LOOP REVIEW & RECLASSIFICATION MODAL */}
+      {reviewingBid && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-slate-900/60 backdrop-blur-sm animate-in fade-in">
+          <div className="bg-white rounded-2xl shadow-2xl border border-slate-200 max-w-xl w-full p-6 space-y-5 animate-in zoom-in-95">
+            {/* Modal Header */}
+            <div className="flex items-start justify-between">
+              <div>
+                <span className="text-xs font-bold text-blue-600 uppercase tracking-wider">
+                  Calendar Manager Review
+                </span>
+                <h3 className="text-lg font-bold text-slate-900 mt-0.5">
+                  Change Classification & Adjust Workflow
+                </h3>
+              </div>
+              <button
+                onClick={() => setReviewingBid(null)}
+                className="text-slate-400 hover:text-slate-600 p-1"
+              >
+                <X className="w-5 h-5" />
+              </button>
+            </div>
+
+            {/* Email Info Box */}
+            <div className="p-3.5 bg-slate-50 rounded-xl border border-slate-200 text-xs space-y-1">
+              <p className="font-bold text-slate-800 text-sm leading-tight">
+                {reviewingBid.subject}
+              </p>
+              <p className="text-slate-500">
+                From: <strong>{reviewingBid.senderName}</strong> &lt;{reviewingBid.senderEmail}&gt;
+              </p>
+              {reviewingBid.scopeSummary && (
+                <p className="text-slate-600 italic pt-1 border-t border-slate-200 mt-1">
+                  AI Summary: {reviewingBid.scopeSummary}
+                </p>
+              )}
+            </div>
+
+            {/* 1. Sticker Selection */}
+            <div className="space-y-2">
+              <label className="text-xs font-bold text-slate-700 uppercase tracking-wider">
+                Select Correct Sticker:
+              </label>
+              <div className="grid grid-cols-5 gap-2">
+                {(['ITB', 'Addendum', 'Won', 'Lost', 'Spam'] as const).map((s) => {
+                  const isSelected = targetSticker === s;
+                  return (
+                    <button
+                      key={s}
+                      type="button"
+                      onClick={() => setTargetSticker(s)}
+                      className={`py-2 px-1 text-center rounded-lg text-xs font-bold border transition-all ${
+                        isSelected
+                          ? s === 'ITB'
+                            ? 'bg-blue-600 text-white border-blue-700 ring-2 ring-blue-300'
+                            : s === 'Addendum'
+                            ? 'bg-purple-600 text-white border-purple-700 ring-2 ring-purple-300'
+                            : s === 'Won'
+                            ? 'bg-emerald-600 text-white border-emerald-700 ring-2 ring-emerald-300'
+                            : s === 'Lost'
+                            ? 'bg-rose-600 text-white border-rose-700 ring-2 ring-rose-300'
+                            : 'bg-slate-700 text-white border-slate-800 ring-2 ring-slate-300'
+                          : 'bg-slate-50 text-slate-700 border-slate-200 hover:bg-slate-100'
+                      }`}
+                    >
+                      {s}
+                    </button>
+                  );
+                })}
+              </div>
+            </div>
+
+            {/* 2. DYNAMIC WORKFLOW SECTION BASED ON SELECTED STICKER */}
+            {/* If ITB: Enable Estimator Assignment & Confirm Bid # */}
+            {targetSticker === 'ITB' && (
+              <div className="p-4 bg-blue-50/70 rounded-xl border border-blue-200 text-xs space-y-3">
+                <div className="flex items-center gap-1.5 font-bold text-blue-900">
+                  <Hash className="w-4 h-4 text-blue-600" />
+                  <span>ITB Workflow: Generates Internal Bid Number & Estimator Assignment</span>
+                </div>
+                <p className="text-blue-800 text-[11px] leading-relaxed">
+                  This will register this opportunity as a standalone bid (assigned its own <strong>BID-26-XXXX</strong> number). Estimators can now be assigned to produce a quote.
+                </p>
+
+                <div className="space-y-1">
+                  <label className="text-[11px] font-bold text-blue-950 uppercase tracking-wider">
+                    Assign Estimator (Optional):
+                  </label>
+                  <select
+                    value={selectedEstimatorForITB}
+                    onChange={(e) => setSelectedEstimatorForITB(e.target.value)}
+                    className="w-full text-xs border border-blue-300 rounded-lg p-2 bg-white text-slate-800 font-medium focus:ring-2 focus:ring-blue-500"
+                  >
+                    <option value="">Leave Unassigned (Needs Assignment)</option>
+                    {ESTIMATORS.map((est) => (
+                      <option key={est} value={est}>
+                        {est}
+                      </option>
+                    ))}
+                  </select>
+                </div>
+              </div>
+            )}
+
+            {/* If Addendum, Won, or Lost: Select Existing Bid Number */}
+            {(targetSticker === 'Addendum' || targetSticker === 'Won' || targetSticker === 'Lost') && (
+              <div className="p-4 bg-purple-50/70 rounded-xl border border-purple-200 text-xs space-y-3">
+                <div className="flex items-center gap-1.5 font-bold text-purple-900">
+                  <LinkIcon className="w-4 h-4 text-purple-600" />
+                  <span>
+                    {targetSticker === 'Addendum' && 'Addendum Workflow: Link to Existing Bid Folder'}
+                    {targetSticker === 'Won' && 'Won Workflow: Match to Bid & Prepare for Job Promotion'}
+                    {targetSticker === 'Lost' && 'Lost Workflow: Match to Bid & Archive'}
+                  </span>
+                </div>
+                <p className="text-purple-800 text-[11px] leading-relaxed">
+                  {targetSticker === 'Addendum' &&
+                    'This email will be attached directly to the chosen bid folder. No separate estimator assignment will be created.'}
+                  {targetSticker === 'Won' &&
+                    'This will mark the selected bid as WON and unlock the Promote to Active Job transition.'}
+                  {targetSticker === 'Lost' &&
+                    'This will close the selected bid as Lost and archive it from active estimating.'}
+                </p>
+
+                <div className="space-y-2">
+                  <div className="flex items-center justify-between">
+                    <label className="text-[11px] font-bold text-purple-950 uppercase tracking-wider">
+                      Select Active Bid to Attach To:
+                    </label>
+                    <span className="text-[10px] text-purple-600 font-medium">
+                      {activeITBsWithNumbers.length} Active Bids
+                    </span>
+                  </div>
+
+                  {/* Search box if many bids */}
+                  <div className="relative">
+                    <Search className="w-3.5 h-3.5 absolute left-2.5 top-2.5 text-slate-400" />
+                    <input
+                      type="text"
+                      placeholder="Search active bids by project, GC, or number..."
+                      value={bidSearchQuery}
+                      onChange={(e) => setBidSearchQuery(e.target.value)}
+                      className="w-full text-xs pl-8 pr-3 py-1.5 border border-purple-300 rounded-lg bg-white placeholder-slate-400 focus:outline-none focus:ring-2 focus:ring-purple-500"
+                    />
+                  </div>
+
+                  {/* Bid Selection Dropdown / Radio list */}
+                  <div className="max-h-44 overflow-y-auto divide-y divide-purple-100 border border-purple-200 rounded-lg bg-white">
+                    {filteredBidsForLinking.length === 0 ? (
+                      <p className="p-3 text-slate-400 text-center text-xs">
+                        No matching active bids found.
+                      </p>
+                    ) : (
+                      filteredBidsForLinking.map((b) => {
+                        const isChosen = selectedBidNumberToLink === b.bidNumber;
+                        return (
+                          <div
+                            key={b.id}
+                            onClick={() => setSelectedBidNumberToLink(b.bidNumber!)}
+                            className={`p-2.5 flex items-center justify-between cursor-pointer transition-colors text-xs ${
+                              isChosen
+                                ? 'bg-purple-100/70 text-purple-950 font-bold'
+                                : 'hover:bg-purple-50/50 text-slate-700'
+                            }`}
+                          >
+                            <div className="space-y-0.5">
+                              <div className="flex items-center gap-1.5">
+                                <span className="font-mono px-1.5 py-0.5 rounded bg-purple-200 text-purple-900 text-[10px]">
+                                  {b.bidNumber}
+                                </span>
+                                <span className="truncate max-w-[280px]">
+                                  {b.subject}
+                                </span>
+                              </div>
+                              <p className="text-[10px] text-slate-500">
+                                Client: {b.senderName} • Assigned: {b.assignedEstimator || 'Unassigned'}
+                              </p>
+                            </div>
+                            {isChosen && <Check className="w-4 h-4 text-purple-600 flex-shrink-0" />}
+                          </div>
+                        );
+                      })
+                    )}
+                  </div>
+                </div>
+              </div>
+            )}
+
+            {/* If Spam: Notice */}
+            {targetSticker === 'Spam' && (
+              <div className="p-4 bg-slate-100 rounded-xl border border-slate-300 text-xs text-slate-700 space-y-1">
+                <p className="font-bold text-slate-900">Spam / Noise Workflow:</p>
+                <p className="text-[11px] leading-relaxed">
+                  This email will be removed from your active dispatch queue and archived into the <strong>Spam / Noise</strong> tab.
+                </p>
+              </div>
+            )}
+
+            {/* Modal Actions */}
+            <div className="flex items-center justify-end gap-3 pt-2 border-t border-slate-100">
+              <button
+                type="button"
+                onClick={() => setReviewingBid(null)}
+                className="px-4 py-2 rounded-lg text-xs font-semibold text-slate-600 hover:bg-slate-100 transition-colors"
+              >
+                Cancel
+              </button>
+              <button
+                type="button"
+                onClick={handleSaveReclassification}
+                disabled={isSavingReclassification || (targetSticker !== 'ITB' && targetSticker !== 'Spam' && !selectedBidNumberToLink)}
+                className="px-4 py-2 rounded-lg text-xs font-bold bg-blue-600 hover:bg-blue-700 text-white shadow-sm transition-colors disabled:opacity-50 flex items-center gap-1.5"
+              >
+                {isSavingReclassification ? 'Updating Workflow...' : 'Save & Update Workflow'}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   );
 }
