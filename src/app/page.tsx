@@ -1,22 +1,21 @@
 'use client';
 
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
 import {
   Inbox,
   Copy,
   Users,
-  CheckCircle2,
   Clock,
   AlertCircle,
-  FileText,
   Paperclip,
   Send,
   ChevronDown,
   ChevronRight,
-  ExternalLink,
+  RefreshCw,
+  Database,
 } from 'lucide-react';
 
-interface MockBidRequest {
+interface DisplayBidRequest {
   id: string;
   subject: string;
   senderEmail: string;
@@ -32,7 +31,7 @@ interface MockBidRequest {
   attachmentsCount: number;
 }
 
-const INITIAL_DATA: MockBidRequest[] = [
+const FALLBACK_DATA: DisplayBidRequest[] = [
   {
     id: 'bid_101',
     subject: '26-0208ST - TEST DAVID - Architectural Plans & Bid Request',
@@ -102,15 +101,54 @@ const INITIAL_DATA: MockBidRequest[] = [
 const ESTIMATORS = ['Steven Gross', 'Jaxson Farnholtz', 'Matt Magnani', 'Mariam Azab'];
 
 export default function DispatchDashboard() {
-  const [bids, setBids] = useState<MockBidRequest[]>(INITIAL_DATA);
+  const [bids, setBids] = useState<DisplayBidRequest[]>(FALLBACK_DATA);
+  const [isUsingLiveDb, setIsUsingLiveDb] = useState(false);
+  const [isLoading, setIsLoading] = useState(false);
   const [expandedGroups, setExpandedGroups] = useState<Record<string, boolean>>({
     group_apex_001: true,
   });
   const [isSimulating, setIsSimulating] = useState(false);
   const [simulationLog, setSimulationLog] = useState<string | null>(null);
 
-  // Group bids by duplicateGroupId
-  const groupedBids = bids.reduce<Record<string, MockBidRequest[]>>((acc, bid) => {
+  const fetchLiveBids = async () => {
+    setIsLoading(true);
+    try {
+      const res = await fetch('/api/bid-requests');
+      const data = await res.json();
+      if (data.bidRequests && data.bidRequests.length > 0) {
+        const mapped: DisplayBidRequest[] = data.bidRequests.map((r: any) => ({
+          id: r.id,
+          subject: r.email_subject,
+          senderEmail: r.sender_email,
+          senderName: r.sender_name || r.sender_email.split('@')[0],
+          receivedAt: new Date(r.email_received_at || r.created_at).toLocaleTimeString([], {
+            hour: '2-digit',
+            minute: '2-digit',
+          }),
+          jobCode: r.job_code,
+          duplicateGroupId: r.duplicate_group_id || r.id,
+          isFlaggedDuplicate: r.is_flagged_duplicate,
+          duplicateReasons: r.duplicate_reasons || [],
+          triageStatus: r.triage_status || 'pending_triage',
+          priority: r.priority || 'normal',
+          assignedEstimator: r.assigned_estimator_id ? 'Assigned' : null,
+          attachmentsCount: Array.isArray(r.attachments) ? r.attachments.length : 0,
+        }));
+        setBids(mapped);
+        setIsUsingLiveDb(true);
+      }
+    } catch {
+      // fallback to mock data
+    } finally {
+      setIsLoading(false);
+    }
+  };
+
+  useEffect(() => {
+    fetchLiveBids();
+  }, []);
+
+  const groupedBids = bids.reduce<Record<string, DisplayBidRequest[]>>((acc, bid) => {
     acc[bid.duplicateGroupId] = acc[bid.duplicateGroupId] || [];
     acc[bid.duplicateGroupId].push(bid);
     return acc;
@@ -133,7 +171,6 @@ export default function DispatchDashboard() {
     );
   };
 
-  // Simulate an incoming webhook payload
   const handleSimulateWebhook = async () => {
     setIsSimulating(true);
     setSimulationLog('Sending webhook payload to /api/webhooks/email...');
@@ -162,36 +199,13 @@ export default function DispatchDashboard() {
       const json = await res.json();
       if (res.ok) {
         setSimulationLog(
-          `✔ Webhook Success! Assigned to group: ${json.duplicateGroupId} (Duplicate: ${json.isFlaggedDuplicate})`
+          `✔ Webhook Success! Stored in Supabase. Group: ${json.duplicateGroupId.slice(0, 8)}... (Duplicate: ${json.isFlaggedDuplicate})`
         );
-
-        // Add to local UI state for instant visual feedback
-        const newEntry: MockBidRequest = {
-          id: json.bidRequestId || `bid_${Date.now()}`,
-          subject: simulatedPayload.subject,
-          senderEmail: simulatedPayload.sender,
-          senderName: 'Apex Estimator',
-          receivedAt: 'Just now',
-          jobCode: '26-0208ST',
-          duplicateGroupId: 'group_apex_001', // grouped with existing apex bids
-          isFlaggedDuplicate: true,
-          duplicateReasons: [
-            'Identical attachment checksum matched (Apex_Plans_v2.pdf)',
-            'Exact job code match: 26-0208ST',
-          ],
-          triageStatus: 'pending_triage',
-          priority: 'normal',
-          assignedEstimator: null,
-          attachmentsCount: 1,
-        };
-
-        setBids((prev) => [newEntry, ...prev]);
-        setExpandedGroups((prev) => ({ ...prev, group_apex_001: true }));
+        await fetchLiveBids();
       } else {
         setSimulationLog(`Webhook Response: ${json.error || 'Check Supabase connection'}`);
       }
     } catch {
-      // In offline / mock mode
       setSimulationLog(
         'Simulated offline: Detected identical hash for 26-0208ST. Auto-grouped into Apex Project!'
       );
@@ -211,14 +225,29 @@ export default function DispatchDashboard() {
       <div className="bg-gradient-to-r from-blue-900 to-indigo-900 rounded-2xl p-6 text-white shadow-md">
         <div className="flex flex-col md:flex-row md:items-center justify-between gap-4">
           <div>
-            <h2 className="text-2xl font-bold tracking-tight">
-              Calendar Manager Dispatch Dashboard
-            </h2>
-            <p className="text-blue-200 text-sm mt-1">
+            <div className="flex items-center gap-2 mb-1">
+              <h2 className="text-2xl font-bold tracking-tight">
+                Calendar Manager Dispatch Dashboard
+              </h2>
+              {isUsingLiveDb && (
+                <span className="px-2 py-0.5 rounded text-[11px] font-semibold bg-emerald-500/20 text-emerald-300 border border-emerald-500/30 flex items-center gap-1">
+                  <Database className="w-3 h-3" /> Supabase Live
+                </span>
+              )}
+            </div>
+            <p className="text-blue-200 text-sm">
               Automated email ingestion, heuristic deduplication, and estimator queue dispatch.
             </p>
           </div>
           <div className="flex items-center gap-3">
+            <button
+              onClick={fetchLiveBids}
+              disabled={isLoading}
+              title="Refresh from Supabase"
+              className="p-2 rounded-lg bg-white/10 hover:bg-white/20 text-white transition-colors"
+            >
+              <RefreshCw className={`w-4 h-4 ${isLoading ? 'animate-spin' : ''}`} />
+            </button>
             <button
               onClick={handleSimulateWebhook}
               disabled={isSimulating}
@@ -302,7 +331,7 @@ export default function DispatchDashboard() {
               Inbound Bid Opportunities (Grouped by Project / Duplicate Group)
             </h3>
             <p className="text-xs text-slate-500">
-              Duplicates are grouped automatically so you never have to delete duplicate emails manually.
+              Duplicates are grouped automatically so the Calendar Manager never has to delete emails manually.
             </p>
           </div>
           <span className="text-xs text-slate-400 font-medium">
