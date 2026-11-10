@@ -68,6 +68,18 @@ function parseSender(
 
 export async function POST(request: NextRequest) {
   try {
+    // Optional webhook secret validation
+    const expectedSecret = process.env.WEBHOOK_SECRET;
+    if (expectedSecret) {
+      const incomingSecret = request.headers.get('x-webhook-secret');
+      if (incomingSecret !== expectedSecret) {
+        return NextResponse.json(
+          { error: 'Unauthorized: Invalid or missing webhook secret' },
+          { status: 401 }
+        );
+      }
+    }
+
     const rawBody = await request.json();
     const parseResult = inboundEmailSchema.safeParse(rawBody);
 
