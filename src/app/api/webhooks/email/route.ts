@@ -6,7 +6,7 @@ import {
   computeAttachmentHash,
   extractJobCode,
 } from '@/lib/email-parser/deduplication';
-import { analyzeEmailWithAI } from '@/lib/email-parser/ai-classifier';
+import { analyzeEmailWithAI, ActiveBidSummary } from '@/lib/email-parser/ai-classifier';
 import type { EmailAttachmentPayload } from '@/types/bid-request';
 
 const attachmentSchema = z.object({
@@ -68,7 +68,6 @@ function parseSender(
 
 export async function POST(request: NextRequest) {
   try {
-    // Optional webhook secret validation
     const expectedSecret = process.env.WEBHOOK_SECRET;
     if (expectedSecret) {
       const incomingSecret = request.headers.get('x-webhook-secret');
@@ -85,10 +84,7 @@ export async function POST(request: NextRequest) {
 
     if (!parseResult.success) {
       return NextResponse.json(
-        {
-          error: 'Invalid email payload schema',
-          details: parseResult.error.format(),
-        },
+        { error: 'Invalid email payload schema', details: parseResult.error.format() },
         { status: 400 }
       );
     }
@@ -116,13 +112,31 @@ export async function POST(request: NextRequest) {
     const attachmentHashes = processedAttachments.map((a) => a.checksum!).filter(Boolean);
     const attachmentFilenames = processedAttachments.map((a) => a.filename);
 
-    // 1. Run Gemini AI Classifier & Forwarder Unpacker
+    const supabase = createServerSupabaseClient();
+
+    // Query active ITBs to supply context to AI for Addendum / Won / Lost matching
+    const { data: activeBidsData } = await supabase
+      .from('bid_requests')
+      .select('bid_number, project_name, client_company, project_address_city, project_address_state, job_code')
+      .not('bid_number', 'is', null)
+      .limit(60);
+
+    const activeBids: ActiveBidSummary[] = (activeBidsData || []).map((b) => ({
+      bidNumber: b.bid_number,
+      projectName: b.project_name,
+      clientCompany: b.client_company,
+      projectAddress: [b.project_address_city, b.project_address_state].filter(Boolean).join(', '),
+      jobCode: b.job_code,
+    }));
+
+    // 1. Run Gemini AI Classifier with Active Bids matching context
     const ai = await analyzeEmailWithAI({
       subject: payload.subject,
       bodyText,
       senderEmail: directSenderEmail,
       senderName: directSenderName,
       attachmentFilenames,
+      activeBids,
     });
 
     // 2. Identify the true client (if forwarded by coworker, use original GC)
@@ -136,9 +150,37 @@ export async function POST(request: NextRequest) {
     const effectiveProjectName = ai.projectName || payload.projectName || null;
     const effectiveClientCompany = ai.clientCompany || payload.clientCompany || null;
 
-    const supabase = createServerSupabaseClient();
+    // 3. Match against existing bid record if AI found a match
+    let matchedBidId: string | null = null;
+    let targetGroupId: string | null = null;
 
-    // 3. Deduplication & Grouping Heuristics
+    if (ai.matchedBidNumber) {
+      const { data: matchedBidRecord } = await supabase
+        .from('bid_requests')
+        .select('id, duplicate_group_id, estimator_status, assigned_estimator_id')
+        .eq('bid_number', ai.matchedBidNumber)
+        .maybeSingle();
+
+      if (matchedBidRecord) {
+        matchedBidId = matchedBidRecord.id;
+        targetGroupId = matchedBidRecord.duplicate_group_id;
+
+        // If Won or Lost, update the parent bid's estimator_status
+        if (ai.sticker === 'Won') {
+          await supabase
+            .from('bid_requests')
+            .update({ estimator_status: 'won', priority: 'urgent' })
+            .eq('id', matchedBidRecord.id);
+        } else if (ai.sticker === 'Lost') {
+          await supabase
+            .from('bid_requests')
+            .update({ estimator_status: 'lost' })
+            .eq('id', matchedBidRecord.id);
+        }
+      }
+    }
+
+    // 4. Run Deduplication / Grouping
     const duplicateEvaluation = await detectAndGroupDuplicates(
       {
         subject: ai.originalSubject || payload.subject,
@@ -150,25 +192,38 @@ export async function POST(request: NextRequest) {
       supabase
     );
 
-    // 4. Initial Triage and Estimator States based on AI analysis
-    let triageStatus = 'pending_triage';
-    let estimatorStatus = 'unassigned';
-    let filterStatus = 'inbox';
+    const finalGroupId = targetGroupId || duplicateEvaluation.duplicateGroupId;
 
-    if (ai.intent === 'spam_noise') {
+    // 5. Determine Triage Status
+    let triageStatus = 'pending_triage';
+    let filterStatus = 'inbox';
+    let estimatorStatus = 'unassigned';
+
+    if (ai.sticker === 'Spam') {
       triageStatus = 'archived';
       filterStatus = 'auto_filtered';
-    } else if (ai.intent === 'bid_won') {
+    } else if (ai.sticker === 'Won') {
       estimatorStatus = 'won';
       triageStatus = 'assigned';
-    } else if (ai.intent === 'bid_lost') {
+    } else if (ai.sticker === 'Lost') {
       estimatorStatus = 'lost';
-    } else if (ai.intent === 'addendum_update') {
-      // Addendums are automatically linked to the existing project
-      triageStatus = 'ready_for_assignment';
+      triageStatus = 'archived';
+    } else if (ai.sticker === 'Addendum') {
+      // Addendums are already attached to existing bid folder, no new estimator assignment needed
+      triageStatus = matchedBidId ? 'ready_for_assignment' : 'pending_triage';
     }
 
-    // 5. Insert Record into Supabase
+    // 6. Map sticker to enum intent
+    const intentMap: Record<string, string> = {
+      ITB: 'invitation_to_bid',
+      Addendum: 'addendum_update',
+      Won: 'bid_won',
+      Lost: 'bid_lost',
+      Spam: 'spam_noise',
+      General: 'general_inquiry',
+    };
+
+    // 7. Insert Record into Supabase
     const bidRequestRecord = {
       source_email_id: payload.messageId || null,
       sender_email: effectiveSenderEmail,
@@ -187,16 +242,23 @@ export async function POST(request: NextRequest) {
       attachments: processedAttachments,
       attachment_hashes: attachmentHashes,
 
-      // Duplicate Grouping
-      duplicate_group_id: duplicateEvaluation.duplicateGroupId,
-      is_flagged_duplicate: duplicateEvaluation.isDuplicate,
-      duplicate_of_id: duplicateEvaluation.duplicateOfId,
+      // Grouping
+      duplicate_group_id: finalGroupId,
+      is_flagged_duplicate: ai.sticker === 'Addendum' || duplicateEvaluation.isDuplicate,
+      duplicate_of_id: matchedBidId || duplicateEvaluation.duplicateOfId,
       duplicate_confidence: duplicateEvaluation.confidence,
       duplicate_reasons: duplicateEvaluation.reasons,
       duplicate_resolution: 'unreviewed',
 
+      // Bid Number & Matching
+      matched_bid_id: matchedBidId,
+      matched_bid_number: ai.matchedBidNumber,
+      match_confidence: ai.matchConfidence,
+      match_reason: ai.matchReason,
+      match_status: matchedBidId ? 'confirmed' : 'pending',
+
       // Intent & AI Extraction
-      email_intent: ai.intent,
+      email_intent: intentMap[ai.sticker] || 'invitation_to_bid',
       intent_confidence: ai.confidence,
       intent_explanation: ai.reasoning,
       filter_status: filterStatus,
@@ -207,18 +269,17 @@ export async function POST(request: NextRequest) {
       original_sender_email: ai.originalSenderEmail,
       original_sender_name: ai.originalSenderName,
       scope_summary: ai.scopeSummary,
-      recommended_action: ai.recommendedAction,
       ai_analysis: ai,
 
       triage_status: triageStatus,
-      priority: ai.intent === 'bid_won' ? 'urgent' : 'normal',
+      priority: ai.sticker === 'Won' ? 'urgent' : 'normal',
       estimator_status: estimatorStatus,
     };
 
     const { data: inserted, error: insertError } = await supabase
       .from('bid_requests')
       .insert(bidRequestRecord)
-      .select('id, duplicate_group_id, is_flagged_duplicate, email_intent, filter_status, triage_status')
+      .select('id, bid_number, duplicate_group_id, is_flagged_duplicate, email_intent, filter_status, triage_status, matched_bid_number')
       .single();
 
     if (insertError) {
@@ -233,21 +294,23 @@ export async function POST(request: NextRequest) {
       {
         success: true,
         bidRequestId: inserted.id,
-        intent: inserted.email_intent,
+        bidNumber: inserted.bid_number,
+        sticker: ai.sticker,
+        matchedBidNumber: inserted.matched_bid_number,
         ai: {
-          intent: ai.intent,
+          sticker: ai.sticker,
           confidence: ai.confidence,
           reasoning: ai.reasoning,
           isForwarded: ai.isForwarded,
           forwardedBy: ai.forwardedBy,
           originalSender: ai.originalSenderEmail,
           projectName: effectiveProjectName,
-          jobCode: effectiveJobCode,
+          clientCompany: effectiveClientCompany,
           scopeSummary: ai.scopeSummary,
-          recommendedAction: ai.recommendedAction,
+          matchedBidNumber: ai.matchedBidNumber,
+          matchConfidence: ai.matchConfidence,
+          matchReason: ai.matchReason,
         },
-        duplicateGroupId: inserted.duplicate_group_id,
-        isFlaggedDuplicate: inserted.is_flagged_duplicate,
       },
       { status: 201 }
     );
