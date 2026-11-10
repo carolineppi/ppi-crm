@@ -5,6 +5,7 @@ interface UpdatePayload {
   newSticker?: 'ITB' | 'Addendum' | 'Won' | 'Lost' | 'Spam';
   matchedBidNumber?: string | null;
   assignedEstimator?: string | null;
+  bidDueDate?: string | null;
   triageStatus?: string | null;
 }
 
@@ -43,6 +44,16 @@ export async function PATCH(
       };
       updates.estimator_status = body.assignedEstimator ? 'assigned' : 'unassigned';
       updates.triage_status = body.assignedEstimator ? 'assigned' : 'ready_for_assignment';
+    }
+
+    // 2b. Handle Calendar Bid Due Date Update
+    if (body.bidDueDate !== undefined) {
+      if (!body.bidDueDate) {
+        updates.bid_due_date = null;
+      } else {
+        const parsed = new Date(body.bidDueDate);
+        updates.bid_due_date = !isNaN(parsed.getTime()) ? parsed.toISOString() : null;
+      }
     }
 
     // 3. Handle Sticker Reclassification & Workflow Transitions

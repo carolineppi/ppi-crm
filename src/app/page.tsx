@@ -26,8 +26,18 @@ import {
   Check,
   Mail,
   FileText,
+  Calendar as CalendarIcon,
+  Clock,
+  CalendarCheck,
 } from 'lucide-react';
 import EmailDocumentViewer from '@/components/EmailDocumentViewer';
+import CalendarScheduleView from '@/components/CalendarScheduleView';
+import {
+  normalizeDateToYyyyMmDd,
+  formatFriendlyDate,
+  getDueDateStatus,
+  getEstimatorColor,
+} from '@/lib/date-utils';
 
 interface DisplayBidRequest {
   id: string;
@@ -37,12 +47,17 @@ interface DisplayBidRequest {
   senderName: string;
   receivedAt: string;
   jobCode: string | null;
+  projectName?: string | null;
+  clientCompany?: string | null;
   duplicateGroupId: string;
   isFlaggedDuplicate: boolean;
   duplicateReasons: string[];
   triageStatus: 'pending_triage' | 'in_triage' | 'ready_for_assignment' | 'assigned' | 'archived';
   priority: 'low' | 'normal' | 'high' | 'urgent';
   assignedEstimator: string | null;
+  bidDueDate?: string | null;
+  rawAiDueDate?: string | null;
+  normalizedAiDueDate?: string | null;
   attachmentsCount: number;
   attachments?: Array<{ filename: string; size?: number; contentType?: string }>;
 
@@ -83,6 +98,7 @@ const ESTIMATORS = ['Steven Gross', 'Jaxson Farnholtz', 'Matt Magnani', 'Mariam 
 export default function DispatchDashboard() {
   const [bids, setBids] = useState<DisplayBidRequest[]>([]);
   const [activeFilter, setActiveFilter] = useState<'ALL' | 'ITB' | 'Addendum' | 'Won' | 'Lost' | 'Spam'>('ALL');
+  const [viewMode, setViewMode] = useState<'feed' | 'calendar'>('feed');
   const [isUsingLiveDb, setIsUsingLiveDb] = useState(false);
   const [isLoading, setIsLoading] = useState(false);
   const [expandedGroups, setExpandedGroups] = useState<Record<string, boolean>>({});
@@ -94,6 +110,7 @@ export default function DispatchDashboard() {
   const [targetSticker, setTargetSticker] = useState<DisplayBidRequest['sticker']>('ITB');
   const [selectedBidNumberToLink, setSelectedBidNumberToLink] = useState<string>('');
   const [selectedEstimatorForITB, setSelectedEstimatorForITB] = useState<string>('');
+  const [selectedDueDateForITB, setSelectedDueDateForITB] = useState<string>('');
   const [bidSearchQuery, setBidSearchQuery] = useState('');
   const [isSavingReclassification, setIsSavingReclassification] = useState(false);
   const [showModalEmailBody, setShowModalEmailBody] = useState(true);
@@ -131,6 +148,12 @@ export default function DispatchDashboard() {
             ? r.raw_payload.attachments
             : [];
 
+          const rawAiDueDate = r.ai_analysis?.bidDueDate || null;
+          const normalizedAiDueDate = normalizeDateToYyyyMmDd(rawAiDueDate);
+          const bidDueDate = r.bid_due_date ? normalizeDateToYyyyMmDd(r.bid_due_date) : null;
+          const projectName = r.project_name || r.ai_analysis?.projectName || null;
+          const clientCompany = r.client_company || r.ai_analysis?.clientCompany || null;
+
           return {
             id: r.id,
             bidNumber: r.bid_number || null,
@@ -142,12 +165,17 @@ export default function DispatchDashboard() {
               minute: '2-digit',
             }),
             jobCode: r.job_code,
+            projectName,
+            clientCompany,
             duplicateGroupId: r.duplicate_group_id || r.id,
             isFlaggedDuplicate: r.is_flagged_duplicate,
             duplicateReasons: r.duplicate_reasons || [],
             triageStatus: r.triage_status || 'pending_triage',
             priority: r.priority || 'normal',
             assignedEstimator: assignedName,
+            bidDueDate,
+            rawAiDueDate,
+            normalizedAiDueDate,
             attachmentsCount: attachmentsList.length,
             attachments: attachmentsList,
             bodyText: r.email_body_text || r.raw_payload?.bodyText || r.raw_payload?.body || null,
@@ -220,27 +248,40 @@ export default function DispatchDashboard() {
     }));
   };
 
-  // 1. Direct Estimator Assignment from Dropdown (Persisted to Supabase)
-  const handleAssignEstimator = async (bidId: string, estimator: string) => {
+  // 1. Direct Estimator & Due Date Assignment (Persisted to Supabase)
+  const handleAssignEstimatorAndDate = async (
+    bidId: string,
+    estimator?: string | null,
+    dueDate?: string | null
+  ) => {
     // Optimistic UI update
     setBids((prev) =>
       prev.map((b) =>
         b.id === bidId
-          ? { ...b, assignedEstimator: estimator || null, triageStatus: estimator ? 'assigned' : 'ready_for_assignment' }
+          ? {
+              ...b,
+              ...(estimator !== undefined ? { assignedEstimator: estimator || null } : {}),
+              ...(dueDate !== undefined ? { bidDueDate: dueDate || null } : {}),
+              triageStatus: estimator ? 'assigned' : 'ready_for_assignment',
+            }
           : b
       )
     );
 
     try {
+      const payload: any = {};
+      if (estimator !== undefined) payload.assignedEstimator = estimator || null;
+      if (dueDate !== undefined) payload.bidDueDate = dueDate || null;
+
       const res = await fetch(`/api/bid-requests/${bidId}`, {
         method: 'PATCH',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ assignedEstimator: estimator || null }),
+        body: JSON.stringify(payload),
       });
       if (res.ok) {
-        showToast(estimator ? `Assigned to ${estimator} (Saved)` : 'Estimator unassigned (Saved)');
+        showToast('✔ Assignment & Due Date updated in calendar');
       } else {
-        showToast('Error saving assignment to database');
+        showToast('Error saving update to database');
         await fetchLiveBids();
       }
     } catch {
@@ -254,6 +295,7 @@ export default function DispatchDashboard() {
     setTargetSticker(bid.sticker);
     setSelectedBidNumberToLink(bid.matchedBidNumber || (activeITBsWithNumbers[0]?.bidNumber || ''));
     setSelectedEstimatorForITB(bid.assignedEstimator || '');
+    setSelectedDueDateForITB(bid.bidDueDate || bid.normalizedAiDueDate || '');
     setBidSearchQuery('');
     setShowModalEmailBody(true);
   };
@@ -270,6 +312,7 @@ export default function DispatchDashboard() {
 
       if (targetSticker === 'ITB') {
         payload.assignedEstimator = selectedEstimatorForITB || null;
+        payload.bidDueDate = selectedDueDateForITB || null;
       } else if (targetSticker === 'Addendum' || targetSticker === 'Won' || targetSticker === 'Lost') {
         payload.matchedBidNumber = selectedBidNumberToLink || null;
       }
@@ -382,8 +425,57 @@ export default function DispatchDashboard() {
         </div>
       </div>
 
-      {/* QUICK CATEGORIZATION STICKER FILTER BAR */}
-      <div className="bg-white p-3 rounded-xl border border-slate-200 shadow-sm flex items-center justify-between gap-2 overflow-x-auto">
+      {/* VIEW SWITCHER TABS: INBOUND FEED vs CALENDAR SCHEDULE VIEW */}
+      <div className="bg-white p-2.5 rounded-2xl border border-slate-200 shadow-sm flex flex-col sm:flex-row sm:items-center justify-between gap-3">
+        <div className="flex items-center gap-2">
+          <button
+            onClick={() => setViewMode('feed')}
+            className={`px-4 py-2 rounded-xl text-xs font-bold transition-all flex items-center gap-2 ${
+              viewMode === 'feed'
+                ? 'bg-slate-900 text-white shadow-sm'
+                : 'text-slate-600 hover:bg-slate-100'
+            }`}
+          >
+            <Inbox className="w-4 h-4" />
+            <span>Inbound Dispatch Feed</span>
+            <span className="px-1.5 py-0.5 rounded-full text-[10px] bg-white/20 font-mono">
+              {bids.filter((b) => b.sticker !== 'Spam').length}
+            </span>
+          </button>
+
+          <button
+            onClick={() => setViewMode('calendar')}
+            className={`px-4 py-2 rounded-xl text-xs font-bold transition-all flex items-center gap-2 ${
+              viewMode === 'calendar'
+                ? 'bg-blue-600 text-white shadow-sm ring-2 ring-blue-300'
+                : 'text-slate-600 hover:bg-slate-100'
+            }`}
+          >
+            <CalendarIcon className="w-4 h-4" />
+            <span>Calendar Schedule View</span>
+            <span className="px-1.5 py-0.5 rounded-full text-[10px] bg-white/20 font-mono">
+              {bids.filter((b) => (b.bidDueDate || b.normalizedAiDueDate) && b.sticker !== 'Spam').length} Scheduled
+            </span>
+          </button>
+        </div>
+
+        <div className="hidden sm:flex items-center gap-2 text-xs text-slate-500 pr-2">
+          <Sparkles className="w-3.5 h-3.5 text-amber-500" />
+          <span>Auto-suggests bid due dates directly from email bodies</span>
+        </div>
+      </div>
+
+      {viewMode === 'calendar' ? (
+        <CalendarScheduleView
+          bids={bids}
+          estimators={ESTIMATORS}
+          onSelectBid={openReviewModal}
+          onAssignBid={handleAssignEstimatorAndDate}
+        />
+      ) : (
+        <>
+          {/* QUICK CATEGORIZATION STICKER FILTER BAR */}
+          <div className="bg-white p-3 rounded-xl border border-slate-200 shadow-sm flex items-center justify-between gap-2 overflow-x-auto">
         <div className="flex items-center gap-2">
           <span className="text-xs text-slate-400 font-bold uppercase tracking-wider pl-2 pr-1">
             Filter by Sticker:
@@ -645,22 +737,58 @@ export default function DispatchDashboard() {
 
                     {/* Operational Action Column */}
                     <div className="flex items-center gap-3">
-                      {/* RULE: ONLY ITBs ARE ASSIGNED TO ESTIMATORS */}
+                      {/* RULE: ONLY ITBs ARE ASSIGNED TO ESTIMATORS & SCHEDULED ON CALENDAR */}
                       {primary.sticker === 'ITB' && (
-                        <div className="flex items-center gap-2">
-                          <span className="text-xs text-slate-500 font-medium">Estimator:</span>
-                          <select
-                            value={primary.assignedEstimator || ''}
-                            onChange={(e) => handleAssignEstimator(primary.id, e.target.value)}
-                            className="text-xs border border-slate-300 rounded-lg px-2.5 py-1.5 bg-white text-slate-800 font-medium focus:ring-2 focus:ring-blue-500 shadow-sm"
-                          >
-                            <option value="">Assign Estimator...</option>
-                            {ESTIMATORS.map((est) => (
-                              <option key={est} value={est}>
-                                {est}
-                              </option>
-                            ))}
-                          </select>
+                        <div className="flex flex-col sm:flex-row sm:items-center gap-2 bg-slate-50 p-2 rounded-xl border border-slate-200">
+                          {/* Estimator Selector */}
+                          <div className="flex items-center gap-1.5">
+                            <span className="text-xs text-slate-500 font-semibold">Estimator:</span>
+                            <select
+                              value={primary.assignedEstimator || ''}
+                              onChange={(e) => handleAssignEstimatorAndDate(primary.id, e.target.value, undefined)}
+                              className="text-xs border border-slate-300 rounded-lg px-2.5 py-1.5 bg-white text-slate-800 font-medium focus:ring-2 focus:ring-blue-500 shadow-2xs"
+                            >
+                              <option value="">Assign Estimator...</option>
+                              {ESTIMATORS.map((est) => (
+                                <option key={est} value={est}>
+                                  {est}
+                                </option>
+                              ))}
+                            </select>
+                          </div>
+
+                          {/* Calendar Bid Due Date */}
+                          <div className="flex items-center gap-1.5">
+                            <span className="text-xs text-slate-500 font-semibold flex items-center gap-1">
+                              <CalendarIcon className="w-3.5 h-3.5 text-blue-600" />
+                              Due:
+                            </span>
+                            <input
+                              type="date"
+                              value={primary.bidDueDate || ''}
+                              onChange={(e) => handleAssignEstimatorAndDate(primary.id, undefined, e.target.value)}
+                              className="text-xs border border-slate-300 rounded-lg px-2 py-1 bg-white text-slate-800 font-medium focus:ring-2 focus:ring-blue-500 shadow-2xs"
+                            />
+
+                            {/* AI Suggestion Chip if not yet confirmed */}
+                            {!primary.bidDueDate && primary.normalizedAiDueDate && (
+                              <button
+                                type="button"
+                                onClick={() => handleAssignEstimatorAndDate(primary.id, undefined, primary.normalizedAiDueDate)}
+                                className="inline-flex items-center gap-1 px-2 py-1 rounded-md bg-indigo-50 hover:bg-indigo-100 text-indigo-700 text-[11px] font-bold border border-indigo-200 shadow-2xs transition-colors"
+                                title={`Accept AI detected date: ${primary.rawAiDueDate || primary.normalizedAiDueDate}`}
+                              >
+                                <Sparkles className="w-3 h-3 text-indigo-600" />
+                                <span>Accept AI: {formatFriendlyDate(primary.normalizedAiDueDate).split(',')[1]}</span>
+                              </button>
+                            )}
+
+                            {primary.bidDueDate && (
+                              <span className={`px-2 py-0.5 rounded text-[10px] font-bold border ${getDueDateStatus(primary.bidDueDate).badgeClass}`}>
+                                {getDueDateStatus(primary.bidDueDate).label}
+                              </span>
+                            )}
+                          </div>
                         </div>
                       )}
 
@@ -764,6 +892,8 @@ export default function DispatchDashboard() {
           </div>
         )}
       </div>
+      </>
+      )}
 
       {/* HUMAN-IN-THE-LOOP REVIEW & RECLASSIFICATION MODAL */}
       {reviewingBid && (
@@ -908,34 +1038,78 @@ export default function DispatchDashboard() {
             </div>
 
             {/* 2. DYNAMIC WORKFLOW SECTION BASED ON SELECTED STICKER */}
-            {/* If ITB: Enable Estimator Assignment & Confirm Bid # */}
+            {/* If ITB: Enable Estimator Assignment & Confirm Bid # & Due Date */}
             {targetSticker === 'ITB' && (
-              <div className="p-4 bg-blue-50/70 rounded-xl border border-blue-200 text-xs space-y-3">
+              <div className="p-4 bg-blue-50/70 rounded-xl border border-blue-200 text-xs space-y-3.5">
                 <div className="flex items-center gap-1.5 font-bold text-blue-900">
                   <Hash className="w-4 h-4 text-blue-600" />
-                  <span>ITB Workflow: Generates Internal Bid Number & Estimator Assignment</span>
+                  <span>ITB Workflow: Internal Bid Number, Estimator & Calendar Due Date</span>
                 </div>
                 <p className="text-blue-800 text-[11px] leading-relaxed">
-                  This will register this opportunity as a standalone bid (assigned its own <strong>BID-26-XXXX</strong> number). Estimators can now be assigned to produce a quote.
+                  This opportunity will be registered as a standalone bid (assigned its own <strong>BID-26-XXXX</strong> number). Confirm the bid due date to place it on the calendar and assign an estimator.
                 </p>
 
-                <div className="space-y-1">
-                  <label className="text-[11px] font-bold text-blue-950 uppercase tracking-wider">
-                    Assign Estimator (Optional):
-                  </label>
-                  <select
-                    value={selectedEstimatorForITB}
-                    onChange={(e) => setSelectedEstimatorForITB(e.target.value)}
-                    className="w-full text-xs border border-blue-300 rounded-lg p-2 bg-white text-slate-800 font-medium focus:ring-2 focus:ring-blue-500"
-                  >
-                    <option value="">Leave Unassigned (Needs Assignment)</option>
-                    {ESTIMATORS.map((est) => (
-                      <option key={est} value={est}>
-                        {est}
-                      </option>
-                    ))}
-                  </select>
+                <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 pt-1">
+                  {/* Estimator Assignment */}
+                  <div className="space-y-1">
+                    <label className="text-[11px] font-bold text-blue-950 uppercase tracking-wider flex items-center gap-1">
+                      <Clock className="w-3 h-3 text-blue-600" />
+                      Assign Estimator:
+                    </label>
+                    <select
+                      value={selectedEstimatorForITB}
+                      onChange={(e) => setSelectedEstimatorForITB(e.target.value)}
+                      className="w-full text-xs border border-blue-300 rounded-lg p-2 bg-white text-slate-800 font-medium focus:ring-2 focus:ring-blue-500 shadow-2xs"
+                    >
+                      <option value="">Leave Unassigned (Needs Assignment)</option>
+                      {ESTIMATORS.map((est) => (
+                        <option key={est} value={est}>
+                          {est}
+                        </option>
+                      ))}
+                    </select>
+                  </div>
+
+                  {/* Calendar Bid Due Date */}
+                  <div className="space-y-1">
+                    <label className="text-[11px] font-bold text-blue-950 uppercase tracking-wider flex items-center gap-1">
+                      <CalendarIcon className="w-3 h-3 text-blue-600" />
+                      Assign Calendar Due Date:
+                    </label>
+                    <input
+                      type="date"
+                      value={selectedDueDateForITB}
+                      onChange={(e) => setSelectedDueDateForITB(e.target.value)}
+                      className="w-full text-xs border border-blue-300 rounded-lg p-2 bg-white text-slate-800 font-medium focus:ring-2 focus:ring-blue-500 shadow-2xs"
+                    />
+                  </div>
                 </div>
+
+                {/* AI Detected Due Date Suggestion Chip */}
+                {reviewingBid.normalizedAiDueDate && (
+                  <div className="p-2.5 rounded-lg bg-indigo-50 border border-indigo-200 text-[11px] text-indigo-950 flex items-center justify-between gap-2 flex-wrap">
+                    <div className="flex items-center gap-1.5">
+                      <Sparkles className="w-4 h-4 text-indigo-600 flex-shrink-0" />
+                      <span>
+                        <strong>AI Detected Due Date in Email:</strong>{' '}
+                        <span className="font-semibold text-indigo-800">
+                          {formatFriendlyDate(reviewingBid.normalizedAiDueDate)}
+                        </span>
+                        {reviewingBid.rawAiDueDate && reviewingBid.rawAiDueDate !== reviewingBid.normalizedAiDueDate && (
+                          <span className="text-slate-500 text-[10px]"> ({reviewingBid.rawAiDueDate})</span>
+                        )}
+                      </span>
+                    </div>
+
+                    <button
+                      type="button"
+                      onClick={() => setSelectedDueDateForITB(reviewingBid.normalizedAiDueDate || '')}
+                      className="px-2.5 py-1 rounded bg-indigo-600 hover:bg-indigo-700 text-white font-bold text-[10px] shadow-2xs transition-colors"
+                    >
+                      Use Suggested Date
+                    </button>
+                  </div>
+                )}
               </div>
             )}
 

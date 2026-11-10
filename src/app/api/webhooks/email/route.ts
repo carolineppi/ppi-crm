@@ -7,6 +7,7 @@ import {
   extractJobCode,
 } from '@/lib/email-parser/deduplication';
 import { analyzeEmailWithAI, ActiveBidSummary } from '@/lib/email-parser/ai-classifier';
+import { normalizeDateToYyyyMmDd } from '@/lib/date-utils';
 import type { EmailAttachmentPayload } from '@/types/bid-request';
 
 const attachmentSchema = z.object({
@@ -237,7 +238,11 @@ export async function POST(request: NextRequest) {
       project_name: effectiveProjectName,
       client_company: effectiveClientCompany,
       job_code: effectiveJobCode,
-      bid_due_date: ai.bidDueDate || payload.bidDueDate || null,
+      bid_due_date: (() => {
+        const rawDate = ai.bidDueDate || payload.bidDueDate;
+        const normalized = normalizeDateToYyyyMmDd(rawDate);
+        return normalized ? new Date(`${normalized}T17:00:00Z`).toISOString() : null;
+      })(),
 
       attachments: processedAttachments,
       attachment_hashes: attachmentHashes,
