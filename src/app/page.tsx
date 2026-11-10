@@ -16,6 +16,7 @@ import {
   UserCheck,
   ChevronDown,
   ChevronRight,
+  ChevronUp,
   Link as LinkIcon,
   XCircle,
   Hash,
@@ -23,6 +24,8 @@ import {
   X,
   Search,
   Check,
+  Mail,
+  FileText,
 } from 'lucide-react';
 
 interface DisplayBidRequest {
@@ -40,6 +43,11 @@ interface DisplayBidRequest {
   priority: 'low' | 'normal' | 'high' | 'urgent';
   assignedEstimator: string | null;
   attachmentsCount: number;
+  attachments?: Array<{ filename: string; size?: number; contentType?: string }>;
+
+  // Email Body Content
+  bodyText?: string | null;
+  bodyHtml?: string | null;
 
   // 5 Definitive Stickers
   sticker: 'ITB' | 'Addendum' | 'Won' | 'Lost' | 'Spam' | 'General';
@@ -61,6 +69,14 @@ interface DisplayBidRequest {
   matchStatus?: string | null;
 }
 
+function formatBytes(bytes?: number): string {
+  if (!bytes || bytes === 0) return '0 B';
+  const k = 1024;
+  const sizes = ['B', 'KB', 'MB', 'GB'];
+  const i = Math.floor(Math.log(bytes) / Math.log(k));
+  return `${parseFloat((bytes / Math.pow(k, i)).toFixed(1))} ${sizes[i]}`;
+}
+
 const ESTIMATORS = ['Steven Gross', 'Jaxson Farnholtz', 'Matt Magnani', 'Mariam Azab'];
 
 export default function DispatchDashboard() {
@@ -69,6 +85,7 @@ export default function DispatchDashboard() {
   const [isUsingLiveDb, setIsUsingLiveDb] = useState(false);
   const [isLoading, setIsLoading] = useState(false);
   const [expandedGroups, setExpandedGroups] = useState<Record<string, boolean>>({});
+  const [expandedEmails, setExpandedEmails] = useState<Record<string, boolean>>({});
   const [toastMessage, setToastMessage] = useState<string | null>(null);
 
   // Review & Reclassification Modal State
@@ -78,6 +95,14 @@ export default function DispatchDashboard() {
   const [selectedEstimatorForITB, setSelectedEstimatorForITB] = useState<string>('');
   const [bidSearchQuery, setBidSearchQuery] = useState('');
   const [isSavingReclassification, setIsSavingReclassification] = useState(false);
+  const [showModalEmailBody, setShowModalEmailBody] = useState(true);
+
+  const toggleEmailDropdown = (id: string) => {
+    setExpandedEmails((prev) => ({
+      ...prev,
+      [id]: !prev[id],
+    }));
+  };
 
   const showToast = (msg: string) => {
     setToastMessage(msg);
@@ -99,6 +124,12 @@ export default function DispatchDashboard() {
 
           const assignedName = r.raw_payload?.assigned_estimator_name || (r.assigned_estimator_id ? 'Assigned' : null);
 
+          const attachmentsList = Array.isArray(r.attachments)
+            ? r.attachments
+            : Array.isArray(r.raw_payload?.attachments)
+            ? r.raw_payload.attachments
+            : [];
+
           return {
             id: r.id,
             bidNumber: r.bid_number || null,
@@ -116,7 +147,10 @@ export default function DispatchDashboard() {
             triageStatus: r.triage_status || 'pending_triage',
             priority: r.priority || 'normal',
             assignedEstimator: assignedName,
-            attachmentsCount: Array.isArray(r.attachments) ? r.attachments.length : 0,
+            attachmentsCount: attachmentsList.length,
+            attachments: attachmentsList,
+            bodyText: r.email_body_text || r.raw_payload?.bodyText || r.raw_payload?.body || null,
+            bodyHtml: r.email_body_html || r.raw_payload?.bodyHtml || null,
             sticker,
             filterStatus: r.filter_status || 'inbox',
 
@@ -220,6 +254,7 @@ export default function DispatchDashboard() {
     setSelectedBidNumberToLink(bid.matchedBidNumber || (activeITBsWithNumbers[0]?.bidNumber || ''));
     setSelectedEstimatorForITB(bid.assignedEstimator || '');
     setBidSearchQuery('');
+    setShowModalEmailBody(true);
   };
 
   // 3. Save Reclassification & Workflow Transition
@@ -570,6 +605,57 @@ export default function DispatchDashboard() {
                             <p className="leading-relaxed">{primary.scopeSummary}</p>
                           </div>
                         )}
+
+                        {/* View Email Content Dropdown Button */}
+                        <div className="pt-0.5">
+                          <button
+                            type="button"
+                            onClick={() => toggleEmailDropdown(primary.id)}
+                            className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-md text-xs font-semibold text-slate-700 bg-slate-100 hover:bg-slate-200 border border-slate-200 transition-colors shadow-2xs"
+                          >
+                            <Mail className="w-3.5 h-3.5 text-blue-600" />
+                            <span>{expandedEmails[primary.id] ? 'Hide Email Message' : 'View Email Message'}</span>
+                            <ChevronDown className={`w-3.5 h-3.5 text-slate-400 transition-transform ${expandedEmails[primary.id] ? 'rotate-180' : ''}`} />
+                          </button>
+                        </div>
+
+                        {/* Expandable Email Content Drawer on Card */}
+                        {expandedEmails[primary.id] && (
+                          <div className="p-3.5 bg-slate-900 rounded-xl border border-slate-800 text-slate-100 space-y-2.5 animate-in fade-in slide-in-from-top-1 shadow-md">
+                            <div className="flex items-center justify-between text-xs pb-1.5 border-b border-slate-800 text-slate-400">
+                              <span className="flex items-center gap-1.5 text-blue-400 font-semibold">
+                                <Mail className="w-3.5 h-3.5" />
+                                Original Email Message Body
+                              </span>
+                              <span>Received: {primary.receivedAt}</span>
+                            </div>
+
+                            <div className="max-h-60 overflow-y-auto font-mono text-[11px] leading-relaxed whitespace-pre-wrap select-text pr-2 text-slate-200 bg-slate-950/60 p-3 rounded-lg border border-slate-800/80">
+                              {primary.bodyText || primary.bodyHtml || '(No text content available in email message)'}
+                            </div>
+
+                            {primary.attachments && primary.attachments.length > 0 && (
+                              <div className="pt-2 border-t border-slate-800 space-y-1.5">
+                                <span className="text-[10px] font-bold text-slate-400 uppercase tracking-wider flex items-center gap-1">
+                                  <Paperclip className="w-3 h-3 text-slate-400" />
+                                  Attachments ({primary.attachments.length}):
+                                </span>
+                                <div className="flex flex-wrap gap-1.5">
+                                  {primary.attachments.map((att, idx) => (
+                                    <span
+                                      key={idx}
+                                      className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-md bg-slate-800 border border-slate-700 text-[11px] text-slate-200"
+                                    >
+                                      <FileText className="w-3 h-3 text-blue-400" />
+                                      <span className="font-medium">{att.filename}</span>
+                                      {att.size ? <span className="text-slate-400 text-[10px]">({formatBytes(att.size)})</span> : null}
+                                    </span>
+                                  ))}
+                                </div>
+                              </div>
+                            )}
+                          </div>
+                        )}
                       </div>
                     </div>
 
@@ -651,6 +737,24 @@ export default function DispatchDashboard() {
                               {dup.scopeSummary}
                             </p>
                           )}
+
+                          <div>
+                            <button
+                              type="button"
+                              onClick={() => toggleEmailDropdown(dup.id)}
+                              className="inline-flex items-center gap-1 text-[11px] font-semibold text-amber-900 hover:text-amber-950 underline"
+                            >
+                              <Mail className="w-3 h-3 text-amber-700" />
+                              <span>{expandedEmails[dup.id] ? 'Hide Email Message' : 'View Email Message'}</span>
+                              <ChevronDown className={`w-3 h-3 transition-transform ${expandedEmails[dup.id] ? 'rotate-180' : ''}`} />
+                            </button>
+                          </div>
+
+                          {expandedEmails[dup.id] && (
+                            <div className="p-3 bg-slate-900 text-slate-100 rounded-lg font-mono text-[11px] whitespace-pre-wrap max-h-48 overflow-y-auto border border-slate-800">
+                              {dup.bodyText || dup.bodyHtml || '(No text content available)'}
+                            </div>
+                          )}
                         </div>
                       ))}
                     </div>
@@ -665,9 +769,9 @@ export default function DispatchDashboard() {
       {/* HUMAN-IN-THE-LOOP REVIEW & RECLASSIFICATION MODAL */}
       {reviewingBid && (
         <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-slate-900/60 backdrop-blur-sm animate-in fade-in">
-          <div className="bg-white rounded-2xl shadow-2xl border border-slate-200 max-w-xl w-full p-6 space-y-5 animate-in zoom-in-95">
+          <div className="bg-white rounded-2xl shadow-2xl border border-slate-200 max-w-2xl w-full max-h-[90vh] flex flex-col p-6 animate-in zoom-in-95">
             {/* Modal Header */}
-            <div className="flex items-start justify-between">
+            <div className="flex items-start justify-between pb-3 border-b border-slate-100">
               <div>
                 <span className="text-xs font-bold text-blue-600 uppercase tracking-wider">
                   Calendar Manager Review
@@ -678,26 +782,109 @@ export default function DispatchDashboard() {
               </div>
               <button
                 onClick={() => setReviewingBid(null)}
-                className="text-slate-400 hover:text-slate-600 p-1"
+                className="text-slate-400 hover:text-slate-600 p-1 rounded-lg hover:bg-slate-100 transition-colors"
               >
                 <X className="w-5 h-5" />
               </button>
             </div>
 
-            {/* Email Info Box */}
-            <div className="p-3.5 bg-slate-50 rounded-xl border border-slate-200 text-xs space-y-1">
-              <p className="font-bold text-slate-800 text-sm leading-tight">
-                {reviewingBid.subject}
-              </p>
-              <p className="text-slate-500">
-                From: <strong>{reviewingBid.senderName}</strong> &lt;{reviewingBid.senderEmail}&gt;
-              </p>
-              {reviewingBid.scopeSummary && (
-                <p className="text-slate-600 italic pt-1 border-t border-slate-200 mt-1">
-                  AI Summary: {reviewingBid.scopeSummary}
-                </p>
-              )}
-            </div>
+            {/* Scrollable Modal Content */}
+            <div className="overflow-y-auto pr-1 py-4 space-y-5 flex-1">
+              {/* Email Details & Raw Content Accordion */}
+              <div className="bg-slate-50 rounded-xl border border-slate-200 overflow-hidden text-xs">
+                <div className="p-3.5 space-y-1.5">
+                  <div className="flex items-start justify-between gap-2">
+                    <h4 className="font-bold text-slate-900 text-sm leading-snug">
+                      {reviewingBid.subject}
+                    </h4>
+                    <span className="px-2 py-0.5 rounded text-[10px] font-bold uppercase bg-slate-200 text-slate-700 flex-shrink-0">
+                      Current: {reviewingBid.sticker}
+                    </span>
+                  </div>
+
+                  <div className="flex items-center gap-2 text-slate-600 flex-wrap">
+                    {reviewingBid.isForwarded ? (
+                      <span className="inline-flex items-center gap-1 text-indigo-700 font-medium">
+                        <UserCheck className="w-3 h-3 text-indigo-500" />
+                        Client/GC: <strong>{reviewingBid.originalSenderName || reviewingBid.senderName}</strong> &lt;{reviewingBid.originalSenderEmail || reviewingBid.senderEmail}&gt;
+                        <span className="text-indigo-400 font-normal">↳ (via {reviewingBid.forwardedBy || 'Coworker'})</span>
+                      </span>
+                    ) : (
+                      <span>From: <strong>{reviewingBid.senderName}</strong> &lt;{reviewingBid.senderEmail}&gt;</span>
+                    )}
+                    <span className="text-slate-400">•</span>
+                    <span>Received: {reviewingBid.receivedAt}</span>
+                    {reviewingBid.attachments && reviewingBid.attachments.length > 0 && (
+                      <>
+                        <span className="text-slate-400">•</span>
+                        <span className="text-slate-700 font-medium flex items-center gap-1">
+                          <Paperclip className="w-3 h-3" />
+                          {reviewingBid.attachments.length} attachment{reviewingBid.attachments.length > 1 ? 's' : ''}
+                        </span>
+                      </>
+                    )}
+                  </div>
+
+                  {reviewingBid.scopeSummary && (
+                    <div className="mt-2 p-2.5 bg-indigo-50/80 border border-indigo-100 rounded-lg text-slate-700">
+                      <span className="font-semibold text-indigo-900 flex items-center gap-1">
+                        <Sparkles className="w-3.5 h-3.5 text-indigo-600" /> AI Scope Summary:
+                      </span>
+                      <p className="mt-0.5 text-[11px] leading-relaxed">{reviewingBid.scopeSummary}</p>
+                    </div>
+                  )}
+                </div>
+
+                {/* Email Content Dropdown Bar */}
+                <div className="border-t border-slate-200 bg-white">
+                  <button
+                    type="button"
+                    onClick={() => setShowModalEmailBody(!showModalEmailBody)}
+                    className="w-full px-3.5 py-2.5 flex items-center justify-between text-left text-xs font-semibold text-slate-700 hover:bg-slate-50 transition-colors"
+                  >
+                    <span className="flex items-center gap-1.5 text-blue-700">
+                      <Mail className="w-3.5 h-3.5 text-blue-600" />
+                      Original Email Message Content
+                    </span>
+                    <span className="flex items-center gap-1 text-[11px] text-slate-500">
+                      {showModalEmailBody ? 'Hide Email Text' : 'Show Email Text'}
+                      <ChevronDown className={`w-3.5 h-3.5 transition-transform ${showModalEmailBody ? 'rotate-180' : ''}`} />
+                    </span>
+                  </button>
+
+                  {showModalEmailBody && (
+                    <div className="px-3.5 pb-3.5 pt-1 space-y-2 border-t border-slate-100 animate-in fade-in">
+                      <div className="max-h-56 overflow-y-auto p-3 bg-slate-900 text-slate-100 rounded-lg font-mono text-[11px] leading-relaxed whitespace-pre-wrap select-text border border-slate-800 shadow-inner">
+                        {reviewingBid.bodyText || reviewingBid.bodyHtml || '(No text body content available in email)'}
+                      </div>
+
+                      {/* Attachments Section */}
+                      {reviewingBid.attachments && reviewingBid.attachments.length > 0 && (
+                        <div className="pt-1 space-y-1">
+                          <span className="text-[10px] font-bold text-slate-500 uppercase tracking-wider flex items-center gap-1">
+                            <Paperclip className="w-3 h-3 text-slate-400" />
+                            Attached Files ({reviewingBid.attachments.length}):
+                          </span>
+                          <div className="flex flex-wrap gap-1.5">
+                            {reviewingBid.attachments.map((att, idx) => (
+                              <span
+                                key={idx}
+                                className="inline-flex items-center gap-1 px-2.5 py-1 rounded bg-slate-100 border border-slate-200 text-[11px] text-slate-700 font-medium"
+                              >
+                                <FileText className="w-3 h-3 text-blue-600" />
+                                <span className="truncate max-w-[240px]">{att.filename}</span>
+                                {att.size ? (
+                                  <span className="text-[10px] text-slate-400">({formatBytes(att.size)})</span>
+                                ) : null}
+                              </span>
+                            ))}
+                          </div>
+                        </div>
+                      )}
+                    </div>
+                  )}
+                </div>
+              </div>
 
             {/* 1. Sticker Selection */}
             <div className="space-y-2">
@@ -850,17 +1037,18 @@ export default function DispatchDashboard() {
             )}
 
             {/* If Spam: Notice */}
-            {targetSticker === 'Spam' && (
-              <div className="p-4 bg-slate-100 rounded-xl border border-slate-300 text-xs text-slate-700 space-y-1">
-                <p className="font-bold text-slate-900">Spam / Noise Workflow:</p>
-                <p className="text-[11px] leading-relaxed">
-                  This email will be removed from your active dispatch queue and archived into the <strong>Spam / Noise</strong> tab.
-                </p>
-              </div>
-            )}
+              {targetSticker === 'Spam' && (
+                <div className="p-4 bg-slate-100 rounded-xl border border-slate-300 text-xs text-slate-700 space-y-1">
+                  <p className="font-bold text-slate-900">Spam / Noise Workflow:</p>
+                  <p className="text-[11px] leading-relaxed">
+                    This email will be removed from your active dispatch queue and archived into the <strong>Spam / Noise</strong> tab.
+                  </p>
+                </div>
+              )}
+            </div>
 
             {/* Modal Actions */}
-            <div className="flex items-center justify-end gap-3 pt-2 border-t border-slate-100">
+            <div className="flex items-center justify-end gap-3 pt-3 border-t border-slate-100">
               <button
                 type="button"
                 onClick={() => setReviewingBid(null)}
