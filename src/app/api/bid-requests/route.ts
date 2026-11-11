@@ -44,6 +44,13 @@ export async function GET(request: NextRequest) {
         is_human_labeled,
         human_label,
         human_labeled_at,
+        is_due_date_revised,
+        revised_due_date,
+        is_gc_won_prime,
+        project_address_street,
+        project_address_city,
+        project_address_state,
+        project_address_zip,
         raw_payload,
         created_at
       `
@@ -85,6 +92,13 @@ export async function GET(request: NextRequest) {
         is_human_labeled,
         human_label,
         human_labeled_at,
+        is_due_date_revised,
+        revised_due_date,
+        is_gc_won_prime,
+        project_address_street,
+        project_address_city,
+        project_address_state,
+        project_address_zip,
         raw_payload,
         created_at
       `;

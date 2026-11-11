@@ -19,6 +19,10 @@ export interface ParsedBidRequestInput {
   senderName?: string | null;
   bodyText?: string | null;
   attachments?: EmailAttachmentPayload[];
+  projectName?: string | null;
+  projectAddress?: string | null;
+  clientCompany?: string | null;
+  emailIntent?: string | null;
 }
 
 /**
@@ -94,15 +98,22 @@ export function compareBidRequests(
     attachmentHashes: string[];
     attachmentFilenames: string[];
     tokens: Set<string>;
+    projectName?: string | null;
+    projectAddress?: string | null;
+    clientCompany?: string | null;
   },
   candidate: {
     id: string;
     email_subject: string;
     sender_email: string;
     job_code: string | null;
+    project_name?: string | null;
+    project_address_city?: string | null;
+    client_company?: string | null;
     attachment_hashes: string[] | null;
     attachments: Array<{ filename: string; checksum?: string; size?: number }> | null;
     duplicate_group_id: string | null;
+    bid_number?: string | null;
   }
 ): { confidence: number; reasons: string[] } {
   const reasons: string[] = [];
@@ -137,7 +148,26 @@ export function compareBidRequests(
     reasons.push(`Exact job code match: ${incoming.jobCode}`);
   }
 
-  // 3. Subject Keyword Similarity
+  // 3. Project Name / Job Site Similarity (Cross-Contractor Multi-GC Sibling Detection)
+  if (incoming.projectName && candidate.project_name) {
+    const normIn = incoming.projectName.toLowerCase().replace(/[^a-z0-9]/g, ' ').trim();
+    const normCand = candidate.project_name.toLowerCase().replace(/[^a-z0-9]/g, ' ').trim();
+
+    if (
+      (normIn.length > 3 && normCand.length > 3) &&
+      (normIn === normCand || normIn.includes(normCand) || normCand.includes(normIn))
+    ) {
+      score += 0.70;
+      const isDiffSender = incoming.senderEmail.toLowerCase() !== candidate.sender_email?.toLowerCase();
+      if (isDiffSender) {
+        reasons.push(`🏢 Multi-GC Sibling: Same Job Site ("${candidate.project_name}") from different bidding contractor`);
+      } else {
+        reasons.push(`Matching Project Name: "${candidate.project_name}"`);
+      }
+    }
+  }
+
+  // 4. Subject Keyword Similarity
   const candidateTokens = extractSignificantTokens(candidate.email_subject);
   const similarity = calculateTokenSimilarity(incoming.tokens, candidateTokens);
 
@@ -149,7 +179,7 @@ export function compareBidRequests(
     reasons.push(`Moderate subject keyword overlap (${Math.round(similarity * 100)}%)`);
   }
 
-  // 4. Same Sender Correlation
+  // 5. Same Sender Correlation
   if (
     incoming.senderEmail.toLowerCase().trim() ===
     candidate.sender_email.toLowerCase().trim()
@@ -181,10 +211,10 @@ export async function detectAndGroupDuplicates(
   const attachmentHashes = incomingAttachments.map(computeAttachmentHash);
   const attachmentFilenames = incomingAttachments.map((a) => a.filename);
 
-  // Query candidate records: search within recent records (last 90 days or matching job code / hashes / sender)
+  // Query candidate records: search within recent records (last 90 days or matching job code / hashes / sender / project)
   let query = supabase
     .from('bid_requests')
-    .select('id, email_subject, sender_email, job_code, attachment_hashes, attachments, duplicate_group_id')
+    .select('id, email_subject, sender_email, job_code, project_name, project_address_city, client_company, attachment_hashes, attachments, duplicate_group_id, bid_number')
     .order('created_at', { ascending: false })
     .limit(100);
 
@@ -218,6 +248,9 @@ export async function detectAndGroupDuplicates(
         attachmentHashes,
         attachmentFilenames,
         tokens: incomingTokens,
+        projectName: incoming.projectName,
+        projectAddress: incoming.projectAddress,
+        clientCompany: incoming.clientCompany,
       },
       candidate
     );

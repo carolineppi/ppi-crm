@@ -4,6 +4,10 @@ import { createServerSupabaseClient } from '@/lib/supabase/server';
 interface UpdatePayload {
   newSticker?: string;
   matchedBidNumber?: string | null;
+  linkToBidNumber?: string | null;
+  unlinkFromGroup?: boolean;
+  acceptRevisedDueDate?: boolean;
+  revisedDueDate?: string | null;
   assignedEstimator?: string | null;
   bidDueDate?: string | null;
   triageStatus?: string | null;
@@ -11,6 +15,7 @@ interface UpdatePayload {
   estimatorNotes?: string | null;
   duplicateResolution?: string | null;
   isHumanLabeled?: boolean;
+  isGcWonPrime?: boolean;
 }
 
 export async function PATCH(
@@ -92,6 +97,84 @@ export async function PATCH(
         human_verified: true,
         human_label: body.newSticker || currentRecord.email_intent,
       };
+    }
+
+    // 2f. Handle Unlinking from Project Group (Calendar Manager Manual Intervention)
+    if (body.unlinkFromGroup) {
+      const newGroupId = crypto.randomUUID();
+      updates.duplicate_group_id = newGroupId;
+      updates.is_flagged_duplicate = false;
+      updates.duplicate_of_id = null;
+      updates.matched_bid_id = null;
+      updates.matched_bid_number = null;
+      updates.match_status = null;
+      updates.match_reason = null;
+      updates.duplicate_resolution = 'marked_distinct';
+
+      // If it is an ITB or general inquiry and has no internal bid_number, assign one
+      if (!currentRecord.bid_number && (currentRecord.email_intent === 'invitation_to_bid' || !body.newSticker || body.newSticker === 'ITB')) {
+        const currentYear = new Date().getFullYear().toString().slice(-2);
+        const { count } = await supabase
+          .from('bid_requests')
+          .select('id', { count: 'exact', head: true })
+          .not('bid_number', 'is', null);
+        const seq = (count || 0) + 1;
+        updates.bid_number = `BID-${currentYear}-${seq.toString().padStart(4, '0')}`;
+        updates.triage_status = 'ready_for_assignment';
+      }
+    }
+
+    // 2g. Handle Manual Linking to an Existing Bid Number (Works for ITBs, Addendums, Awards, etc.)
+    const targetBidNum = body.linkToBidNumber || (body.newSticker !== 'ITB' ? body.matchedBidNumber : null);
+    if (targetBidNum && !body.unlinkFromGroup) {
+      const { data: parentBid } = await supabase
+        .from('bid_requests')
+        .select('id, duplicate_group_id, bid_number, assigned_estimator_id, raw_payload')
+        .eq('bid_number', targetBidNum)
+        .maybeSingle();
+
+      if (parentBid) {
+        updates.matched_bid_id = parentBid.id;
+        updates.matched_bid_number = parentBid.bid_number;
+        updates.duplicate_group_id = parentBid.duplicate_group_id;
+        updates.duplicate_of_id = parentBid.id;
+        updates.is_flagged_duplicate = true;
+        updates.match_status = 'confirmed';
+        updates.duplicate_resolution = 'confirmed_duplicate';
+        updates.match_reason = 'Manually linked to project folder by Calendar Manager';
+
+        // Propagate estimator assignment from parent bid
+        if (parentBid.assigned_estimator_id || parentBid.raw_payload?.assigned_estimator_name) {
+          updates.assigned_estimator_id = parentBid.assigned_estimator_id;
+          updates.raw_payload = {
+            ...(updates.raw_payload || currentRecord.raw_payload),
+            assigned_estimator_name: parentBid.raw_payload?.assigned_estimator_name,
+          };
+          updates.triage_status = 'assigned';
+        }
+      }
+    }
+
+    // 2h. Handle Accepting Revised Due Date (e.g. from Addendum)
+    if (body.acceptRevisedDueDate && body.revisedDueDate) {
+      const parsedDate = new Date(body.revisedDueDate);
+      if (!isNaN(parsedDate.getTime())) {
+        updates.bid_due_date = parsedDate.toISOString();
+        updates.is_due_date_revised = false; // resolved
+
+        // Also update parent bid due date if this is attached to a parent group!
+        if (currentRecord.duplicate_group_id) {
+          await supabase
+            .from('bid_requests')
+            .update({ bid_due_date: parsedDate.toISOString(), is_due_date_revised: false })
+            .eq('duplicate_group_id', currentRecord.duplicate_group_id);
+        }
+      }
+    }
+
+    // 2i. Handle GC Won Prime Status Flag
+    if (body.isGcWonPrime !== undefined) {
+      updates.is_gc_won_prime = body.isGcWonPrime;
     }
 
     // 3. Handle Sticker Reclassification & Workflow Transitions

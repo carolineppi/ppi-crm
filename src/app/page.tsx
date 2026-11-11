@@ -34,6 +34,10 @@ import {
   ExternalLink,
   Briefcase,
   Tag,
+  Building2,
+  AlertTriangle,
+  Unlink,
+  ArrowRightLeft,
 } from 'lucide-react';
 import EmailDocumentViewer from '@/components/EmailDocumentViewer';
 import CalendarScheduleView from '@/components/CalendarScheduleView';
@@ -54,6 +58,7 @@ interface DisplayBidRequest {
   jobCode: string | null;
   projectName?: string | null;
   clientCompany?: string | null;
+  projectAddress?: string | null;
   duplicateGroupId: string;
   isFlaggedDuplicate: boolean;
   duplicateReasons: string[];
@@ -63,6 +68,9 @@ interface DisplayBidRequest {
   bidDueDate?: string | null;
   rawAiDueDate?: string | null;
   normalizedAiDueDate?: string | null;
+  isDueDateRevised?: boolean;
+  revisedDueDate?: string | null;
+  isGcWonPrime?: boolean;
   attachmentsCount: number;
   attachments?: Array<{ filename: string; size?: number; contentType?: string; storageUrl?: string }>;
 
@@ -126,9 +134,18 @@ export default function DispatchDashboard() {
   const [selectedBidNumberToLink, setSelectedBidNumberToLink] = useState<string>('');
   const [selectedEstimatorForITB, setSelectedEstimatorForITB] = useState<string>('');
   const [selectedDueDateForITB, setSelectedDueDateForITB] = useState<string>('');
+  const [isGcWonPrimeCheckbox, setIsGcWonPrimeCheckbox] = useState(false);
+  const [linkToExistingItb, setLinkToExistingItb] = useState(false);
+  const [addendumRevisedDueDateInput, setAddendumRevisedDueDateInput] = useState('');
   const [bidSearchQuery, setBidSearchQuery] = useState('');
   const [isSavingReclassification, setIsSavingReclassification] = useState(false);
   const [showModalEmailBody, setShowModalEmailBody] = useState(true);
+
+  // Standalone Link / Relink Modal State (for Calendar Manager)
+  const [linkingBid, setLinkingBid] = useState<DisplayBidRequest | null>(null);
+  const [targetBidNumberForLink, setTargetBidNumberForLink] = useState('');
+  const [relinkSearchQuery, setRelinkSearchQuery] = useState('');
+  const [isLinkingLoading, setIsLinkingLoading] = useState(false);
 
   const toggleEmailDropdown = (id: string) => {
     setExpandedEmails((prev) => ({
@@ -168,6 +185,12 @@ export default function DispatchDashboard() {
           const bidDueDate = r.bid_due_date ? normalizeDateToYyyyMmDd(r.bid_due_date) : null;
           const projectName = r.project_name || r.ai_analysis?.projectName || null;
           const clientCompany = r.client_company || r.ai_analysis?.clientCompany || null;
+          const projectAddress = [r.project_address_street, r.project_address_city, r.project_address_state, r.project_address_zip]
+            .filter(Boolean)
+            .join(', ') || r.ai_analysis?.projectAddress || null;
+          const isDueDateRevised = Boolean(r.is_due_date_revised);
+          const revisedDueDate = r.revised_due_date ? normalizeDateToYyyyMmDd(r.revised_due_date) : null;
+          const isGcWonPrime = Boolean(r.is_gc_won_prime);
 
           return {
             id: r.id,
@@ -182,6 +205,7 @@ export default function DispatchDashboard() {
             jobCode: r.job_code,
             projectName,
             clientCompany,
+            projectAddress,
             duplicateGroupId: r.duplicate_group_id || r.id,
             isFlaggedDuplicate: r.is_flagged_duplicate,
             duplicateReasons: r.duplicate_reasons || [],
@@ -191,6 +215,9 @@ export default function DispatchDashboard() {
             bidDueDate,
             rawAiDueDate,
             normalizedAiDueDate,
+            isDueDateRevised,
+            revisedDueDate,
+            isGcWonPrime,
             attachmentsCount: attachmentsList.length,
             attachments: attachmentsList,
             bodyText: r.email_body_text || r.raw_payload?.bodyText || r.raw_payload?.body || null,
@@ -359,6 +386,9 @@ export default function DispatchDashboard() {
     setSelectedBidNumberToLink(bid.matchedBidNumber || (activeITBsWithNumbers[0]?.bidNumber || ''));
     setSelectedEstimatorForITB(bid.assignedEstimator || '');
     setSelectedDueDateForITB(bid.bidDueDate || bid.normalizedAiDueDate || '');
+    setIsGcWonPrimeCheckbox(Boolean(bid.isGcWonPrime));
+    setLinkToExistingItb(Boolean(bid.isFlaggedDuplicate && bid.matchedBidNumber));
+    setAddendumRevisedDueDateInput(bid.revisedDueDate || '');
     setBidSearchQuery('');
     setShowModalEmailBody(true);
   };
@@ -374,9 +404,22 @@ export default function DispatchDashboard() {
       };
 
       if (targetSticker === 'ITB') {
-        payload.assignedEstimator = selectedEstimatorForITB || null;
-        payload.bidDueDate = selectedDueDateForITB || null;
-      } else if (targetSticker === 'Addendum' || targetSticker === 'Won' || targetSticker === 'Lost') {
+        if (linkToExistingItb && selectedBidNumberToLink) {
+          payload.linkToBidNumber = selectedBidNumberToLink;
+        } else {
+          payload.assignedEstimator = selectedEstimatorForITB || null;
+          payload.bidDueDate = selectedDueDateForITB || null;
+        }
+      } else if (targetSticker === 'Addendum') {
+        payload.matchedBidNumber = selectedBidNumberToLink || null;
+        if (addendumRevisedDueDateInput) {
+          payload.acceptRevisedDueDate = true;
+          payload.revisedDueDate = addendumRevisedDueDateInput;
+        }
+      } else if (targetSticker === 'Won') {
+        payload.matchedBidNumber = selectedBidNumberToLink || null;
+        payload.isGcWonPrime = isGcWonPrimeCheckbox;
+      } else if (targetSticker === 'Lost') {
         payload.matchedBidNumber = selectedBidNumberToLink || null;
       }
 
@@ -401,6 +444,101 @@ export default function DispatchDashboard() {
     }
   };
 
+  // 4. Standalone Link / Relink Modal Open & Handlers
+  const openLinkModal = (bid: DisplayBidRequest) => {
+    setLinkingBid(bid);
+    setTargetBidNumberForLink(bid.matchedBidNumber || (activeITBsWithNumbers[0]?.bidNumber || ''));
+    setRelinkSearchQuery('');
+  };
+
+  const handleExecuteLink = async (sourceBidId: string, targetBidNumber: string) => {
+    if (!targetBidNumber) {
+      showToast('Please select an active project / bid number to link to.');
+      return;
+    }
+    setIsLinkingLoading(true);
+    try {
+      const res = await fetch(`/api/bid-requests/${sourceBidId}`, {
+        method: 'PATCH',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ linkToBidNumber: targetBidNumber }),
+      });
+      if (res.ok) {
+        showToast(`✔ Linked to ${targetBidNumber}! Shared folder and estimator updated.`);
+        setLinkingBid(null);
+        if (reviewingBid) setReviewingBid(null);
+        await fetchLiveBids();
+      } else {
+        const err = await res.json();
+        showToast(`Failed to link: ${err.error || 'Server error'}`);
+      }
+    } catch (e: any) {
+      showToast(`Error: ${e.message}`);
+    } finally {
+      setIsLinkingLoading(false);
+    }
+  };
+
+  // 5. Unlink Bid Handler (Calendar Manager Manual Intervention)
+  const handleUnlinkBid = async (bidId: string) => {
+    if (!confirm('Are you sure you want to unlink this email? It will become an independent bid folder with its own bid number.')) {
+      return;
+    }
+    try {
+      const res = await fetch(`/api/bid-requests/${bidId}`, {
+        method: 'PATCH',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ unlinkFromGroup: true }),
+      });
+      if (res.ok) {
+        showToast('✔ Email unlinked and detached into its own project folder!');
+        if (reviewingBid) setReviewingBid(null);
+        await fetchLiveBids();
+      } else {
+        const err = await res.json();
+        showToast(`Failed to unlink: ${err.error || 'Server error'}`);
+      }
+    } catch (e: any) {
+      showToast(`Error: ${e.message}`);
+    }
+  };
+
+  // 6. Accept Revised Due Date Handler (from Addendum)
+  const handleAcceptRevisedDueDate = async (bidId: string, revisedDueDate: string) => {
+    try {
+      const res = await fetch(`/api/bid-requests/${bidId}`, {
+        method: 'PATCH',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ acceptRevisedDueDate: true, revisedDueDate }),
+      });
+      if (res.ok) {
+        showToast(`✔ Calendar bid due date updated to ${formatFriendlyDate(revisedDueDate)}!`);
+        await fetchLiveBids();
+      } else {
+        const err = await res.json();
+        showToast(`Failed to update due date: ${err.error || 'Server error'}`);
+      }
+    } catch (e: any) {
+      showToast(`Error: ${e.message}`);
+    }
+  };
+
+  // Filter list of active ITBs for linking modal
+  const filteredBidsForRelinking = activeITBsWithNumbers.filter((b) => {
+    if (!linkingBid) return false;
+    if (b.id === linkingBid.id) return false;
+    if (!relinkSearchQuery.trim()) return true;
+    const q = relinkSearchQuery.toLowerCase();
+    return (
+      b.bidNumber?.toLowerCase().includes(q) ||
+      b.subject.toLowerCase().includes(q) ||
+      b.senderName.toLowerCase().includes(q) ||
+      b.clientCompany?.toLowerCase().includes(q) ||
+      b.projectName?.toLowerCase().includes(q) ||
+      b.jobCode?.toLowerCase().includes(q)
+    );
+  });
+
   // Sticker counts
   const countITB = bids.filter((b) => b.sticker === 'ITB').length;
   const countAddendum = bids.filter((b) => b.sticker === 'Addendum').length;
@@ -411,13 +549,20 @@ export default function DispatchDashboard() {
   const renderStickerBadge = (sticker: DisplayBidRequest['sticker'], bid: DisplayBidRequest) => {
     let badgeClass = 'bg-blue-600 text-white';
     let icon = null;
+    let badgeText = sticker === 'ITB' ? 'ITB' : sticker;
 
     if (sticker === 'Addendum') {
       badgeClass = 'bg-purple-600 text-white';
       icon = <FileSpreadsheet className="w-3 h-3" />;
     } else if (sticker === 'Won') {
-      badgeClass = 'bg-emerald-600 text-white';
-      icon = <Trophy className="w-3 h-3" />;
+      if (bid.isGcWonPrime) {
+        badgeClass = 'bg-amber-600 text-white shadow-xs';
+        icon = <Trophy className="w-3 h-3 text-amber-200" />;
+        badgeText = 'GC Won (Sub Pending)';
+      } else {
+        badgeClass = 'bg-emerald-600 text-white';
+        icon = <Trophy className="w-3 h-3" />;
+      }
     } else if (sticker === 'Lost') {
       badgeClass = 'bg-rose-600 text-white';
       icon = <XCircle className="w-3 h-3" />;
@@ -428,9 +573,16 @@ export default function DispatchDashboard() {
 
     return (
       <div className="inline-flex items-center gap-1 group">
-        <span className={`px-2.5 py-1 rounded font-black text-[11px] uppercase tracking-wider shadow-sm flex items-center gap-1 ${badgeClass}`}>
+        <span
+          title={
+            bid.isGcWonPrime
+              ? 'General Contractor won prime contract; waiting on subcontractor selection'
+              : undefined
+          }
+          className={`px-2.5 py-1 rounded font-black text-[11px] uppercase tracking-wider shadow-sm flex items-center gap-1 ${badgeClass}`}
+        >
           {icon}
-          {sticker === 'ITB' ? 'ITB' : sticker}
+          {badgeText}
         </span>
         <button
           onClick={() => openReviewModal(bid)}
@@ -754,61 +906,130 @@ export default function DispatchDashboard() {
             ) : (
               <div className="divide-y divide-slate-200">
                 {paginatedGroupEntries.map(([groupId, groupItems]) => {
-              const isExpanded = expandedGroups[groupId] ?? false;
-              const primary = groupItems.find((b) => !b.isFlaggedDuplicate) || groupItems[0];
-              const duplicates = groupItems.filter((b) => b.id !== primary.id);
+                  const isExpanded = expandedGroups[groupId] ?? false;
+                  const primary = groupItems.find((b) => !b.isFlaggedDuplicate) || groupItems[0];
+                  const duplicates = groupItems.filter((b) => b.id !== primary.id);
 
-              return (
-                <div key={groupId} className="p-5 hover:bg-slate-50/50 transition-colors space-y-3">
-                  <div className="flex items-start justify-between gap-4">
-                    <div className="flex items-start gap-3 flex-1">
-                      <button
-                        onClick={() => toggleGroup(groupId)}
-                        className="mt-1 text-slate-400 hover:text-slate-600 focus:outline-none"
-                      >
-                        {isExpanded ? (
-                          <ChevronDown className="w-5 h-5 text-slate-600" />
-                        ) : (
-                          <ChevronRight className="w-5 h-5" />
-                        )}
-                      </button>
+                  // Multi-GC detection across all bidding contractors in this job folder
+                  const uniqueGCs = Array.from(
+                    new Set(
+                      groupItems
+                        .map((item) => item.clientCompany || item.originalSenderName || item.senderName)
+                        .filter(Boolean)
+                    )
+                  );
+                  const isMultiGCGroup = uniqueGCs.length > 1;
 
-                      <div className="space-y-2 flex-1">
-                        {/* Categorization Sticker + Bid # + Subject */}
-                        <div className="flex items-center gap-2.5 flex-wrap">
-                          {renderStickerBadge(primary.sticker, primary)}
+                  // Detect any unaccepted due date revision from an Addendum
+                  const dueDateRevisionItem = groupItems.find(
+                    (item) => item.isDueDateRevised && item.revisedDueDate
+                  );
 
-                          {/* Internal Bid Number for ITBs */}
-                          {primary.sticker === 'ITB' && primary.bidNumber && (
-                            <span className="px-2.5 py-0.5 rounded text-xs font-mono font-bold bg-blue-100 text-blue-900 border border-blue-200 flex items-center gap-1">
-                              <Hash className="w-3 h-3 text-blue-600" /> {primary.bidNumber}
-                            </span>
-                          )}
-
-                          {/* Matched Bid Number for Addendum / Won / Lost */}
-                          {primary.sticker !== 'ITB' && primary.matchedBidNumber && (
-                            <span className="px-2.5 py-0.5 rounded text-xs font-mono font-bold bg-purple-100 text-purple-900 border border-purple-200 flex items-center gap-1">
-                              <LinkIcon className="w-3 h-3 text-purple-600" /> Attached to {primary.matchedBidNumber}
-                            </span>
-                          )}
-
-                          {primary.jobCode && (
-                            <span className="px-2 py-0.5 rounded text-xs font-semibold bg-slate-100 text-slate-800">
-                              {primary.jobCode}
-                            </span>
-                          )}
-
-                          <span className="font-semibold text-slate-900 text-base">
-                            {primary.subject}
-                          </span>
-
-                          {duplicates.length > 0 && (
-                            <span className="px-2 py-0.5 rounded-full text-xs font-medium bg-amber-100 text-amber-800 flex items-center gap-1">
-                              <Copy className="w-3 h-3" />
-                              {duplicates.length} Related Inquiry
-                            </span>
-                          )}
+                  return (
+                    <div key={groupId} className="p-5 hover:bg-slate-50/50 transition-colors space-y-3">
+                      {/* Addendum Due Date Extension Alert Banner */}
+                      {dueDateRevisionItem && (
+                        <div className="p-3 bg-amber-50 rounded-xl border border-amber-300 text-xs text-amber-950 flex flex-col sm:flex-row sm:items-center justify-between gap-3 shadow-2xs animate-in fade-in">
+                          <div className="flex items-start sm:items-center gap-2">
+                            <AlertTriangle className="w-4 h-4 text-amber-600 flex-shrink-0 mt-0.5 sm:mt-0" />
+                            <div>
+                              <span className="font-bold text-amber-900">⏰ Addendum Due Date Extension Detected:</span>{' '}
+                              <span>
+                                An addendum revised the bid due date to{' '}
+                                <strong className="text-amber-950 underline decoration-amber-500">
+                                  {formatFriendlyDate(dueDateRevisionItem.revisedDueDate!)}
+                                </strong>
+                                .
+                              </span>
+                            </div>
+                          </div>
+                          <button
+                            type="button"
+                            onClick={() =>
+                              handleAcceptRevisedDueDate(
+                                dueDateRevisionItem.id,
+                                dueDateRevisionItem.revisedDueDate!
+                              )
+                            }
+                            className="px-3 py-1.5 bg-emerald-600 hover:bg-emerald-700 text-white rounded-lg font-bold text-xs shadow-2xs flex items-center gap-1.5 transition-colors self-start sm:self-auto flex-shrink-0"
+                          >
+                            <Check className="w-3.5 h-3.5" />
+                            <span>Accept & Update Calendar</span>
+                          </button>
                         </div>
+                      )}
+
+                      {/* Multi-GC Sibling Banner */}
+                      {isMultiGCGroup && (
+                        <div className="p-3 bg-indigo-50/90 rounded-xl border border-indigo-200 text-xs text-indigo-950 flex flex-col sm:flex-row sm:items-center justify-between gap-2 shadow-2xs">
+                          <div className="flex items-start sm:items-center gap-2">
+                            <Building2 className="w-4 h-4 text-indigo-700 flex-shrink-0 mt-0.5 sm:mt-0" />
+                            <div>
+                              <span className="font-bold text-indigo-900">Multi-GC Bidding Sibling Group:</span>{' '}
+                              <span>
+                                Multiple general contractors (<strong>{uniqueGCs.join(', ')}</strong>) are bidding this same facility. One takeoff covers all quotes.
+                              </span>
+                            </div>
+                          </div>
+                        </div>
+                      )}
+
+                      <div className="flex items-start justify-between gap-4">
+                        <div className="flex items-start gap-3 flex-1">
+                          <button
+                            onClick={() => toggleGroup(groupId)}
+                            className="mt-1 text-slate-400 hover:text-slate-600 focus:outline-none"
+                          >
+                            {isExpanded ? (
+                              <ChevronDown className="w-5 h-5 text-slate-600" />
+                            ) : (
+                              <ChevronRight className="w-5 h-5" />
+                            )}
+                          </button>
+
+                          <div className="space-y-2 flex-1">
+                            {/* Categorization Sticker + Bid # + Subject */}
+                            <div className="flex items-center gap-2.5 flex-wrap">
+                              {renderStickerBadge(primary.sticker, primary)}
+
+                              {/* Internal Bid Number for ITBs */}
+                              {primary.sticker === 'ITB' && primary.bidNumber && (
+                                <span className="px-2.5 py-0.5 rounded text-xs font-mono font-bold bg-blue-100 text-blue-900 border border-blue-200 flex items-center gap-1">
+                                  <Hash className="w-3 h-3 text-blue-600" /> {primary.bidNumber}
+                                </span>
+                              )}
+
+                              {/* Matched Bid Number for Addendum / Won / Lost */}
+                              {primary.sticker !== 'ITB' && primary.matchedBidNumber && (
+                                <span className="px-2.5 py-0.5 rounded text-xs font-mono font-bold bg-purple-100 text-purple-900 border border-purple-200 flex items-center gap-1">
+                                  <LinkIcon className="w-3 h-3 text-purple-600" /> Attached to {primary.matchedBidNumber}
+                                </span>
+                              )}
+
+                              {/* Multi-GC Indicator Badge */}
+                              {isMultiGCGroup && (
+                                <span className="px-2.5 py-0.5 rounded text-xs font-bold bg-indigo-100 text-indigo-900 border border-indigo-200 flex items-center gap-1 shadow-2xs">
+                                  <Building2 className="w-3 h-3 text-indigo-700" /> Multi-GC ({uniqueGCs.length} Contractors)
+                                </span>
+                              )}
+
+                              {primary.jobCode && (
+                                <span className="px-2 py-0.5 rounded text-xs font-semibold bg-slate-100 text-slate-800">
+                                  {primary.jobCode}
+                                </span>
+                              )}
+
+                              <span className="font-semibold text-slate-900 text-base">
+                                {primary.subject}
+                              </span>
+
+                              {duplicates.length > 0 && (
+                                <span className="px-2 py-0.5 rounded-full text-xs font-medium bg-amber-100 text-amber-800 flex items-center gap-1">
+                                  <Copy className="w-3 h-3" />
+                                  {duplicates.length} Related Inquiry
+                                </span>
+                              )}
+                            </div>
 
                         {/* Forwarded Header / GC Details */}
                         <div className="text-xs text-slate-600 flex items-center gap-3 flex-wrap">
@@ -975,6 +1196,17 @@ export default function DispatchDashboard() {
                           Closed / Archived
                         </span>
                       )}
+
+                      {/* Link to Project (Calendar Manager Manual Intervention) */}
+                      <button
+                        type="button"
+                        onClick={() => openLinkModal(primary)}
+                        title="Link or merge this inquiry into an existing project folder (e.g. Multi-GC bidding)"
+                        className="p-2 rounded-lg border border-slate-300 bg-white hover:bg-slate-100 text-slate-700 text-xs font-semibold flex items-center gap-1 shadow-2xs transition-colors"
+                      >
+                        <LinkIcon className="w-3.5 h-3.5 text-blue-600" />
+                        <span className="hidden sm:inline">Link / Move</span>
+                      </button>
                     </div>
                   </div>
 
@@ -1043,6 +1275,36 @@ export default function DispatchDashboard() {
                               />
                             </div>
                           )}
+
+                          {/* Calendar Manager Link / Unlink Manual Controls */}
+                          <div className="flex items-center justify-between pt-2 border-t border-amber-200/60 flex-wrap gap-2">
+                            <div className="text-[11px] text-amber-800 flex items-center gap-1">
+                              <LinkIcon className="w-3 h-3 text-amber-600" />
+                              <span>
+                                Grouped under <strong>{primary.bidNumber || primary.subject.slice(0, 30)}</strong>
+                              </span>
+                            </div>
+                            <div className="flex items-center gap-2">
+                              <button
+                                type="button"
+                                onClick={() => openLinkModal(dup)}
+                                className="px-2.5 py-1 rounded bg-white hover:bg-amber-100 text-amber-900 border border-amber-300 text-[11px] font-semibold flex items-center gap-1 transition-colors shadow-2xs"
+                                title="Relink this email to a different project"
+                              >
+                                <ArrowRightLeft className="w-3 h-3 text-amber-700" />
+                                <span>Relink / Move</span>
+                              </button>
+                              <button
+                                type="button"
+                                onClick={() => handleUnlinkBid(dup.id)}
+                                className="px-2.5 py-1 rounded bg-white hover:bg-rose-50 text-rose-700 border border-rose-200 text-[11px] font-semibold flex items-center gap-1 transition-colors shadow-2xs"
+                                title="Unlink into standalone project"
+                              >
+                                <Unlink className="w-3 h-3 text-rose-600" />
+                                <span>Unlink from Project</span>
+                              </button>
+                            </div>
+                          </div>
                         </div>
                       ))}
                     </div>
@@ -1171,6 +1433,16 @@ export default function DispatchDashboard() {
                 <h3 className="text-lg font-bold text-slate-900 mt-0.5">
                   Change Classification & Adjust Workflow
                 </h3>
+                {(reviewingBid.isFlaggedDuplicate || reviewingBid.matchedBidNumber) && (
+                  <button
+                    type="button"
+                    onClick={() => handleUnlinkBid(reviewingBid.id)}
+                    className="mt-2 inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-bold text-rose-700 bg-rose-50 hover:bg-rose-100 border border-rose-200 transition-colors shadow-2xs"
+                  >
+                    <Unlink className="w-3.5 h-3.5 text-rose-600" />
+                    <span>Unlink from Group into Standalone Project</span>
+                  </button>
+                )}
               </div>
               <button
                 onClick={() => setReviewingBid(null)}
@@ -1329,112 +1601,199 @@ export default function DispatchDashboard() {
             </div>
 
             {/* 2. DYNAMIC WORKFLOW SECTION BASED ON SELECTED STICKER */}
-            {/* If ITB: Enable Estimator Assignment & Confirm Bid # & Due Date */}
+            {/* If ITB: Enable Estimator Assignment OR Multi-GC Sibling Link */}
             {targetSticker === 'ITB' && (
               <div className="p-4 bg-blue-50/70 rounded-xl border border-blue-200 text-xs space-y-3.5">
-                <div className="flex items-center gap-1.5 font-bold text-blue-900">
-                  <Hash className="w-4 h-4 text-blue-600" />
-                  <span>ITB Workflow: Internal Bid Number, Estimator & Calendar Due Date</span>
-                </div>
-                <p className="text-blue-800 text-[11px] leading-relaxed">
-                  This opportunity will be registered as a standalone bid (assigned its own <strong>BID-26-XXXX</strong> number). Confirm the bid due date to place it on the calendar and assign an estimator.
-                </p>
-
-                <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 pt-1">
-                  {/* Estimator Assignment */}
-                  <div className="space-y-1">
-                    <label className="text-[11px] font-bold text-blue-950 uppercase tracking-wider flex items-center gap-1">
-                      <Clock className="w-3 h-3 text-blue-600" />
-                      Assign Estimator:
-                    </label>
-                    <select
-                      value={selectedEstimatorForITB}
-                      onChange={(e) => setSelectedEstimatorForITB(e.target.value)}
-                      className="w-full text-xs border border-blue-300 rounded-lg p-2 bg-white text-slate-800 font-medium focus:ring-2 focus:ring-blue-500 shadow-2xs"
-                    >
-                      <option value="">Leave Unassigned (Needs Assignment)</option>
-                      {ESTIMATORS.map((est) => (
-                        <option key={est} value={est}>
-                          {est}
-                        </option>
-                      ))}
-                    </select>
+                <div className="flex items-center justify-between gap-2 flex-wrap">
+                  <div className="flex items-center gap-1.5 font-bold text-blue-900">
+                    <Hash className="w-4 h-4 text-blue-600" />
+                    <span>ITB Routing & Multi-GC Sibling Handling</span>
                   </div>
 
-                  {/* Calendar Bid Due Date */}
-                  <div className="space-y-1">
-                    <label className="text-[11px] font-bold text-blue-950 uppercase tracking-wider flex items-center gap-1">
-                      <CalendarIcon className="w-3 h-3 text-blue-600" />
-                      Assign Calendar Due Date:
+                  {/* Toggle between Standalone ITB vs Multi-GC Sibling */}
+                  <div className="flex items-center gap-3 bg-white px-3 py-1.5 rounded-lg border border-blue-200 shadow-2xs">
+                    <label className="flex items-center gap-1.5 cursor-pointer font-bold text-[11px] text-blue-900">
+                      <input
+                        type="radio"
+                        name="itbMode"
+                        checked={!linkToExistingItb}
+                        onChange={() => setLinkToExistingItb(false)}
+                        className="text-blue-600 focus:ring-blue-500"
+                      />
+                      <span>Standalone Project</span>
                     </label>
-                    <input
-                      type="date"
-                      value={selectedDueDateForITB}
-                      onChange={(e) => setSelectedDueDateForITB(e.target.value)}
-                      className="w-full text-xs border border-blue-300 rounded-lg p-2 bg-white text-slate-800 font-medium focus:ring-2 focus:ring-blue-500 shadow-2xs"
-                    />
+                    <label className="flex items-center gap-1.5 cursor-pointer font-bold text-[11px] text-indigo-900">
+                      <input
+                        type="radio"
+                        name="itbMode"
+                        checked={linkToExistingItb}
+                        onChange={() => setLinkToExistingItb(true)}
+                        className="text-indigo-600 focus:ring-indigo-500"
+                      />
+                      <span>Multi-GC Sibling (Same Job Site)</span>
+                    </label>
                   </div>
                 </div>
 
-                {/* AI Detected Due Date Suggestion Chip */}
-                {reviewingBid.normalizedAiDueDate && (
-                  <div className="p-2.5 rounded-lg bg-indigo-50 border border-indigo-200 text-[11px] text-indigo-950 flex items-center justify-between gap-2 flex-wrap">
-                    <div className="flex items-center gap-1.5">
-                      <Sparkles className="w-4 h-4 text-indigo-600 flex-shrink-0" />
-                      <span>
-                        <strong>AI Detected Due Date in Email:</strong>{' '}
-                        <span className="font-semibold text-indigo-800">
-                          {formatFriendlyDate(reviewingBid.normalizedAiDueDate)}
-                        </span>
-                        {reviewingBid.rawAiDueDate && reviewingBid.rawAiDueDate !== reviewingBid.normalizedAiDueDate && (
-                          <span className="text-slate-500 text-[10px]"> ({reviewingBid.rawAiDueDate})</span>
-                        )}
-                      </span>
+                {!linkToExistingItb ? (
+                  <>
+                    <p className="text-blue-800 text-[11px] leading-relaxed">
+                      This opportunity will be registered as a standalone bid (assigned its own <strong>BID-26-XXXX</strong> number). Confirm the bid due date to place it on the calendar and assign an estimator.
+                    </p>
+
+                    <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 pt-1">
+                      {/* Estimator Assignment */}
+                      <div className="space-y-1">
+                        <label className="text-[11px] font-bold text-blue-950 uppercase tracking-wider flex items-center gap-1">
+                          <Clock className="w-3 h-3 text-blue-600" />
+                          Assign Estimator:
+                        </label>
+                        <select
+                          value={selectedEstimatorForITB}
+                          onChange={(e) => setSelectedEstimatorForITB(e.target.value)}
+                          className="w-full text-xs border border-blue-300 rounded-lg p-2 bg-white text-slate-800 font-medium focus:ring-2 focus:ring-blue-500 shadow-2xs"
+                        >
+                          <option value="">Leave Unassigned (Needs Assignment)</option>
+                          {ESTIMATORS.map((est) => (
+                            <option key={est} value={est}>
+                              {est}
+                            </option>
+                          ))}
+                        </select>
+                      </div>
+
+                      {/* Calendar Bid Due Date */}
+                      <div className="space-y-1">
+                        <label className="text-[11px] font-bold text-blue-950 uppercase tracking-wider flex items-center gap-1">
+                          <CalendarIcon className="w-3 h-3 text-blue-600" />
+                          Assign Calendar Due Date:
+                        </label>
+                        <input
+                          type="date"
+                          value={selectedDueDateForITB}
+                          onChange={(e) => setSelectedDueDateForITB(e.target.value)}
+                          className="w-full text-xs border border-blue-300 rounded-lg p-2 bg-white text-slate-800 font-medium focus:ring-2 focus:ring-blue-500 shadow-2xs"
+                        />
+                      </div>
                     </div>
 
-                    <button
-                      type="button"
-                      onClick={() => setSelectedDueDateForITB(reviewingBid.normalizedAiDueDate || '')}
-                      className="px-2.5 py-1 rounded bg-indigo-600 hover:bg-indigo-700 text-white font-bold text-[10px] shadow-2xs transition-colors"
-                    >
-                      Use Suggested Date
-                    </button>
+                    {/* AI Detected Due Date Suggestion Chip */}
+                    {reviewingBid.normalizedAiDueDate && (
+                      <div className="p-2.5 rounded-lg bg-indigo-50 border border-indigo-200 text-[11px] text-indigo-950 flex items-center justify-between gap-2 flex-wrap">
+                        <div className="flex items-center gap-1.5">
+                          <Sparkles className="w-4 h-4 text-indigo-600 flex-shrink-0" />
+                          <span>
+                            <strong>AI Detected Due Date in Email:</strong>{' '}
+                            <span className="font-semibold text-indigo-800">
+                              {formatFriendlyDate(reviewingBid.normalizedAiDueDate)}
+                            </span>
+                            {reviewingBid.rawAiDueDate && reviewingBid.rawAiDueDate !== reviewingBid.normalizedAiDueDate && (
+                              <span className="text-slate-500 text-[10px]"> ({reviewingBid.rawAiDueDate})</span>
+                            )}
+                          </span>
+                        </div>
+
+                        <button
+                          type="button"
+                          onClick={() => setSelectedDueDateForITB(reviewingBid.normalizedAiDueDate || '')}
+                          className="px-2.5 py-1 rounded bg-indigo-600 hover:bg-indigo-700 text-white font-bold text-[10px] shadow-2xs transition-colors"
+                        >
+                          Use Suggested Date
+                        </button>
+                      </div>
+                    )}
+                  </>
+                ) : (
+                  <div className="space-y-2.5">
+                    <p className="text-indigo-900 text-[11px] leading-relaxed">
+                      <strong>Multi-GC Sibling:</strong> Another contractor is bidding this same project. Attaching this ITB will group both contractors under the chosen BID folder so the same estimator handles the takeoff and doesn't quote it twice.
+                    </p>
+
+                    <div className="relative">
+                      <Search className="w-3.5 h-3.5 absolute left-2.5 top-2.5 text-slate-400" />
+                      <input
+                        type="text"
+                        placeholder="Search active project folder to attach to..."
+                        value={bidSearchQuery}
+                        onChange={(e) => setBidSearchQuery(e.target.value)}
+                        className="w-full text-xs pl-8 pr-3 py-1.5 border border-indigo-300 rounded-lg bg-white placeholder-slate-400 focus:outline-none focus:ring-2 focus:ring-indigo-500"
+                      />
+                    </div>
+
+                    <div className="max-h-44 overflow-y-auto divide-y divide-indigo-100 border border-indigo-200 rounded-lg bg-white">
+                      {filteredBidsForLinking.length === 0 ? (
+                        <p className="p-3 text-slate-400 text-center text-xs">No active projects found.</p>
+                      ) : (
+                        filteredBidsForLinking.map((b) => {
+                          const isChosen = selectedBidNumberToLink === b.bidNumber;
+                          return (
+                            <div
+                              key={b.id}
+                              onClick={() => setSelectedBidNumberToLink(b.bidNumber!)}
+                              className={`p-2.5 flex items-center justify-between cursor-pointer transition-colors text-xs ${
+                                isChosen ? 'bg-indigo-100/80 text-indigo-950 font-bold' : 'hover:bg-indigo-50/50 text-slate-700'
+                              }`}
+                            >
+                              <div className="space-y-0.5">
+                                <div className="flex items-center gap-1.5">
+                                  <span className="font-mono px-1.5 py-0.5 rounded bg-indigo-200 text-indigo-900 text-[10px]">
+                                    {b.bidNumber}
+                                  </span>
+                                  <span className="truncate max-w-[280px]">{b.projectName || b.subject}</span>
+                                </div>
+                                <p className="text-[10px] text-slate-500">
+                                  Contractor: {b.clientCompany || b.senderName} • Estimator: {b.assignedEstimator || 'Unassigned'}
+                                </p>
+                              </div>
+                              {isChosen && <Check className="w-4 h-4 text-indigo-600 flex-shrink-0" />}
+                            </div>
+                          );
+                        })
+                      )}
+                    </div>
                   </div>
                 )}
               </div>
             )}
 
-            {/* If Addendum, Won, or Lost: Select Existing Bid Number */}
-            {(targetSticker === 'Addendum' || targetSticker === 'Won' || targetSticker === 'Lost') && (
-              <div className="p-4 bg-purple-50/70 rounded-xl border border-purple-200 text-xs space-y-3">
+            {/* If Addendum: Link to Bid Folder + Due Date Revision */}
+            {targetSticker === 'Addendum' && (
+              <div className="p-4 bg-purple-50/70 rounded-xl border border-purple-200 text-xs space-y-3.5">
                 <div className="flex items-center gap-1.5 font-bold text-purple-900">
                   <LinkIcon className="w-4 h-4 text-purple-600" />
-                  <span>
-                    {targetSticker === 'Addendum' && 'Addendum Workflow: Link to Existing Bid Folder'}
-                    {targetSticker === 'Won' && 'Won Workflow: Match to Bid & Prepare for Job Promotion'}
-                    {targetSticker === 'Lost' && 'Lost Workflow: Match to Bid & Archive'}
-                  </span>
+                  <span>Addendum Workflow: Link to Bid Folder & Due Date Revision</span>
                 </div>
                 <p className="text-purple-800 text-[11px] leading-relaxed">
-                  {targetSticker === 'Addendum' &&
-                    'This email will be attached directly to the chosen bid folder. No separate estimator assignment will be created.'}
-                  {targetSticker === 'Won' &&
-                    'This will mark the selected bid as WON and unlock the Promote to Active Job transition.'}
-                  {targetSticker === 'Lost' &&
-                    'This will close the selected bid as Lost and archive it from active estimating.'}
+                  Addendums attach directly to an active bid folder so the estimator receives updated plans/scopes without creating separate bids.
                 </p>
 
-                <div className="space-y-2">
-                  <div className="flex items-center justify-between">
-                    <label className="text-[11px] font-bold text-purple-950 uppercase tracking-wider">
-                      Select Active Bid to Attach To:
-                    </label>
-                    <span className="text-[10px] text-purple-600 font-medium">
-                      {activeITBsWithNumbers.length} Active Bids
-                    </span>
+                {/* Due Date Extension Flag & Input */}
+                <div className="p-3 bg-white rounded-lg border border-purple-200 space-y-2">
+                  <label className="text-[11px] font-bold text-purple-950 uppercase tracking-wider flex items-center gap-1">
+                    <CalendarIcon className="w-3.5 h-3.5 text-purple-600" />
+                    Revised Bid Due Date (if modified in addendum):
+                  </label>
+                  <div className="flex items-center gap-2">
+                    <input
+                      type="date"
+                      value={addendumRevisedDueDateInput}
+                      onChange={(e) => setAddendumRevisedDueDateInput(e.target.value)}
+                      className="text-xs border border-purple-300 rounded-lg p-2 bg-white text-slate-800 font-medium focus:ring-2 focus:ring-purple-500 shadow-2xs"
+                    />
+                    {addendumRevisedDueDateInput ? (
+                      <span className="text-[11px] font-semibold text-purple-700">
+                        Will update calendar due date across project to {formatFriendlyDate(addendumRevisedDueDateInput)}
+                      </span>
+                    ) : (
+                      <span className="text-[10px] text-slate-400">Leave blank if no due date change</span>
+                    )}
                   </div>
+                </div>
 
-                  {/* Search box if many bids */}
+                <div className="space-y-2">
+                  <label className="text-[11px] font-bold text-purple-950 uppercase tracking-wider">
+                    Select Active Bid Folder to Attach To:
+                  </label>
                   <div className="relative">
                     <Search className="w-3.5 h-3.5 absolute left-2.5 top-2.5 text-slate-400" />
                     <input
@@ -1446,12 +1805,9 @@ export default function DispatchDashboard() {
                     />
                   </div>
 
-                  {/* Bid Selection Dropdown / Radio list */}
                   <div className="max-h-44 overflow-y-auto divide-y divide-purple-100 border border-purple-200 rounded-lg bg-white">
                     {filteredBidsForLinking.length === 0 ? (
-                      <p className="p-3 text-slate-400 text-center text-xs">
-                        No matching active bids found.
-                      </p>
+                      <p className="p-3 text-slate-400 text-center text-xs">No matching active bids found.</p>
                     ) : (
                       filteredBidsForLinking.map((b) => {
                         const isChosen = selectedBidNumberToLink === b.bidNumber;
@@ -1460,9 +1816,7 @@ export default function DispatchDashboard() {
                             key={b.id}
                             onClick={() => setSelectedBidNumberToLink(b.bidNumber!)}
                             className={`p-2.5 flex items-center justify-between cursor-pointer transition-colors text-xs ${
-                              isChosen
-                                ? 'bg-purple-100/70 text-purple-950 font-bold'
-                                : 'hover:bg-purple-50/50 text-slate-700'
+                              isChosen ? 'bg-purple-100/70 text-purple-950 font-bold' : 'hover:bg-purple-50/50 text-slate-700'
                             }`}
                           >
                             <div className="space-y-0.5">
@@ -1470,12 +1824,10 @@ export default function DispatchDashboard() {
                                 <span className="font-mono px-1.5 py-0.5 rounded bg-purple-200 text-purple-900 text-[10px]">
                                   {b.bidNumber}
                                 </span>
-                                <span className="truncate max-w-[280px]">
-                                  {b.subject}
-                                </span>
+                                <span className="truncate max-w-[280px]">{b.projectName || b.subject}</span>
                               </div>
                               <p className="text-[10px] text-slate-500">
-                                Client: {b.senderName} • Assigned: {b.assignedEstimator || 'Unassigned'}
+                                Client: {b.clientCompany || b.senderName} • Estimator: {b.assignedEstimator || 'Unassigned'}
                               </p>
                             </div>
                             {isChosen && <Check className="w-4 h-4 text-purple-600 flex-shrink-0" />}
@@ -1488,15 +1840,151 @@ export default function DispatchDashboard() {
               </div>
             )}
 
-            {/* If Spam: Notice */}
-              {targetSticker === 'Spam' && (
-                <div className="p-4 bg-slate-100 rounded-xl border border-slate-300 text-xs text-slate-700 space-y-1">
-                  <p className="font-bold text-slate-900">Spam / Noise Workflow:</p>
-                  <p className="text-[11px] leading-relaxed">
-                    This email will be removed from your active dispatch queue and archived into the <strong>Spam / Noise</strong> tab.
-                  </p>
+            {/* If Won: Match to Bid + GC Won Prime Contract Option */}
+            {targetSticker === 'Won' && (
+              <div className="p-4 bg-emerald-50/70 rounded-xl border border-emerald-200 text-xs space-y-3.5">
+                <div className="flex items-center gap-1.5 font-bold text-emerald-900">
+                  <Trophy className="w-4 h-4 text-emerald-600" />
+                  <span>Won Workflow: Match to Bid & Prime Award Status</span>
                 </div>
-              )}
+
+                {/* GC Won Prime Contract Checkbox */}
+                <div className="p-3 bg-white rounded-lg border border-emerald-200 space-y-1.5">
+                  <label className="flex items-start gap-2.5 cursor-pointer">
+                    <input
+                      type="checkbox"
+                      checked={isGcWonPrimeCheckbox}
+                      onChange={(e) => setIsGcWonPrimeCheckbox(e.target.checked)}
+                      className="mt-0.5 rounded border-emerald-400 text-emerald-600 focus:ring-emerald-500"
+                    />
+                    <div>
+                      <span className="font-bold text-emerald-950 text-xs">
+                        GC Won Prime Contract (Subcontractor Quote Pending)
+                      </span>
+                      <p className="text-[11px] text-emerald-800 leading-snug">
+                        The general contractor won the overall project prime contract and Partition Plus is currently waiting or negotiating to be awarded our subcontractor package.
+                      </p>
+                    </div>
+                  </label>
+                </div>
+
+                <div className="space-y-2">
+                  <label className="text-[11px] font-bold text-emerald-950 uppercase tracking-wider">
+                    Select Corresponding Active Bid Folder:
+                  </label>
+                  <div className="relative">
+                    <Search className="w-3.5 h-3.5 absolute left-2.5 top-2.5 text-slate-400" />
+                    <input
+                      type="text"
+                      placeholder="Search active bids by project, GC, or number..."
+                      value={bidSearchQuery}
+                      onChange={(e) => setBidSearchQuery(e.target.value)}
+                      className="w-full text-xs pl-8 pr-3 py-1.5 border border-emerald-300 rounded-lg bg-white placeholder-slate-400 focus:outline-none focus:ring-2 focus:ring-emerald-500"
+                    />
+                  </div>
+
+                  <div className="max-h-44 overflow-y-auto divide-y divide-emerald-100 border border-emerald-200 rounded-lg bg-white">
+                    {filteredBidsForLinking.length === 0 ? (
+                      <p className="p-3 text-slate-400 text-center text-xs">No matching active bids found.</p>
+                    ) : (
+                      filteredBidsForLinking.map((b) => {
+                        const isChosen = selectedBidNumberToLink === b.bidNumber;
+                        return (
+                          <div
+                            key={b.id}
+                            onClick={() => setSelectedBidNumberToLink(b.bidNumber!)}
+                            className={`p-2.5 flex items-center justify-between cursor-pointer transition-colors text-xs ${
+                              isChosen ? 'bg-emerald-100/70 text-emerald-950 font-bold' : 'hover:bg-emerald-50/50 text-slate-700'
+                            }`}
+                          >
+                            <div className="space-y-0.5">
+                              <div className="flex items-center gap-1.5">
+                                <span className="font-mono px-1.5 py-0.5 rounded bg-emerald-200 text-emerald-900 text-[10px]">
+                                  {b.bidNumber}
+                                </span>
+                                <span className="truncate max-w-[280px]">{b.projectName || b.subject}</span>
+                              </div>
+                              <p className="text-[10px] text-slate-500">
+                                Client: {b.clientCompany || b.senderName} • Assigned: {b.assignedEstimator || 'Unassigned'}
+                              </p>
+                            </div>
+                            {isChosen && <Check className="w-4 h-4 text-emerald-600 flex-shrink-0" />}
+                          </div>
+                        );
+                      })
+                    )}
+                  </div>
+                </div>
+              </div>
+            )}
+
+            {/* If Lost: Match to Bid & Archive */}
+            {targetSticker === 'Lost' && (
+              <div className="p-4 bg-rose-50/70 rounded-xl border border-rose-200 text-xs space-y-3">
+                <div className="flex items-center gap-1.5 font-bold text-rose-900">
+                  <XCircle className="w-4 h-4 text-rose-600" />
+                  <span>Lost Workflow: Match to Bid & Archive</span>
+                </div>
+                <p className="text-rose-800 text-[11px] leading-relaxed">
+                  This will close the selected bid folder as Lost and archive it from active estimating queues.
+                </p>
+
+                <div className="space-y-2">
+                  <div className="relative">
+                    <Search className="w-3.5 h-3.5 absolute left-2.5 top-2.5 text-slate-400" />
+                    <input
+                      type="text"
+                      placeholder="Search active bids by project, GC, or number..."
+                      value={bidSearchQuery}
+                      onChange={(e) => setBidSearchQuery(e.target.value)}
+                      className="w-full text-xs pl-8 pr-3 py-1.5 border border-rose-300 rounded-lg bg-white placeholder-slate-400 focus:outline-none focus:ring-2 focus:ring-rose-500"
+                    />
+                  </div>
+
+                  <div className="max-h-44 overflow-y-auto divide-y divide-rose-100 border border-rose-200 rounded-lg bg-white">
+                    {filteredBidsForLinking.length === 0 ? (
+                      <p className="p-3 text-slate-400 text-center text-xs">No matching active bids found.</p>
+                    ) : (
+                      filteredBidsForLinking.map((b) => {
+                        const isChosen = selectedBidNumberToLink === b.bidNumber;
+                        return (
+                          <div
+                            key={b.id}
+                            onClick={() => setSelectedBidNumberToLink(b.bidNumber!)}
+                            className={`p-2.5 flex items-center justify-between cursor-pointer transition-colors text-xs ${
+                              isChosen ? 'bg-rose-100/70 text-rose-950 font-bold' : 'hover:bg-rose-50/50 text-slate-700'
+                            }`}
+                          >
+                            <div className="space-y-0.5">
+                              <div className="flex items-center gap-1.5">
+                                <span className="font-mono px-1.5 py-0.5 rounded bg-rose-200 text-rose-900 text-[10px]">
+                                  {b.bidNumber}
+                                </span>
+                                <span className="truncate max-w-[280px]">{b.projectName || b.subject}</span>
+                              </div>
+                              <p className="text-[10px] text-slate-500">
+                                Client: {b.clientCompany || b.senderName} • Assigned: {b.assignedEstimator || 'Unassigned'}
+                              </p>
+                            </div>
+                            {isChosen && <Check className="w-4 h-4 text-rose-600 flex-shrink-0" />}
+                          </div>
+                        );
+                      })
+                    )}
+                  </div>
+                </div>
+              </div>
+            )}
+
+            {/* If Spam: Notice */}
+            {targetSticker === 'Spam' && (
+              <div className="p-4 bg-slate-100 rounded-xl border border-slate-300 text-xs text-slate-700 space-y-1">
+                <p className="font-bold text-slate-900">Spam / Noise Workflow:</p>
+                <p className="text-[11px] leading-relaxed">
+                  This email will be removed from your active dispatch queue and archived into the <strong>Spam / Noise</strong> tab.
+                </p>
+              </div>
+            )}
             </div>
 
             {/* Modal Actions */}
@@ -1511,10 +1999,126 @@ export default function DispatchDashboard() {
               <button
                 type="button"
                 onClick={handleSaveReclassification}
-                disabled={isSavingReclassification || (targetSticker !== 'ITB' && targetSticker !== 'Spam' && !selectedBidNumberToLink)}
+                disabled={
+                  isSavingReclassification ||
+                  (targetSticker !== 'ITB' && targetSticker !== 'Spam' && !selectedBidNumberToLink) ||
+                  (targetSticker === 'ITB' && linkToExistingItb && !selectedBidNumberToLink)
+                }
                 className="px-4 py-2 rounded-lg text-xs font-bold bg-blue-600 hover:bg-blue-700 text-white shadow-sm transition-colors disabled:opacity-50 flex items-center gap-1.5"
               >
                 {isSavingReclassification ? 'Updating Workflow...' : 'Save & Update Workflow'}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* STANDALONE PROJECT LINK / RELINK MODAL FOR CALENDAR MANAGER */}
+      {linkingBid && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-slate-900/60 backdrop-blur-sm animate-in fade-in">
+          <div className="bg-white rounded-2xl shadow-2xl border border-slate-200 max-w-xl w-full p-6 space-y-4 animate-in zoom-in-95">
+            <div className="flex items-start justify-between pb-3 border-b border-slate-100">
+              <div>
+                <span className="text-xs font-bold text-blue-600 uppercase tracking-wider flex items-center gap-1">
+                  <Building2 className="w-3.5 h-3.5" /> Project Folder Linker
+                </span>
+                <h3 className="text-lg font-bold text-slate-900 mt-0.5">
+                  Link Email into Existing Project
+                </h3>
+              </div>
+              <button
+                onClick={() => setLinkingBid(null)}
+                className="text-slate-400 hover:text-slate-600 p-1 rounded-lg hover:bg-slate-100 transition-colors"
+              >
+                <X className="w-5 h-5" />
+              </button>
+            </div>
+
+            {/* Email Being Linked */}
+            <div className="p-3 bg-slate-50 rounded-xl border border-slate-200 text-xs space-y-1">
+              <div className="font-bold text-slate-900 truncate">{linkingBid.subject}</div>
+              <div className="text-slate-600">
+                Sender: {linkingBid.senderName} ({linkingBid.senderEmail})
+                {linkingBid.clientCompany ? ` • Contractor: ${linkingBid.clientCompany}` : ''}
+              </div>
+              {linkingBid.projectName && (
+                <div className="text-slate-600">
+                  Job Site: <strong>{linkingBid.projectName}</strong>
+                </div>
+              )}
+            </div>
+
+            <p className="text-xs text-slate-600 leading-relaxed">
+              Select the active project folder (<strong>BID-26-XXXX</strong>) to attach this email to. If multiple contractors are bidding on the same job, linking them together ensures the same estimator prices the project and doesn't duplicate takeoffs.
+            </p>
+
+            {/* Project Search Input */}
+            <div className="relative">
+              <Search className="w-3.5 h-3.5 absolute left-3 top-1/2 -translate-y-1/2 text-slate-400" />
+              <input
+                type="text"
+                placeholder="Search by project name, GC contractor, or BID number..."
+                value={relinkSearchQuery}
+                onChange={(e) => setRelinkSearchQuery(e.target.value)}
+                className="w-full text-xs pl-8 pr-3 py-2 border border-slate-300 rounded-lg bg-white placeholder-slate-400 focus:outline-none focus:ring-2 focus:ring-blue-500"
+              />
+            </div>
+
+            {/* Project Selection List */}
+            <div className="max-h-56 overflow-y-auto divide-y divide-slate-100 border border-slate-200 rounded-xl bg-white">
+              {filteredBidsForRelinking.length === 0 ? (
+                <div className="p-4 text-center text-slate-400 text-xs">
+                  No matching active bids found.
+                </div>
+              ) : (
+                filteredBidsForRelinking.map((b) => {
+                  const isChosen = targetBidNumberForLink === b.bidNumber;
+                  return (
+                    <div
+                      key={b.id}
+                      onClick={() => setTargetBidNumberForLink(b.bidNumber!)}
+                      className={`p-3 flex items-center justify-between cursor-pointer transition-colors text-xs ${
+                        isChosen
+                          ? 'bg-blue-50/80 text-blue-950 font-bold border-l-4 border-blue-600'
+                          : 'hover:bg-slate-50 text-slate-700'
+                      }`}
+                    >
+                      <div className="space-y-0.5">
+                        <div className="flex items-center gap-1.5 flex-wrap">
+                          <span className="font-mono px-1.5 py-0.5 rounded bg-blue-100 text-blue-900 text-[10px] font-bold">
+                            {b.bidNumber}
+                          </span>
+                          <span className="font-semibold text-slate-900 truncate max-w-[340px]">
+                            {b.projectName || b.subject}
+                          </span>
+                        </div>
+                        <div className="text-[11px] text-slate-500">
+                          GC: {b.clientCompany || b.senderName} • Estimator: {b.assignedEstimator || 'Unassigned'} • Due: {b.bidDueDate ? formatFriendlyDate(b.bidDueDate) : 'No due date'}
+                        </div>
+                      </div>
+                      {isChosen && <Check className="w-4 h-4 text-blue-600 flex-shrink-0" />}
+                    </div>
+                  );
+                })
+              )}
+            </div>
+
+            {/* Actions */}
+            <div className="flex items-center justify-end gap-3 pt-3 border-t border-slate-100">
+              <button
+                type="button"
+                onClick={() => setLinkingBid(null)}
+                className="px-4 py-2 rounded-lg text-xs font-semibold text-slate-600 hover:bg-slate-100 transition-colors"
+              >
+                Cancel
+              </button>
+              <button
+                type="button"
+                onClick={() => handleExecuteLink(linkingBid.id, targetBidNumberForLink)}
+                disabled={!targetBidNumberForLink || isLinkingLoading}
+                className="px-4 py-2 rounded-lg text-xs font-bold bg-blue-600 hover:bg-blue-700 text-white shadow-sm transition-colors disabled:opacity-50 flex items-center gap-1.5"
+              >
+                {isLinkingLoading ? 'Linking...' : 'Confirm & Link into Project'}
               </button>
             </div>
           </div>

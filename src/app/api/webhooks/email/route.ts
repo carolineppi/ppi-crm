@@ -177,6 +177,10 @@ export async function POST(request: NextRequest) {
         matchedBidNumber: null,
         matchConfidence: 0,
         matchReason: null,
+        isDueDateRevised: false,
+        revisedDueDate: null,
+        dueDateRevisionNotes: null,
+        isGcWonPrime: false,
       };
     } else {
       // Query active ITBs to supply context to AI for Addendum / Won / Lost matching
@@ -246,7 +250,7 @@ export async function POST(request: NextRequest) {
       }
     }
 
-    // 4. Run Deduplication / Grouping
+    // 4. Run Deduplication / Grouping (including cross-contractor project site matching)
     const duplicateEvaluation = await detectAndGroupDuplicates(
       {
         subject: ai.originalSubject || payload.subject,
@@ -254,6 +258,10 @@ export async function POST(request: NextRequest) {
         senderName: effectiveSenderName,
         bodyText,
         attachments: processedAttachments,
+        projectName: effectiveProjectName,
+        projectAddress: ai.projectAddress,
+        clientCompany: effectiveClientCompany,
+        emailIntent: ai.sticker,
       },
       supabase
     );
@@ -340,6 +348,15 @@ export async function POST(request: NextRequest) {
       original_sender_name: ai.originalSenderName,
       scope_summary: ai.scopeSummary,
       ai_analysis: ai,
+
+      // Due date revisions & GC Won prime indicators
+      is_due_date_revised: Boolean(ai.isDueDateRevised),
+      revised_due_date: (() => {
+        if (!ai.revisedDueDate) return null;
+        const norm = normalizeDateToYyyyMmDd(ai.revisedDueDate);
+        return norm ? new Date(`${norm}T17:00:00Z`).toISOString() : null;
+      })(),
+      is_gc_won_prime: Boolean(ai.isGcWonPrime || (ai.sticker === 'Won' && !ai.matchedBidNumber)),
 
       triage_status: triageStatus,
       priority: ai.sticker === 'Won' ? 'urgent' : 'normal',

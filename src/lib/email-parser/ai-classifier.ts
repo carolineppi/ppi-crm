@@ -62,12 +62,12 @@ export const aiEmailAnalysisSchema = z.object({
       '1-2 sentence executive summary of the trade package or work requested (e.g. Toilet partitions, Lockers, Fire extinguishers)'
     ),
 
-  // 4. Intelligent Matching to Existing Internal Bid Numbers (for Addendum, Won, Lost)
+  // 4. Intelligent Matching to Existing Internal Bid Numbers (for Addendum, Won, Lost, and Multi-GC ITBs)
   matchedBidNumber: z
     .string()
     .nullable()
     .describe(
-      'If this is an Addendum, Won, or Lost, the matching internal BID-YY-XXXX number from active bids list, or null if no match'
+      'If this matches an existing project (Addendum, Won, Lost, or another GC bidding the SAME project name/address), the matching internal BID-YY-XXXX number, or null if new'
     ),
   matchConfidence: z
     .number()
@@ -78,8 +78,26 @@ export const aiEmailAnalysisSchema = z.object({
     .string()
     .nullable()
     .describe(
-      'Explanation of why this email matches the existing bid (e.g. "Matches project name Kroger #399 and contractor")'
+      'Explanation of why this email matches the existing bid (e.g. "Same project name Kroger #399 and address, different bidding contractor")'
     ),
+
+  // 5. Due Date Revision Detection (Crucial for Addendums)
+  isDueDateRevised: z
+    .boolean()
+    .describe('True if this email is an addendum/bulletin that specifically postpones, extends, or updates the bid due date'),
+  revisedDueDate: z
+    .string()
+    .nullable()
+    .describe('The new or postponed bid due date/time if explicitly updated in this email, else null'),
+  dueDateRevisionNotes: z
+    .string()
+    .nullable()
+    .describe('Brief explanation of the date change (e.g. "Bid date extended from 11/15 to 11/22 per Addendum 2")'),
+
+  // 6. GC Prime Award Status
+  isGcWonPrime: z
+    .boolean()
+    .describe('True if the General Contractor has won the prime contract and is now collecting/finalizing subcontractor quotes or awarding our quote'),
 });
 
 export type AIEmailAnalysis = z.infer<typeof aiEmailAnalysisSchema>;
@@ -265,5 +283,9 @@ function buildFallbackAnalysis(
     matchedBidNumber: null,
     matchConfidence: 0,
     matchReason: null,
+    isDueDateRevised: false,
+    revisedDueDate: null,
+    dueDateRevisionNotes: null,
+    isGcWonPrime: false,
   };
 }
