@@ -1,6 +1,6 @@
 'use client';
 
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useMemo } from 'react';
 import Link from 'next/link';
 import {
   Brain,
@@ -101,6 +101,43 @@ export default function ModelLabPage() {
   useEffect(() => {
     fetchMetrics();
   }, []);
+
+  const perClassList = useMemo<PerClassMetric[]>(() => {
+    if (!metrics) return [];
+    if (Array.isArray(metrics.per_class_metrics)) return metrics.per_class_metrics;
+    return Object.entries(metrics.per_class_metrics || {}).map(([cls, data]: [string, any]) => ({
+      label: cls,
+      support: data.support ?? 0,
+      precision: Math.round(((data.precision ?? 0) <= 1 ? (data.precision ?? 0) * 100 : (data.precision ?? 0)) * 10) / 10,
+      recall: Math.round(((data.recall ?? 0) <= 1 ? (data.recall ?? 0) * 100 : (data.recall ?? 0)) * 10) / 10,
+      f1: Math.round(((data.f1 ?? 0) <= 1 ? (data.f1 ?? 0) * 100 : (data.f1 ?? 0)) * 10) / 10,
+    })).sort((a, b) => b.support - a.support);
+  }, [metrics]);
+
+  const categoryList = useMemo<string[]>(() => {
+    if (!metrics) return [];
+    return metrics.categories || (metrics as any).classes || [];
+  }, [metrics]);
+
+  const misclassList = useMemo<Misclassification[]>(() => {
+    if (!metrics) return [];
+    if (Array.isArray(metrics.misclassifications)) return metrics.misclassifications;
+    if (Array.isArray((metrics as any).misclassified_samples)) {
+      return (metrics as any).misclassified_samples.map((s: any) => ({
+        id: String(s.id || ''),
+        subject: s.subject || 'No Subject',
+        sender: s.snippet || '',
+        actual: s.true_label || s.actual || '',
+        predicted: s.predicted_label || s.predicted || '',
+        confidence: s.confidence || 0,
+      }));
+    }
+    return [];
+  }, [metrics]);
+
+  const displayAccuracy = metrics ? (metrics.test_accuracy ?? Math.round(((metrics as any).accuracy || 0) * 1000) / 10) : 0;
+  const displayWeightedF1 = metrics ? (metrics.weighted_f1 ?? Math.round(((metrics as any).weighted_f1 || 0) * 1000) / 10) : 0;
+  const displayMacroF1 = metrics ? (metrics.macro_f1 ?? Math.round(((metrics as any).macro_f1 || 0) * 1000) / 10) : 0;
 
   const handleTestPredict = async () => {
     setIsPredicting(true);
@@ -225,7 +262,7 @@ export default function ModelLabPage() {
                 <Target className="w-3.5 h-3.5 text-emerald-600" /> 80/20 Test Accuracy
               </span>
               <div className="text-3xl font-extrabold text-slate-900 tracking-tight">
-                {metrics.test_accuracy}%
+                {displayAccuracy}%
               </div>
               <p className="text-[11px] text-emerald-700 font-semibold">
                 Evaluated on held-out test data
@@ -237,10 +274,10 @@ export default function ModelLabPage() {
                 <TrendingUp className="w-3.5 h-3.5 text-blue-600" /> Weighted F1-Score
               </span>
               <div className="text-3xl font-extrabold text-slate-900 tracking-tight">
-                {metrics.weighted_f1}%
+                {displayWeightedF1}%
               </div>
               <p className="text-[11px] text-slate-500 font-medium">
-                Macro F1: {metrics.macro_f1}%
+                Macro F1: {displayMacroF1}%
               </p>
             </div>
 
@@ -335,7 +372,7 @@ export default function ModelLabPage() {
                     </tr>
                   </thead>
                   <tbody className="divide-y divide-slate-100">
-                    {metrics.per_class_metrics.map((row) => (
+                    {perClassList.map((row) => (
                       <tr key={row.label} className="hover:bg-slate-50/70 transition-colors">
                         <td className="py-2.5 px-3 font-semibold text-slate-800">
                           {row.label}
@@ -385,9 +422,9 @@ export default function ModelLabPage() {
 
               <div className="overflow-x-auto">
                 <div className="min-w-[420px]">
-                  <div className="grid text-[10px] font-bold text-slate-500 text-center mb-1" style={{ gridTemplateColumns: `80px repeat(${metrics.categories.length}, minmax(0, 1fr))` }}>
+                  <div className="grid text-[10px] font-bold text-slate-500 text-center mb-1" style={{ gridTemplateColumns: `80px repeat(${categoryList.length}, minmax(0, 1fr))` }}>
                     <div></div>
-                    {metrics.categories.map((c) => (
+                    {categoryList.map((c) => (
                       <div key={`col-${c}`} className="truncate px-1" title={c}>
                         {c.slice(0, 4)}
                       </div>
@@ -398,10 +435,10 @@ export default function ModelLabPage() {
                     <div
                       key={`row-${rowIdx}`}
                       className="grid items-center text-xs mb-1"
-                      style={{ gridTemplateColumns: `80px repeat(${metrics.categories.length}, minmax(0, 1fr))` }}
+                      style={{ gridTemplateColumns: `80px repeat(${categoryList.length}, minmax(0, 1fr))` }}
                     >
-                      <div className="text-[11px] font-bold text-slate-700 truncate pr-2" title={metrics.categories[rowIdx]}>
-                        {metrics.categories[rowIdx]}
+                      <div className="text-[11px] font-bold text-slate-700 truncate pr-2" title={categoryList[rowIdx]}>
+                        {categoryList[rowIdx]}
                       </div>
                       {row.map((val, colIdx) => {
                         const isDiagonal = rowIdx === colIdx;
@@ -415,7 +452,7 @@ export default function ModelLabPage() {
                           <div
                             key={`cell-${rowIdx}-${colIdx}`}
                             className={`h-7 flex items-center justify-center rounded text-[11px] font-mono mx-0.5 ${cellBg}`}
-                            title={`True: ${metrics.categories[rowIdx]} | Pred: ${metrics.categories[colIdx]} | Count: ${val}`}
+                            title={`True: ${categoryList[rowIdx]} | Pred: ${categoryList[colIdx]} | Count: ${val}`}
                           >
                             {val}
                           </div>
@@ -602,12 +639,12 @@ export default function ModelLabPage() {
           </div>
 
           {/* Misclassifications Deep Dive Table */}
-          {metrics.misclassifications && metrics.misclassifications.length > 0 && (
+          {misclassList.length > 0 && (
             <div className="bg-white rounded-2xl border border-slate-200 p-5 shadow-sm space-y-3">
               <div>
                 <h3 className="text-base font-bold text-slate-900 flex items-center gap-2">
                   <AlertTriangle className="w-4 h-4 text-amber-600" />
-                  Misclassification Inspector ({metrics.misclassifications.length} of {metrics.test_samples} test samples)
+                  Misclassification Inspector ({misclassList.length} of {metrics.test_samples} test samples)
                 </h3>
                 <p className="text-xs text-slate-500">
                   Review test cases where model predictions diverged from human labels
@@ -626,7 +663,7 @@ export default function ModelLabPage() {
                     </tr>
                   </thead>
                   <tbody className="divide-y divide-slate-100">
-                    {metrics.misclassifications.map((m, idx) => (
+                    {misclassList.map((m: Misclassification, idx: number) => (
                       <tr key={idx} className="hover:bg-slate-50/70 transition-colors">
                         <td className="py-2.5 px-3 font-medium text-slate-900 max-w-sm truncate" title={m.subject}>
                           {m.subject}
