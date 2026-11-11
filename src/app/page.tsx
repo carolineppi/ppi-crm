@@ -182,16 +182,22 @@ export default function DispatchDashboard() {
           let sticker: string = 'ITB';
           if (isHuman && rawHumanLabel) {
             // User's personal human label takes 100% authoritative precedence!
-            sticker = rawHumanLabel;
+            if (rawHumanLabel === 'Addendum' || rawHumanLabel === 'RFI/Forms' || rawHumanLabel === 'Addendum / RFI') {
+              sticker = 'Addendum / RFI';
+            } else if (rawHumanLabel === 'General') {
+              sticker = 'ITB';
+            } else {
+              sticker = rawHumanLabel;
+            }
           } else {
-            if (r.email_intent === 'addendum_update') sticker = 'Addendum';
+            if (r.email_intent === 'addendum_update') sticker = 'Addendum / RFI';
             else if (r.email_intent === 'bid_won') sticker = 'Won';
             else if (r.email_intent === 'bid_lost') sticker = 'Lost';
             else if (r.email_intent === 'spam_noise') sticker = 'Spam';
-            else if (r.email_intent === 'general_inquiry') sticker = 'General';
+            else sticker = 'ITB';
           }
 
-          const assignedName = r.raw_payload?.assigned_estimator_name || (r.assigned_estimator_id ? 'Assigned' : null);
+          const assignedName = r.assigned_estimator_name || r.raw_payload?.assigned_estimator_name || (r.assigned_estimator_id ? 'Assigned' : null);
 
           const attachmentsList = Array.isArray(r.attachments)
             ? r.attachments
@@ -263,8 +269,8 @@ export default function DispatchDashboard() {
         setBids(mapped);
         setIsUsingLiveDb(true);
       }
-    } catch {
-      // fallback
+    } catch (err) {
+      console.error('Error fetching live bids:', err);
     } finally {
       setIsLoading(false);
     }
@@ -307,6 +313,8 @@ export default function DispatchDashboard() {
       if (b.sticker === 'Spam' || b.filterStatus === 'auto_filtered') return false;
     } else if (activeFilter === 'Won') {
       if (b.sticker !== 'Won' && b.sticker !== 'Contractor Awarded') return false;
+    } else if (activeFilter === 'Addendum / RFI' || activeFilter === 'Addendum' || activeFilter === 'RFI/Forms') {
+      if (b.sticker !== 'Addendum / RFI' && b.sticker !== 'Addendum' && b.sticker !== 'RFI/Forms') return false;
     } else if (b.sticker !== activeFilter) {
       return false;
     }
@@ -568,6 +576,7 @@ export default function DispatchDashboard() {
 
   // Sticker counts
   const countITB = bids.filter((b) => b.sticker === 'ITB').length;
+  const countAddendumRFI = bids.filter((b) => b.sticker === 'Addendum / RFI' || b.sticker === 'Addendum' || b.sticker === 'RFI/Forms').length;
   const countAddendum = bids.filter((b) => b.sticker === 'Addendum').length;
   const countRFI = bids.filter((b) => b.sticker === 'RFI/Forms').length;
   const countReminder = bids.filter((b) => b.sticker === 'Date Reminder').length;
@@ -583,9 +592,14 @@ export default function DispatchDashboard() {
     let icon = null;
     let badgeText = sticker === 'ITB' ? 'ITB' : sticker;
 
-    if (sticker === 'Addendum') {
+    if (sticker === 'Addendum / RFI' || sticker === 'Addendum') {
       badgeClass = 'bg-purple-600 text-white';
       icon = <FileSpreadsheet className="w-3 h-3" />;
+      badgeText = 'Addendum / RFI';
+    } else if (sticker === 'RFI/Forms') {
+      badgeClass = 'bg-purple-600 text-white';
+      icon = <FileSpreadsheet className="w-3 h-3" />;
+      badgeText = 'Addendum / RFI';
     } else if (sticker === 'Won') {
       if (bid.isGcWonPrime) {
         badgeClass = 'bg-amber-600 text-white shadow-xs';
@@ -855,30 +869,16 @@ export default function DispatchDashboard() {
               </button>
 
               <button
-                onClick={() => setActiveFilter('RFI/Forms')}
+                onClick={() => setActiveFilter('Addendum / RFI')}
                 className={`px-2.5 py-1.5 rounded-lg text-xs font-bold transition-all flex items-center gap-1 ${
-                  activeFilter === 'RFI/Forms'
-                    ? 'bg-cyan-600 text-white shadow-sm ring-2 ring-cyan-300'
-                    : 'bg-cyan-50 text-cyan-700 hover:bg-cyan-100'
-                }`}
-              >
-                <span>RFI/Forms</span>
-                <span className="px-1.5 py-0.2 rounded-full text-[10px] bg-white/20 font-black">
-                  {countRFI}
-                </span>
-              </button>
-
-              <button
-                onClick={() => setActiveFilter('Addendum')}
-                className={`px-2.5 py-1.5 rounded-lg text-xs font-bold transition-all flex items-center gap-1 ${
-                  activeFilter === 'Addendum'
+                  activeFilter === 'Addendum / RFI' || activeFilter === 'Addendum' || activeFilter === 'RFI/Forms'
                     ? 'bg-purple-600 text-white shadow-sm ring-2 ring-purple-300'
                     : 'bg-purple-50 text-purple-700 hover:bg-purple-100'
                 }`}
               >
-                <span>Addendum</span>
+                <span>Addendum / RFI</span>
                 <span className="px-1.5 py-0.2 rounded-full text-[10px] bg-white/20 font-black">
-                  {countAddendum}
+                  {countAddendumRFI}
                 </span>
               </button>
 
