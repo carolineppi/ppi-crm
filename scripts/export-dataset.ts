@@ -10,20 +10,47 @@ function escapeCsv(value: any): string {
 }
 
 async function exportDataset() {
-  console.log('🔄 Fetching email records from Supabase...');
+  console.log('🔄 Fetching email records from Supabase in lightweight batches...');
   const supabase = createServerSupabaseClient();
 
-  const { data: records, error } = await supabase
-    .from('bid_requests')
-    .select('*')
-    .order('created_at', { ascending: false });
+  const allRecords: any[] = [];
+  const pageSize = 100;
+  let page = 0;
 
-  if (error || !records) {
-    console.error('❌ Error fetching records:', error);
-    process.exit(1);
+  // Lightweight column projection: avoids fetching multi-megabyte base64 payloads
+  const columns =
+    'id, email_intent, email_subject, email_body_text, sender_email, sender_name, attachments, duplicate_resolution, triage_status, estimator_status, email_received_at, created_at';
+
+  while (true) {
+    const from = page * pageSize;
+    const to = from + pageSize - 1;
+
+    const { data, error } = await supabase
+      .from('bid_requests')
+      .select(columns)
+      .order('created_at', { ascending: false })
+      .range(from, to);
+
+    if (error) {
+      console.error(`❌ Error fetching page ${page} (${from}-${to}):`, error);
+      process.exit(1);
+    }
+
+    if (!data || data.length === 0) {
+      break;
+    }
+
+    allRecords.push(...data);
+    console.log(`  Fetched page ${page + 1}: ${data.length} records (Total so far: ${allRecords.length})`);
+
+    if (data.length < pageSize) {
+      break;
+    }
+
+    page++;
   }
 
-  console.log(`📊 Found ${records.length} records. Processing features...`);
+  console.log(`\n📊 Processing features for ${allRecords.length} total records...`);
 
   const outputDir = path.join(process.cwd(), 'data');
   if (!fs.existsSync(outputDir)) {
@@ -66,7 +93,7 @@ async function exportDataset() {
   const csvRows: string[] = [headers.join(',')];
   const jsonlRows: string[] = [];
 
-  for (const r of records) {
+  for (const r of allRecords) {
     let label = 'ITB';
     if (r.email_intent === 'addendum_update') label = 'Addendum';
     else if (r.email_intent === 'bid_won') label = 'Won';
@@ -77,19 +104,14 @@ async function exportDataset() {
     labelCounts[label] = (labelCounts[label] || 0) + 1;
 
     const rawSubject = r.email_subject || '';
-    const rawBody = r.email_body_text || r.raw_payload?.bodyText || r.raw_payload?.body || '';
+    const rawBody = r.email_body_text || '';
     const senderEmail = r.sender_email || '';
 
     // Deconstruct thread to isolate top message and core content
     const d = deconstructEmailThread(rawSubject, rawBody, senderEmail, r.sender_name);
 
-    // Extract attachment filenames
-    const rawAtts = Array.isArray(r.raw_payload?.attachments)
-      ? r.raw_payload.attachments
-      : Array.isArray(r.attachments)
-      ? r.attachments
-      : [];
-
+    // Extract attachment filenames from metadata (clean & fast)
+    const rawAtts = Array.isArray(r.attachments) ? r.attachments : [];
     const attachmentNames = rawAtts.map((a: any) => a.filename).filter(Boolean);
     const attachmentNamesStr = attachmentNames.join(', ');
     const hasDrawings = attachmentNames.some((f: string) =>
@@ -99,7 +121,7 @@ async function exportDataset() {
       /addend|bulletin|rev/i.test(f)
     );
 
-    // Sender domain (e.g. buildingconnected.com, turnerconstruction.com)
+    // Sender domain (e.g. buildingconnected.com, lobar.com)
     const senderDomain = senderEmail.includes('@') ? senderEmail.split('@')[1].toLowerCase() : '';
 
     // Human verification indicator
@@ -175,7 +197,7 @@ async function exportDataset() {
   console.log(`📁 JSONL: ${jsonlPath}`);
   console.log('\n📈 Class Distribution:');
   Object.entries(labelCounts).forEach(([lbl, count]) => {
-    const pct = ((count / records.length) * 100).toFixed(1);
+    const pct = ((count / allRecords.length) * 100).toFixed(1);
     console.log(`   - ${lbl.padEnd(10)}: ${count.toString().padStart(4)} (${pct}%)`);
   });
 }
