@@ -6,7 +6,13 @@ import {
   computeAttachmentHash,
   extractJobCode,
 } from '@/lib/email-parser/deduplication';
-import { analyzeEmailWithAI, ActiveBidSummary } from '@/lib/email-parser/ai-classifier';
+import {
+  analyzeEmailWithAI,
+  ActiveBidSummary,
+  AIEmailAnalysis,
+} from '@/lib/email-parser/ai-classifier';
+import { deconstructEmailThread } from '@/lib/email-parser/thread-cleaner';
+import { evaluatePrecedenceRules } from '@/lib/email-parser/precedence-rules';
 import { normalizeDateToYyyyMmDd } from '@/lib/date-utils';
 import type { EmailAttachmentPayload } from '@/types/bid-request';
 
@@ -39,6 +45,7 @@ const inboundEmailSchema = z.object({
   clientCompany: z.string().optional(),
   projectName: z.string().optional(),
   bidDueDate: z.string().optional(),
+  isBackfill: z.boolean().optional(),
 });
 
 function parseSender(
@@ -115,30 +122,88 @@ export async function POST(request: NextRequest) {
 
     const supabase = createServerSupabaseClient();
 
-    // Query active ITBs to supply context to AI for Addendum / Won / Lost matching
-    const { data: activeBidsData } = await supabase
-      .from('bid_requests')
-      .select('bid_number, project_name, client_company, project_address_city, project_address_state, job_code')
-      .not('bid_number', 'is', null)
-      .limit(60);
+    // Idempotency check: Skip if email was already ingested
+    if (payload.messageId) {
+      const { data: existing } = await supabase
+        .from('bid_requests')
+        .select('id, bid_number')
+        .eq('source_email_id', payload.messageId)
+        .maybeSingle();
 
-    const activeBids: ActiveBidSummary[] = (activeBidsData || []).map((b) => ({
-      bidNumber: b.bid_number,
-      projectName: b.project_name,
-      clientCompany: b.client_company,
-      projectAddress: [b.project_address_city, b.project_address_state].filter(Boolean).join(', '),
-      jobCode: b.job_code,
-    }));
+      if (existing) {
+        return NextResponse.json(
+          {
+            message: 'Email already ingested (idempotent skip)',
+            id: existing.id,
+            bidNumber: existing.bid_number,
+          },
+          { status: 200 }
+        );
+      }
+    }
 
-    // 1. Run Gemini AI Classifier with Active Bids matching context
-    const ai = await analyzeEmailWithAI({
-      subject: payload.subject,
-      bodyText,
-      senderEmail: directSenderEmail,
-      senderName: directSenderName,
-      attachmentFilenames,
-      activeBids,
-    });
+    const isFastBackfill = Boolean(
+      payload.isBackfill || request.nextUrl.searchParams.get('fast') === '1'
+    );
+
+    let ai: AIEmailAnalysis;
+
+    if (isFastBackfill) {
+      // Fast deterministic evaluation without external LLM latency or rate limits
+      const deconstructed = deconstructEmailThread(payload.subject, bodyText, directSenderEmail, directSenderName);
+      const precedence = evaluatePrecedenceRules({
+        cleanSubject: deconstructed.cleanSubject,
+        topMessage: deconstructed.topMessage,
+        forwardedBody: deconstructed.forwardedBody,
+        attachmentFilenames,
+        senderEmail: directSenderEmail,
+      });
+
+      ai = {
+        sticker: precedence.matched ? precedence.sticker : 'ITB',
+        confidence: precedence.matched ? precedence.confidence : 0.88,
+        reasoning: precedence.matched ? precedence.ruleReason : 'Fast deterministic backfill evaluation',
+        isForwarded: deconstructed.isForwarded,
+        forwardedBy: deconstructed.forwardedBy,
+        originalSenderEmail: deconstructed.originalSenderEmail,
+        originalSenderName: deconstructed.originalSenderName,
+        originalSubject: deconstructed.originalSubject,
+        projectName: payload.projectName || null,
+        projectAddress: null,
+        jobCode: extractJobCode(payload.subject) || extractJobCode(bodyText),
+        clientCompany: payload.clientCompany || null,
+        bidDueDate: payload.bidDueDate || null,
+        scopeSummary: deconstructed.cleanSubject,
+        matchedBidNumber: null,
+        matchConfidence: 0,
+        matchReason: null,
+      };
+    } else {
+      // Query active ITBs to supply context to AI for Addendum / Won / Lost matching
+      const { data: activeBidsData } = await supabase
+        .from('bid_requests')
+        .select('bid_number, project_name, client_company, project_address_city, project_address_state, job_code')
+        .not('bid_number', 'is', null)
+        .limit(60);
+
+      const activeBids: ActiveBidSummary[] = (activeBidsData || []).map((b) => ({
+        bidNumber: b.bid_number,
+        projectName: b.project_name,
+        clientCompany: b.client_company,
+        projectAddress: [b.project_address_city, b.project_address_state].filter(Boolean).join(', '),
+        jobCode: b.job_code,
+      }));
+
+      // 1. Run Gemini AI Classifier with Active Bids matching context
+      ai = await analyzeEmailWithAI({
+        subject: payload.subject,
+        bodyText,
+        senderEmail: directSenderEmail,
+        senderName: directSenderName,
+        attachmentFilenames,
+        activeBids,
+      });
+    }
 
     // 2. Identify the true client (if forwarded by coworker, use original GC)
     const effectiveSenderEmail = ai.isForwarded && ai.originalSenderEmail
