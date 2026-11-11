@@ -243,7 +243,7 @@ export default function ModelLabPage() {
             Commercial Email Classification Lab
           </h1>
           <p className="text-slate-300 text-xs sm:text-sm leading-relaxed">
-            Evaluates machine learning models trained on <strong>{metrics?.total_samples || '549'}</strong> business emails labeled by Partition Plus (with ambiguous <em>Unknown</em> emails excluded per instructions). Evaluated with an <strong>80/20 Stratified Train/Test Split</strong> across all active commercial categories.
+            Evaluates machine learning models trained on <strong>{metrics?.total_samples || '548'}</strong> business emails labeled by Partition Plus (with <em>Addendum & RFI/Forms</em> unified into <em>Addendum / RFI</em>, and <em>Unknown</em> & <em>General</em> excluded per instructions). Evaluated with an <strong>80/20 Stratified Train/Test Split</strong> across all active commercial categories.
           </p>
         </div>
       </div>
@@ -317,10 +317,10 @@ export default function ModelLabPage() {
             <div className="grid grid-cols-1 md:grid-cols-3 gap-3 text-[11px] text-amber-900 leading-relaxed pt-1">
               <div className="bg-white/80 p-3 rounded-xl border border-amber-200/60 space-y-1">
                 <span className="font-bold text-amber-950 flex items-center gap-1">
-                  1. "Unknown" Category Excluded
+                  1. Unified "Addendum / RFI" Category
                 </span>
                 <p>
-                  76 ambiguous emails were excluded from training per your instructions. The model now focuses exclusively on definitive business categories (ITB, Addendum, RFI/Forms, Date Reminder, Won, Lost, Spam).
+                  Merged Addendum and RFI/Forms into a single category (both represent supplementary job details). Excluded ambiguous "Unknown" and singleton "General" records, jumping accuracy from 78.2% to <strong>87.3%</strong>!
                 </p>
               </div>
 
@@ -493,7 +493,14 @@ export default function ModelLabPage() {
                   onClick={() => setPreset('Addendum')}
                   className="px-2.5 py-1 rounded bg-purple-50 text-purple-700 hover:bg-purple-100 text-[11px] font-bold transition-colors"
                 >
-                  Addendum
+                  Addendum Detail
+                </button>
+                <button
+                  type="button"
+                  onClick={() => setPreset('RFI')}
+                  className="px-2.5 py-1 rounded bg-cyan-50 text-cyan-700 hover:bg-cyan-100 text-[11px] font-bold transition-colors"
+                >
+                  RFI / Form Detail
                 </button>
                 <button
                   type="button"
@@ -501,13 +508,6 @@ export default function ModelLabPage() {
                   className="px-2.5 py-1 rounded bg-indigo-50 text-indigo-700 hover:bg-indigo-100 text-[11px] font-bold transition-colors"
                 >
                   Date Reminder
-                </button>
-                <button
-                  type="button"
-                  onClick={() => setPreset('RFI')}
-                  className="px-2.5 py-1 rounded bg-cyan-50 text-cyan-700 hover:bg-cyan-100 text-[11px] font-bold transition-colors"
-                >
-                  RFI/Forms
                 </button>
                 <button
                   type="button"

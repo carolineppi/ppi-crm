@@ -1,70 +1,26 @@
 {
-  "total_samples": 549,
-  "train_samples": 439,
+  "total_samples": 548,
+  "train_samples": 438,
   "test_samples": 110,
-  "accuracy": 0.7818181818181819,
-  "weighted_f1": 0.7890647300955962,
-  "macro_f1": 0.5981046741441557,
+  "accuracy": 0.8727272727272727,
+  "weighted_f1": 0.8713188535602329,
+  "macro_f1": 0.8895320197044335,
   "classes": [
-    "Addendum",
+    "Addendum / RFI",
     "Contractor Awarded",
     "Date Reminder",
-    "General",
     "ITB",
     "Lost",
-    "RFI/Forms",
     "Spam"
   ],
   "confusion_matrix": [
     [
-      23,
-      0,
-      2,
-      1,
-      0,
-      0,
-      2,
-      0
-    ],
-    [
-      0,
-      0,
-      0,
+      50,
       0,
       1,
-      0,
-      0,
-      0
-    ],
-    [
-      1,
-      0,
-      12,
-      1,
-      2,
-      0,
-      0,
-      0
-    ],
-    [
-      0,
-      0,
-      0,
-      0,
-      0,
-      0,
-      0,
-      0
-    ],
-    [
-      1,
-      0,
       3,
       0,
-      30,
-      0,
-      1,
-      0
+      1
     ],
     [
       0,
@@ -72,6 +28,12 @@
       0,
       0,
       0,
+      0
+    ],
+    [
+      4,
+      0,
+      11,
       1,
       0,
       0
@@ -79,16 +41,20 @@
     [
       3,
       0,
-      2,
+      1,
+      31,
       0,
-      3,
-      0,
-      18,
       0
     ],
     [
       0,
       0,
+      0,
+      0,
+      1,
+      0
+    ],
+    [
       0,
       0,
       0,
@@ -98,247 +64,155 @@
     ]
   ],
   "per_class_metrics": {
-    "Addendum": {
-      "precision": 0.8214285714285714,
-      "recall": 0.8214285714285714,
-      "f1": 0.8214285714285714,
-      "support": 28
+    "Addendum / RFI": {
+      "precision": 0.8771929824561403,
+      "recall": 0.9090909090909091,
+      "f1": 0.8928571428571429,
+      "support": 55
     },
     "Contractor Awarded": {
-      "precision": 0.0,
-      "recall": 0.0,
-      "f1": 0.0,
+      "precision": 1.0,
+      "recall": 1.0,
+      "f1": 1.0,
       "support": 1
     },
     "Date Reminder": {
-      "precision": 0.631578947368421,
-      "recall": 0.75,
-      "f1": 0.6857142857142857,
+      "precision": 0.8461538461538461,
+      "recall": 0.6875,
+      "f1": 0.7586206896551724,
       "support": 16
     },
-    "General": {
-      "precision": 0.0,
-      "recall": 0.0,
-      "f1": 0.0,
-      "support": 0
-    },
     "ITB": {
-      "precision": 0.8333333333333334,
-      "recall": 0.8571428571428571,
-      "f1": 0.8450704225352113,
+      "precision": 0.8857142857142857,
+      "recall": 0.8857142857142857,
+      "f1": 0.8857142857142857,
       "support": 35
     },
     "Lost": {
       "precision": 1.0,
-      "recall": 0.5,
-      "f1": 0.6666666666666666,
-      "support": 2
-    },
-    "RFI/Forms": {
-      "precision": 0.8571428571428571,
-      "recall": 0.6923076923076923,
-      "f1": 0.7659574468085106,
-      "support": 26
-    },
-    "Spam": {
-      "precision": 1.0,
       "recall": 1.0,
       "f1": 1.0,
+      "support": 1
+    },
+    "Spam": {
+      "precision": 0.6666666666666666,
+      "recall": 1.0,
+      "f1": 0.8,
       "support": 2
     }
   },
   "misclassified_samples": [
     {
-      "id": "2756be61-9c68-4ebb-af1a-119680dff970",
-      "subject": "ITB Due 11/18 - 20 F St Suite 410",
-      "true_label": "Addendum",
-      "predicted_label": "Date Reminder",
-      "confidence": 75.2,
-      "snippet": "Good afternoon,\r\nPlease see attached for use in pricing a new project, Suite 410-Future Tech at 20 F St NW Washington, DC.\r\n\r\nBids are due C"
-    },
-    {
-      "id": "3a8c5107-f7c8-4632-8fbd-b2688ccaa21a",
-      "subject": "Cromwell Maintenance Facility - Site Visit Photos  - MTA ...",
-      "true_label": "RFI/Forms",
-      "predicted_label": "Addendum",
-      "confidence": 29.6,
-      "snippet": "BuildingConnected\r\n\r\nJacob Buttz of Clark Construction Group, LLC\r\nsent your company a message\r\nabout\r\n\r\nMTA TRANCHE 3 - CROMWELL MAINTENANC"
-    },
-    {
-      "id": "a3a0093a-be33-406e-833d-b6de283dc0f9",
-      "subject": "Megamart Leesburg Bid Opportunity",
+      "id": "83882fae-aceb-4601-9b8a-e792a6230367",
+      "subject": "Please select if your bidding, if you have not done so - ...",
       "true_label": "ITB",
-      "predicted_label": "RFI/Forms",
-      "confidence": 46.0,
-      "snippet": "<https://securecc.smartbidnet.com/Main/Login.aspx?cId=bp_1622349209&sPassportKey=A87C703CC9FA372B72B979EDC8F886B8E6E74EA9&sBidId=879680&st=1"
+      "predicted_label": "Addendum / RFI",
+      "confidence": 47.0,
+      "snippet": "BuildingConnected\r\n\r\nFernandez Evans of Meltech Corporation\r\nsent your company a message\r\nabout\r\n\r\n2026-051-1 Repair Building Interior, Faci"
+    },
+    {
+      "id": "66f4abc5-feae-4ee8-bf14-cefc5b4c766e",
+      "subject": "MEMO: Bids due 11/19 @ 12PM - DSG House of Sport - Richmond, VA",
+      "true_label": "Addendum / RFI",
+      "predicted_label": "ITB",
+      "confidence": 39.4,
+      "snippet": "<https://securecc.smartbidnet.com/Main/Login.aspx?cId=bp_1621446535&sPassportKey=DCCFC17306D44D20E1CE993DEC935621530EBE0A&sBidId=880321&st=1"
+    },
+    {
+      "id": "815431dd-9cc8-4aee-93f9-64f6ebd1bfe7",
+      "subject": "RFI due date reminder - CTRL Nightclub DC - Updated Drawings",
+      "true_label": "Addendum / RFI",
+      "predicted_label": "Date Reminder",
+      "confidence": 70.4,
+      "snippet": "BuildingConnected\r\n\r\nJeremy Daross of Tech-24 Construction\r\nsent your company a message\r\nabout\r\n\r\nCTRL Nightclub DC - Updated Drawings: Bath"
+    },
+    {
+      "id": "6676f738-2fdd-4524-a0ee-e48453f05e73",
+      "subject": "Old Town Pool Replacement - Bids December 9, 2026",
+      "true_label": "ITB",
+      "predicted_label": "Date Reminder",
+      "confidence": 65.9,
+      "snippet": "Dear Valued Subcontractor,\r\nCostello Construction of Maryland, Inc. is pleased to invite your company to submit a proposal for the Old Town "
+    },
+    {
+      "id": "aefe1e1f-51d3-4e79-b5e2-1004644aa2f5",
+      "subject": "1368 Beverly Road Pricing - 1368 Beverly Road",
+      "true_label": "Date Reminder",
+      "predicted_label": "Addendum / RFI",
+      "confidence": 40.6,
+      "snippet": "BuildingConnected\r\n\r\nAlex Merino of GCS-SIGAL\r\nsent your company a message\r\nabout\r\n\r\n1368 Beverly Road\r\n------------------------------------"
+    },
+    {
+      "id": "54f81f79-675f-4a91-bf51-9c098ffce239",
+      "subject": "Last Day To Submit Your Revised Bid - BODYROK - FAIRFAX C...",
+      "true_label": "Date Reminder",
+      "predicted_label": "Addendum / RFI",
+      "confidence": 46.8,
+      "snippet": "BuildingConnected\r\n\r\nSulamita Marquez of TEEL Construction, Inc.\r\nsent your company a message\r\nabout\r\n\r\nBODYROK - FAIRFAX CENTER: LOCKERS\r\n-"
+    },
+    {
+      "id": "41df0e78-30ba-45ff-8685-7ee3c1b85fef",
+      "subject": "Site Walk Photos: 310 Tyson Spec Suite",
+      "true_label": "ITB",
+      "predicted_label": "Addendum / RFI",
+      "confidence": 79.6,
+      "snippet": "Vantage Construction\r\n 310 Tyson Spec Suite\r\n Winchester, VA \r\n\r\n---------------------\r\n\r\n To: Partitions Plus, Inc.\r\n Attn: Jennifer MacFer"
+    },
+    {
+      "id": "19f10d6c-124c-4130-b484-4b835ba0ecb9",
+      "subject": "Bid Submission  - Scenthound - Midlothian, VA",
+      "true_label": "Date Reminder",
+      "predicted_label": "Addendum / RFI",
+      "confidence": 52.6,
+      "snippet": "BuildingConnected\r\n\r\nNathan Selby of Summit Properties &amp; Development\r\nsent your company a message\r\nabout\r\n\r\nScenthound - Midlothian, VA:"
+    },
+    {
+      "id": "b67571ef-55ff-432a-b35e-4c197b4b2cc2",
+      "subject": "Addendum #2 Notice: AutoZone #11239 Union City, PA (Base Bid- Tenant Renovation)",
+      "true_label": "Addendum / RFI",
+      "predicted_label": "Spam",
+      "confidence": 86.7,
+      "snippet": "Premier Construction Group Inc.\r\n AutoZone #11239 Union City, PA (Base Bid- Tenant Renovation)\r\n 11 East High St., Union City, PA 16438 \r\n\r\n"
     },
     {
       "id": "13f38e46-cf50-43ce-bf87-b36cbab66514",
       "subject": "ITB - 21 E Main St - PH 2C",
-      "true_label": "RFI/Forms",
+      "true_label": "Addendum / RFI",
       "predicted_label": "ITB",
-      "confidence": 93.0,
+      "confidence": 93.1,
       "snippet": "INVITATION TO BID:\r\nTO:         ALL BIDDERS\r\nRE:         21 East Main Street, Phase 2C\r\n                21 E. Main St., Waynesboro, PA 17268"
     },
     {
-      "id": "d0c1900d-8d1c-4058-a50d-363ad7210998",
-      "subject": "BID DRAWINGS/INVITATION - Escapology - Annapolis Mall - Annapolis, MD",
-      "true_label": "Date Reminder",
+      "id": "6e701e29-0454-4ea0-abee-c76cdfe90ed2",
+      "subject": "64 NYA - Corgan VW East 1st Floor New Work & Demolition ITB",
+      "true_label": "Addendum / RFI",
       "predicted_label": "ITB",
-      "confidence": 85.2,
-      "snippet": "---------- Forwarded message ---------\r\nFrom: Jazmin Reyes <JReyes@herman-stewart.com>\r\nDate: Tue, Nov 10, 2026 at 9:12\u202fAM\r\nSubject: BID DRA"
+      "confidence": 80.5,
+      "snippet": "Will you be submitting pricing on this today?\r\n\r\n\r\nCatarina (Esteves) Armbrust\r\n\r\nProject Manager\r\n\r\nGilbane Building Company\r\n\r\n4201 Wilson"
     },
     {
-      "id": "3c3f6a81-8cc0-49e6-b98e-259ac8e9a385",
-      "subject": "Bid Update - Planet Fitness Renovation",
-      "true_label": "Lost",
-      "predicted_label": "Contractor Awarded",
-      "confidence": 51.1,
-      "snippet": "BuildingConnected\r\n\r\nClaudia Cole of R. S. Mowery &amp; Sons\r\nsent your company a message\r\nabout\r\n\r\nPlanet Fitness Renovation: Specialties\r\n"
+      "id": "57daf15a-314f-4741-b7ae-14c54288f926",
+      "subject": "Proposals Due @ 2pm today - MC Dean - Logistics Center Re...",
+      "true_label": "Date Reminder",
+      "predicted_label": "Addendum / RFI",
+      "confidence": 49.9,
+      "snippet": "BuildingConnected\r\n\r\nDavid Lee of Coakley &amp; Williams Construction, LLC\r\nsent your company a message\r\nabout\r\n\r\nMC Dean - Logistics Center"
     },
     {
       "id": "bc8e6133-9230-4a49-9d93-81ae0681f329",
       "subject": "Kia of West Chester Service Center Addendum No. 5 Notice",
       "true_label": "ITB",
-      "predicted_label": "Addendum",
-      "confidence": 92.9,
+      "predicted_label": "Addendum / RFI",
+      "confidence": 93.1,
       "snippet": "---------- Forwarded message ---------\r\nFrom: Doug Copp <notifications@com2.smartbidnet.com>\r\nDate: Wed, Nov 11, 2026 at 9:01\u202fAM\r\nSubject: K"
     },
     {
-      "id": "552df049-ee5b-4607-b8ac-6fc02fc8ca83",
-      "subject": "NRECA - P1 Conference & Yoga Room - Invitation to Bid from rand* construction corporation",
-      "true_label": "RFI/Forms",
-      "predicted_label": "ITB",
-      "confidence": 88.1,
-      "snippet": "INVITATION TO BID\r\n                        \r\n                    \r\n                \r\n            \r\n        \r\n        \r\n            \r\n       "
-    },
-    {
-      "id": "aa3571a9-3292-448e-b158-713998e97de2",
-      "subject": "Cromwell Maintenance Facility - Site Visit Photos  - MTA ...",
-      "true_label": "RFI/Forms",
-      "predicted_label": "Addendum",
-      "confidence": 30.5,
-      "snippet": "BuildingConnected\r\n\r\nJacob Buttz of Clark Construction Group, LLC\r\nsent your company a message\r\nabout\r\n\r\nMTA TRANCHE 3 - CROMWELL MAINTENANC"
-    },
-    {
-      "id": "c664ff1f-539d-4069-b66d-84018e73559a",
-      "subject": "Howard County Board of Elections | RFI Responses & Bids Due Tomorrow 11/10",
-      "true_label": "RFI/Forms",
-      "predicted_label": "Date Reminder",
-      "confidence": 87.3,
-      "snippet": "Hi,\r\n\r\nAre you able to provide pricing for this project by EOD today or\r\nEarly tomorrow?\r\nWe currently lack the necessary coverage.\r\n\r\nThank"
-    },
-    {
-      "id": "690c6911-58a4-4b86-b818-180e04fc1225",
-      "subject": "MEMO: Bids due 11/19 @ 12PM - DSG House of Sport - Richmond, VA",
-      "true_label": "ITB",
-      "predicted_label": "Date Reminder",
-      "confidence": 36.0,
-      "snippet": "<https://securecc.smartbidnet.com/Main/Login.aspx?cId=bp_1622507302&sPassportKey=DCCFC17306D44D20E1CE993DEC935621530EBE0A&sBidId=880321&st=1"
-    },
-    {
-      "id": "5d0e776c-7da5-4d94-8545-4b2f3bc2c544",
-      "subject": "Revised Permit Drawings: 310 Tyson Spec Suite",
-      "true_label": "RFI/Forms",
-      "predicted_label": "ITB",
-      "confidence": 38.2,
-      "snippet": "Partition Plus, Inc.\r\nP.O. Box 8\r\nFallston, MD 21047\r\n410-879-6200\r\nPlease stay Safe & Healthy\r\n*Please send all quote request to either est"
-    },
-    {
-      "id": "6d5f497c-b32d-4ae4-ae37-5fa59c513400",
-      "subject": "W.M. Schlosser RFP - Veterans Administration Boiler Room Project",
-      "true_label": "Contractor Awarded",
-      "predicted_label": "ITB",
-      "confidence": 86.7,
-      "snippet": "*Bill Milam*\r\nCall: 800-298-9696\r\nDirect: 410-928-4216\r\nwww.partitionplus.com\r\nPartitionPlus"
-    },
-    {
-      "id": "28e16bac-e8b4-4c3c-8fa5-7a4335df38f8",
-      "subject": "Old Navy #6452 - Washington, DC",
+      "id": "4b4d1c2e-8f7f-40aa-8c23-ed06d037e985",
+      "subject": "Irvine Nature Center Expansion Project - Request For Proposal",
       "true_label": "Date Reminder",
       "predicted_label": "ITB",
-      "confidence": 39.9,
-      "snippet": "*Bill Milam*\r\nCall: 800-298-9696\r\nDirect: 410-928-4216\r\nwww.partitionplus.com\r\nPartitionPlus"
-    },
-    {
-      "id": "a9aa768f-7d8e-4a67-bcac-49a7a01463a8",
-      "subject": "ITB DUE 11/16 - Suite 605 - Abundance Strategies",
-      "true_label": "ITB",
-      "predicted_label": "Date Reminder",
-      "confidence": 71.5,
-      "snippet": "Good afternoon,\r\nPlease see attached for use in pricing a new project, Suite 605 - Abundance Strategies at 1660 L St., NW Washington, DC.\r\n\r"
-    },
-    {
-      "id": "6784d8c0-cf02-4419-bf0e-36925909266e",
-      "subject": "TACO BELL - Sterling, VA project Bid Confirmation",
-      "true_label": "ITB",
-      "predicted_label": "Date Reminder",
-      "confidence": 30.2,
-      "snippet": "Hello,\r\n\r\nI hope you\u2019re doing well.\r\nWe wanted to reach out and see if your team is planning to submit a bid for the TACO BELL - Sterling, V"
-    },
-    {
-      "id": "e010ee01-a743-4762-b09c-cf9b1d3bea3c",
-      "subject": "HDS Added RFI Responses - Hawkers - Gaithersburg",
-      "true_label": "Addendum",
-      "predicted_label": "RFI/Forms",
-      "confidence": 97.6,
-      "snippet": "BuildingConnected\r\n\r\nKaran  Singh of Potomac Construction\r\nsent your company a message\r\nabout\r\n\r\nHawkers - Gaithersburg: Toilet Partitions &"
-    },
-    {
-      "id": "1e2746b7-77e6-4b7a-845d-4162a1979dc5",
-      "subject": "1909 K Street Fitness Center Bid",
-      "true_label": "Addendum",
-      "predicted_label": "General",
-      "confidence": 56.4,
-      "snippet": "Thanks,\r\nLisa Williams\r\nPartition Plus, Inc.\r\nP.O. Box 8\r\nFallston, MD 21047\r\nlisa@partitionplus.com\r\n410-879-6200\r\n*Please send all quote r"
-    },
-    {
-      "id": "820b3fcf-7073-41c8-9b0c-8e8820b630f4",
-      "subject": "Office of Finance - Demo Drawings and Lobby RCP - Office ...",
-      "true_label": "RFI/Forms",
-      "predicted_label": "Addendum",
-      "confidence": 37.8,
-      "snippet": "BuildingConnected\r\n\r\nKenz Baryoun of D|Watts Construction LLC\r\nsent your company a message\r\nabout\r\n\r\nOffice of Finance: Toilet Partitions &a"
-    },
-    {
-      "id": "c27ad338-a6dc-4bcd-ac82-c60da6796308",
-      "subject": "HDS Added RFI Responses - Hawkers - Gaithersburg",
-      "true_label": "Addendum",
-      "predicted_label": "RFI/Forms",
-      "confidence": 97.6,
-      "snippet": "BuildingConnected\r\n\r\nKaran  Singh of Potomac Construction\r\nsent your company a message\r\nabout\r\n\r\nHawkers - Gaithersburg: Toilet Partitions &"
-    },
-    {
-      "id": "c3aea3b9-f6f9-47ea-9336-d78aa3c347be",
-      "subject": "Cromwell Maintenance Facility",
-      "true_label": "Date Reminder",
-      "predicted_label": "Addendum",
-      "confidence": 41.7,
-      "snippet": "Hi Team,\r\n\r\nThe updated bid packages for the *MTA Tranche 3 \u2013 Cromwell Maintenance\r\nFacility* project are now finalized and ready for review"
-    },
-    {
-      "id": "739bc76c-6cfb-49cf-8e62-db914fc709ff",
-      "subject": "Erickson Avery Point - Medical Center - Bidding",
-      "true_label": "Date Reminder",
-      "predicted_label": "General",
-      "confidence": 32.1,
-      "snippet": "Thanks,\r\nLisa Williams\r\nPartition Plus, Inc.\r\nP.O. Box 8\r\nFallston, MD 21047\r\nlisa@partitionplus.com\r\n410-879-6200\r\n*Please send all quote r"
-    },
-    {
-      "id": "815431dd-9cc8-4aee-93f9-64f6ebd1bfe7",
-      "subject": "RFI due date reminder - CTRL Nightclub DC - Updated Drawings",
-      "true_label": "RFI/Forms",
-      "predicted_label": "Date Reminder",
-      "confidence": 64.1,
-      "snippet": "BuildingConnected\r\n\r\nJeremy Daross of Tech-24 Construction\r\nsent your company a message\r\nabout\r\n\r\nCTRL Nightclub DC - Updated Drawings: Bath"
-    },
-    {
-      "id": "82751534-b0d0-4c0f-8ca7-5314b0744a41",
-      "subject": "Bid Clarifications 11.11.26 - Hawkers Asian Street Food - Gaithersburg, MD",
-      "true_label": "Addendum",
-      "predicted_label": "Date Reminder",
-      "confidence": 39.3,
-      "snippet": "Good afternoon,\r\nPlease see attached additional clarifications for this bid.\r\nThank you\r\n                      Invitation to Bid\r\nProject: H"
+      "confidence": 86.5,
+      "snippet": "Good afternoon,\r\n\r\nI am reaching out regarding the Irvine Nature Center Expansion Project. An invitation to bid was sent out via BuildingCon"
     }
   ]
 }

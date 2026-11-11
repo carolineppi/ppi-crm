@@ -10,23 +10,22 @@ function fallbackTypeScriptClassifier(subject: string, bodyText: string, attachm
 
   const scores: Record<string, number> = {
     'ITB': 1.0,
-    'Addendum': 0.8,
-    'RFI/Forms': 0.8,
+    'Addendum / RFI': 1.0,
     'Date Reminder': 0.7,
     'Contractor Awarded': 0.1,
     'Lost': 0.1,
     'Spam': 0.1,
   };
 
-  // 1. Addendum Rules
-  if (/\b(addend(um|a)|amendment\s*\d+|amendments?\b)\b/.test(subj)) {
-    scores['Addendum'] += 14.0;
+  // 1. Addendum / RFI Combined Rules
+  if (/\b(addend(um|a)|amendment\s*\d+|amendments?\b|bulletin\s*\d*|revision\s*\d*|rev\s*\d+|alternate(s)?|scopes? of work|site photos?|site pictures?|bid notice\s*\d+|clarification\s*(#|no\.?|\d+)|rfi\b|request for information|pre-bid|pre bid|bid form|workbook|key rates|wage rate|prevailing wage|site walk|sign-in sheet|tax exempt)\b/.test(subj)) {
+    scores['Addendum / RFI'] += 15.0;
   }
-  if (/\b(bulletin\s*\d*|revision\s*\d*|rev\s*\d+|alternate(s)?|scopes? of work|site photos?|site pictures?|bid notice\s*\d+|clarification\s*(#|no\.?|\d+))\b/.test(subj)) {
-    scores['Addendum'] += 9.0;
+  if (/\b(addend|rfi response|rfi responses|bid form|wage scale|pre-bid rfi|questions and answers|q&a|clarification)\b/.test(top)) {
+    scores['Addendum / RFI'] += 10.0;
   }
-  if (/\b(addend|bulletin|revised|amendment)\b/.test(att)) {
-    scores['Addendum'] += 7.0;
+  if (/\b(addend|bulletin|revised|amendment|rfi|bid form|wage)\b/.test(att)) {
+    scores['Addendum / RFI'] += 8.0;
   }
 
   // 2. Date Reminder Rules
@@ -37,36 +36,28 @@ function fallbackTypeScriptClassifier(subject: string, bodyText: string, attachm
     scores['Date Reminder'] += 9.0;
   }
 
-  // 3. RFI / Forms Rules
-  if (/\b(rfi\b|request for information|pre-bid|pre bid|bid form|workbook|key rates|wage rate|prevailing wage|site walk|sign-in sheet|tax exempt)\b/.test(subj) && !/\baddend\b/.test(subj)) {
-    scores['RFI/Forms'] += 12.0;
-  }
-  if (/\b(rfi response|rfi responses|bid form|wage scale|pre-bid rfi|questions and answers|q&a)\b/.test(top)) {
-    scores['RFI/Forms'] += 8.0;
-  }
-
-  // 4. ITB Rules
+  // 3. ITB Rules
   if (/\b(invitation to bid|itb|request for proposal|rfp|bid invitation|seeking bids|bidding opportunity|bid request|new project for bid|request for budgeting|invite to bid|new bid opportunity|bid drawings)\b/.test(subj)) {
-    scores['ITB'] += 12.0;
+    scores['ITB'] += 14.0;
   }
   if (/\b(invitation to bid|pricing a new project|requesting subcontractor bids|seeking proposals)\b/.test(top)) {
-    scores['ITB'] += 7.0;
+    scores['ITB'] += 8.0;
   }
   if (/drawing|plan|spec/.test(full) || att) {
     scores['ITB'] += 2.0;
   }
 
-  // 5. Award / Won Rules
+  // 4. Award / Won Rules
   if (/\b(awarded|contractor awarded|intent to award|notice of award|winning bid|subcontract agreement|award update|bid result)\b/.test(`${subj} ${top}`)) {
     scores['Contractor Awarded'] += 16.0;
   }
 
-  // 6. Lost Rules
+  // 5. Lost Rules
   if (/\b(regret to inform|not selected|awarded to another|lost)\b/.test(`${subj} ${top}`)) {
     scores['Lost'] += 15.0;
   }
 
-  // 7. Spam Rules
+  // 6. Spam Rules
   if (/\b(seo|lead generation|website design|marketing agency|payroll|unsecured loan|merchant funding|backup code|reset your password)\b/.test(`${subj} ${top}`)) {
     scores['Spam'] += 18.0;
   }

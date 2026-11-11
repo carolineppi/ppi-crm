@@ -13,40 +13,68 @@ def extract_advanced_domain_rules_from_payload(subj, top, body, attachments):
     full_top = f"{subj} {top}"
     att_names = (attachments or '').lower()
     
-    # 1. Addendum Rules
-    r_addend_subj = 1.0 if re.search(r'\b(addend(um|a)|amendment\s*\d+|amendments?\b)\b', subj) else 0.0
-    r_addend_supp = 1.0 if re.search(r'\b(bulletin\s*\d*|revision\s*\d*|rev\s*\d+|alternate(s)?|scopes? of work|site photos?|site pictures?|bid notice\s*\d+|clarification\s*(#|no\.?|\d+))\b', subj) else 0.0
-    r_addend_att = 1.0 if re.search(r'\b(addend|bulletin|revised|amendment)\b', att_names) else 0.0
+    # 1. ADDENDUM / RFI Combined Rules
+    r_addend_rfi_subj = 1.0 if re.search(
+        r'\b(addend(um|a)|amendment\s*\d+|amendments?\b|bulletin\s*\d*|revision\s*\d*|rev\s*\d+|alternate(s)?|scopes? of work|site photos?|site pictures?|bid notice\s*\d+|clarification\s*(#|no\.?|\d+)|rfi\b|request for information|pre-bid|pre bid|bid form|workbook|key rates|wage rate|prevailing wage|site walk|sign-in sheet|tax exempt)\b',
+        subj
+    ) else 0.0
     
-    # 2. Date Reminder Rules
-    r_remind_subj = 1.0 if re.search(r'\b(reminder|due today|closing soon|bids due|deadline|last call|due tomorrow|bid due date|submit your bid|proposal reminder|bidding status|follow-up|follow up|participation follow-up|due\s+\d{1,2}/\d{1,2})\b', subj) else 0.0
-    r_remind_top = 1.0 if re.search(r'\b(reminder|bids due|due today|due tomorrow|deadline|closing soon|submit your bid|extended to|are you able to provide pricing|please confirm)\b', top) else 0.0
+    r_addend_rfi_top = 1.0 if re.search(
+        r'\b(addend|rfi response|rfi responses|bid form|wage scale|pre-bid rfi|questions and answers|q&a|clarification)\b',
+        top
+    ) else 0.0
     
-    # 3. RFI / Forms Rules
-    r_rfi_subj = 1.0 if re.search(r'\b(rfi\b|request for information|pre-bid|pre bid|bid form|workbook|key rates|wage rate|prevailing wage|site walk|sign-in sheet|tax exempt)\b', subj) and not r_addend_subj else 0.0
-    r_rfi_top = 1.0 if re.search(r'\b(rfi response|rfi responses|bid form|wage scale|pre-bid rfi|questions and answers|q&a)\b', top) else 0.0
+    r_addend_rfi_att = 1.0 if re.search(
+        r'\b(addend|bulletin|revised|amendment|rfi|bid form|wage)\b',
+        att_names
+    ) else 0.0
     
-    # 4. ITB Rules
-    r_itb_subj = 1.0 if re.search(r'\b(invitation to bid|itb|request for proposal|rfp|bid invitation|seeking bids|bidding opportunity|bid request|new project for bid|request for budgeting|invite to bid|new bid opportunity|bid drawings)\b', subj) else 0.0
-    r_itb_top = 1.0 if re.search(r'\b(invitation to bid|pricing a new project|requesting subcontractor bids|seeking proposals)\b', top) else 0.0
+    # 2. DATE REMINDER RULES
+    r_remind_subj = 1.0 if re.search(
+        r'\b(reminder|due today|closing soon|bids due|deadline|last call|due tomorrow|bid due date|submit your bid|proposal reminder|bidding status|follow-up|follow up|participation follow-up|due\s+\d{1,2}/\d{1,2})\b',
+        subj
+    ) else 0.0
+    
+    r_remind_top = 1.0 if re.search(
+        r'\b(reminder|bids due|due today|due tomorrow|deadline|closing soon|submit your bid|extended to|are you able to provide pricing|please confirm)\b',
+        top
+    ) else 0.0
+    
+    # 3. ITB RULES
+    r_itb_subj = 1.0 if re.search(
+        r'\b(invitation to bid|itb|request for proposal|rfp|bid invitation|seeking bids|bidding opportunity|bid request|new project for bid|request for budgeting|invite to bid|new bid opportunity|bid drawings)\b',
+        subj
+    ) else 0.0
+    
+    r_itb_top = 1.0 if re.search(
+        r'\b(invitation to bid|pricing a new project|requesting subcontractor bids|seeking proposals)\b',
+        top
+    ) else 0.0
 
-    # 5. Award / Won Rules
-    r_award = 1.0 if re.search(r'\b(awarded|contractor awarded|intent to award|notice of award|winning bid|subcontract agreement|award update|bid result)\b', full_top) else 0.0
+    # 4. AWARD / WON RULES
+    r_award = 1.0 if re.search(
+        r'\b(awarded|contractor awarded|intent to award|notice of award|winning bid|subcontract agreement|award update|bid result)\b',
+        full_top
+    ) else 0.0
 
-    # 6. Lost Rules
-    r_lost = 1.0 if re.search(r'\b(regret to inform|not selected|awarded to another|lost)\b', full_top) else 0.0
+    # 5. LOST RULES
+    r_lost = 1.0 if re.search(
+        r'\b(regret to inform|not selected|awarded to another|lost)\b',
+        full_top
+    ) else 0.0
 
-    # 7. Spam Rules
-    r_spam = 1.0 if re.search(r'\b(seo|lead generation|website design|marketing agency|payroll|unsecured loan|merchant funding|backup code|reset your password)\b', full_top) else 0.0
+    # 6. SPAM RULES
+    r_spam = 1.0 if re.search(
+        r'\b(seo|lead generation|website design|marketing agency|payroll|unsecured loan|merchant funding|backup code|reset your password)\b',
+        full_top
+    ) else 0.0
 
     return np.array([[
-        r_addend_subj * 4.0,
-        r_addend_supp * 3.0,
-        r_addend_att * 2.5,
+        r_addend_rfi_subj * 4.5,
+        r_addend_rfi_top * 3.0,
+        r_addend_rfi_att * 2.5,
         r_remind_subj * 4.0,
         r_remind_top * 3.0,
-        r_rfi_subj * 3.5,
-        r_rfi_top * 2.5,
         r_itb_subj * 3.5,
         r_itb_top * 2.0,
         r_award * 5.0,
