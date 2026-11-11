@@ -19,6 +19,7 @@ export async function GET() {
         duplicate_group_id,
         is_flagged_duplicate,
         duplicate_reasons,
+        duplicate_resolution,
         triage_status,
         priority,
         assigned_estimator_id,

@@ -33,6 +33,7 @@ import {
   CalendarCheck,
   ExternalLink,
   Briefcase,
+  Tag,
 } from 'lucide-react';
 import EmailDocumentViewer from '@/components/EmailDocumentViewer';
 import CalendarScheduleView from '@/components/CalendarScheduleView';
@@ -528,6 +529,18 @@ export default function DispatchDashboard() {
             <span>Estimator Portal</span>
             <span className="px-1.5 py-0.5 rounded-full text-[10px] bg-indigo-200/60 text-indigo-900 font-mono">
               {bids.filter((b) => b.assignedEstimator).length} Assigned
+            </span>
+          </Link>
+
+          <Link
+            href="/label"
+            className="px-4 py-2 rounded-xl text-xs font-bold transition-all flex items-center gap-2 bg-purple-50 hover:bg-purple-100 text-purple-700 border border-purple-200 shadow-2xs"
+            title="Mobile Data Labeling App (Optimized for Samsung Galaxy S24 FE)"
+          >
+            <Tag className="w-4 h-4 text-purple-600" />
+            <span>Quick Labeler</span>
+            <span className="px-1.5 py-0.5 rounded-full text-[10px] bg-purple-200/60 text-purple-900 font-mono">
+              S24 FE
             </span>
           </Link>
         </div>

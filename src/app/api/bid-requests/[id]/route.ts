@@ -9,6 +9,8 @@ interface UpdatePayload {
   triageStatus?: string | null;
   estimatorStatus?: 'unassigned' | 'assigned' | 'in_progress' | 'bid_submitted' | 'won' | 'lost' | 'no_bid' | null;
   estimatorNotes?: string | null;
+  duplicateResolution?: string | null;
+  isHumanLabeled?: boolean;
 }
 
 export async function PATCH(
@@ -71,6 +73,20 @@ export async function PATCH(
       updates.raw_payload = {
         ...(updates.raw_payload || currentRecord.raw_payload),
         estimator_notes: body.estimatorNotes,
+      };
+    }
+
+    // 2e. Handle Human Labeling Flag & Resolution (for ML dataset verification)
+    if (body.duplicateResolution !== undefined) {
+      updates.duplicate_resolution = body.duplicateResolution;
+    }
+    if (body.isHumanLabeled) {
+      updates.duplicate_resolution = 'human_verified';
+      updates.raw_payload = {
+        ...(updates.raw_payload || currentRecord.raw_payload),
+        is_labeled: true,
+        labeled_at: new Date().toISOString(),
+        human_verified: true,
       };
     }
 
