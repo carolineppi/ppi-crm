@@ -19,9 +19,11 @@ import {
   Sparkles,
   Paperclip,
   Check,
-  Smartphone,
-  Eye,
-  SlidersHorizontal,
+  Settings2,
+  X,
+  Plus,
+  HelpCircle,
+  Clock,
 } from 'lucide-react';
 
 interface BidItem {
@@ -47,22 +49,61 @@ interface BidItem {
   raw_payload?: any;
 }
 
-type LabelType = 'ITB' | 'Addendum' | 'Won' | 'Lost' | 'Spam';
+interface CustomLabelConfig {
+  key: '6' | '7' | '8' | '9';
+  name: string;
+  color: 'amber' | 'cyan' | 'indigo' | 'pink' | 'emerald' | 'purple' | 'blue';
+}
+
+const DEFAULT_CUSTOM_LABELS: CustomLabelConfig[] = [
+  { key: '6', name: 'Change Order', color: 'amber' },
+  { key: '7', name: 'RFI / Scope', color: 'cyan' },
+  { key: '8', name: 'Vendor Quote', color: 'indigo' },
+  { key: '9', name: 'Budgetary', color: 'pink' },
+];
 
 export default function QuickLabelerPage() {
   const [bids, setBids] = useState<BidItem[]>([]);
   const [loading, setLoading] = useState(true);
   const [currentIndex, setCurrentIndex] = useState(0);
-  const [filterMode, setFilterMode] = useState<'all' | 'unlabeled'>('unlabeled');
+  const [filterMode, setFilterMode] = useState<'unverified' | 'all' | 'verified'>('unverified');
   const [toast, setToast] = useState<string | null>(null);
   const [viewFormat, setViewFormat] = useState<'pdf' | 'text'>('pdf');
   const [isSaving, setIsSaving] = useState(false);
 
-  // Fetch all bids
+  // Custom Labels (Keys 6-9) State
+  const [customLabels, setCustomLabels] = useState<CustomLabelConfig[]>(DEFAULT_CUSTOM_LABELS);
+  const [isConfigOpen, setIsConfigOpen] = useState(false);
+  const [tempCustomLabels, setTempCustomLabels] = useState<CustomLabelConfig[]>(DEFAULT_CUSTOM_LABELS);
+
+  // Load custom labels from localStorage
+  useEffect(() => {
+    try {
+      const saved = localStorage.getItem('ppi_crm_custom_labels_v1');
+      if (saved) {
+        const parsed = JSON.parse(saved);
+        if (Array.isArray(parsed) && parsed.length > 0) {
+          setCustomLabels(parsed);
+          setTempCustomLabels(parsed);
+        }
+      }
+    } catch {
+      // fallback to defaults
+    }
+  }, []);
+
+  const saveCustomLabels = (newLabels: CustomLabelConfig[]) => {
+    setCustomLabels(newLabels);
+    localStorage.setItem('ppi_crm_custom_labels_v1', JSON.stringify(newLabels));
+    setIsConfigOpen(false);
+    showToast('✓ Custom labels (Keys 6-9) updated');
+  };
+
+  // Fetch all bids using lightweight summary endpoint
   const fetchBids = async () => {
     setLoading(true);
     try {
-      const res = await fetch('/api/bid-requests');
+      const res = await fetch('/api/bid-requests?summary=1');
       const data = await res.json();
       if (data.bidRequests && Array.isArray(data.bidRequests)) {
         setBids(data.bidRequests);
@@ -84,8 +125,8 @@ export default function QuickLabelerPage() {
     setTimeout(() => setToast(null), 2500);
   };
 
-  // Helper: check if a bid has been human-verified
-  const isHumanLabeled = (b: BidItem) => {
+  // Human-checked check: only records marked with human_verified or is_labeled are verified
+  const isHumanVerified = (b: BidItem) => {
     return (
       b.duplicate_resolution === 'human_verified' ||
       b.raw_payload?.is_labeled === true ||
@@ -93,8 +134,10 @@ export default function QuickLabelerPage() {
     );
   };
 
-  // Helper: determine current sticker
-  const getCurrentSticker = (b: BidItem): LabelType => {
+  // Get current assigned label
+  const getCurrentLabel = (b: BidItem): string => {
+    if (b.raw_payload?.human_label) return b.raw_payload.human_label;
+    if (b.raw_payload?.custom_category) return b.raw_payload.custom_category;
     if (b.email_intent === 'addendum_update') return 'Addendum';
     if (b.email_intent === 'bid_won') return 'Won';
     if (b.email_intent === 'bid_lost') return 'Lost';
@@ -104,8 +147,11 @@ export default function QuickLabelerPage() {
 
   // Filtered dataset
   const displayList = useMemo(() => {
-    if (filterMode === 'unlabeled') {
-      return bids.filter((b) => !isHumanLabeled(b));
+    if (filterMode === 'unverified') {
+      return bids.filter((b) => !isHumanVerified(b));
+    }
+    if (filterMode === 'verified') {
+      return bids.filter(isHumanVerified);
     }
     return bids;
   }, [bids, filterMode]);
@@ -121,19 +167,18 @@ export default function QuickLabelerPage() {
 
   // Labeled statistics
   const totalCount = bids.length;
-  const labeledCount = bids.filter(isHumanLabeled).length;
-  const unlabeledCount = totalCount - labeledCount;
-  const percentComplete = totalCount > 0 ? Math.round((labeledCount / totalCount) * 100) : 0;
+  const verifiedCount = bids.filter(isHumanVerified).length;
+  const unverifiedCount = totalCount - verifiedCount;
+  const percentComplete = totalCount > 0 ? Math.round((verifiedCount / totalCount) * 100) : 0;
 
   // Handle Label Assignment & Auto-Advance
   const handleAssignLabel = useCallback(
-    async (label: LabelType) => {
+    async (label: string) => {
       if (!currentBid || isSaving) return;
 
       const targetId = currentBid.id;
-      const prevSticker = getCurrentSticker(currentBid);
 
-      // Optimistic state update in local bids
+      // Optimistic state update
       setBids((prev) =>
         prev.map((b) => {
           if (b.id !== targetId) return b;
@@ -142,6 +187,9 @@ export default function QuickLabelerPage() {
           else if (label === 'Won') intent = 'bid_won';
           else if (label === 'Lost') intent = 'bid_lost';
           else if (label === 'Spam') intent = 'spam_noise';
+          else if (!['ITB', 'Addendum', 'Won', 'Lost', 'Spam'].includes(label)) {
+            intent = 'general_inquiry';
+          }
 
           return {
             ...b,
@@ -151,13 +199,15 @@ export default function QuickLabelerPage() {
               ...(b.raw_payload || {}),
               is_labeled: true,
               human_verified: true,
+              human_label: label,
+              custom_category: label,
               labeled_at: new Date().toISOString(),
             },
           };
         })
       );
 
-      showToast(`✓ Labeled as ${label}`);
+      showToast(`✓ Assigned "${label}" (Final)`);
 
       // Auto-advance to next email
       if (filterMode === 'all') {
@@ -165,15 +215,14 @@ export default function QuickLabelerPage() {
           setCurrentIndex((idx) => idx + 1);
         }
       } else {
-        // In 'unlabeled' mode, the current item will be removed from displayList on state change,
-        // so staying at the current index naturally points to the next unlabeled email!
-        // If we were at the end, cap it.
+        // In unverified mode, the item is removed from displayList, so staying at the current index
+        // automatically points to the next pending email!
         if (currentIndex >= displayList.length - 1 && currentIndex > 0) {
           setCurrentIndex((idx) => Math.max(0, idx - 1));
         }
       }
 
-      // Persist to Supabase in background
+      // Persist to Supabase
       try {
         setIsSaving(true);
         await fetch(`/api/bid-requests/${targetId}`, {
@@ -195,14 +244,14 @@ export default function QuickLabelerPage() {
     [currentBid, isSaving, filterMode, currentIndex, displayList.length]
   );
 
-  // Keyboard shortcuts for laptop / desktop labeling
+  // Keyboard shortcuts (Keys 1-5 for standard, Keys 6-9 for custom categories)
   useEffect(() => {
     const handleKeyDown = (e: KeyboardEvent) => {
-      // Don't trigger if user is typing in an input
       if (['INPUT', 'TEXTAREA', 'SELECT'].includes((e.target as HTMLElement)?.tagName)) {
         return;
       }
 
+      // Standard Keys 1-5
       if (e.key === '1' || e.key === 'i' || e.key === 'I') {
         e.preventDefault();
         handleAssignLabel('ITB');
@@ -218,7 +267,27 @@ export default function QuickLabelerPage() {
       } else if (e.key === '5' || e.key === 's' || e.key === 'S') {
         e.preventDefault();
         handleAssignLabel('Spam');
-      } else if (e.key === 'ArrowRight' || e.key === ' ') {
+      }
+      // Custom Keys 6-9
+      else if (e.key === '6') {
+        e.preventDefault();
+        const l = customLabels.find((c) => c.key === '6');
+        if (l && l.name.trim()) handleAssignLabel(l.name.trim());
+      } else if (e.key === '7') {
+        e.preventDefault();
+        const l = customLabels.find((c) => c.key === '7');
+        if (l && l.name.trim()) handleAssignLabel(l.name.trim());
+      } else if (e.key === '8') {
+        e.preventDefault();
+        const l = customLabels.find((c) => c.key === '8');
+        if (l && l.name.trim()) handleAssignLabel(l.name.trim());
+      } else if (e.key === '9') {
+        e.preventDefault();
+        const l = customLabels.find((c) => c.key === '9');
+        if (l && l.name.trim()) handleAssignLabel(l.name.trim());
+      }
+      // Navigation
+      else if (e.key === 'ArrowRight' || e.key === ' ') {
         e.preventDefault();
         if (currentIndex < displayList.length - 1) {
           setCurrentIndex((i) => i + 1);
@@ -233,7 +302,24 @@ export default function QuickLabelerPage() {
 
     window.addEventListener('keydown', handleKeyDown);
     return () => window.removeEventListener('keydown', handleKeyDown);
-  }, [handleAssignLabel, currentIndex, displayList.length]);
+  }, [handleAssignLabel, currentIndex, displayList.length, customLabels]);
+
+  const getColorClasses = (color: string) => {
+    switch (color) {
+      case 'amber':
+        return 'bg-amber-600 hover:bg-amber-500 active:bg-amber-700 text-white border-amber-400/40';
+      case 'cyan':
+        return 'bg-cyan-600 hover:bg-cyan-500 active:bg-cyan-700 text-white border-cyan-400/40';
+      case 'indigo':
+        return 'bg-indigo-600 hover:bg-indigo-500 active:bg-indigo-700 text-white border-indigo-400/40';
+      case 'pink':
+        return 'bg-pink-600 hover:bg-pink-500 active:bg-pink-700 text-white border-pink-400/40';
+      case 'emerald':
+        return 'bg-emerald-600 hover:bg-emerald-500 active:bg-emerald-700 text-white border-emerald-400/40';
+      default:
+        return 'bg-slate-700 hover:bg-slate-600 active:bg-slate-800 text-white border-slate-500/40';
+    }
+  };
 
   return (
     <div className="flex flex-col h-[100dvh] max-w-lg mx-auto bg-slate-900 text-slate-100 select-none overflow-hidden font-sans">
@@ -246,7 +332,7 @@ export default function QuickLabelerPage() {
       )}
 
       {/* 1. TOP MOBILE HEADER: Navigation, Counter & Mode Toggle */}
-      <header className="flex-none bg-slate-950 border-b border-slate-800 px-3.5 py-2.5 flex items-center justify-between gap-2">
+      <header className="flex-none bg-slate-950 border-b border-slate-800 px-3.5 py-2 flex items-center justify-between gap-2">
         <Link
           href="/"
           className="flex items-center gap-1.5 text-xs text-slate-400 hover:text-white py-1 px-1.5 -ml-1 rounded active:bg-slate-800 transition-colors"
@@ -265,7 +351,7 @@ export default function QuickLabelerPage() {
             <span className="text-slate-500">/</span>
             <span className="text-slate-400">{displayList.length}</span>
             <span className="text-[10px] text-purple-300 font-normal">
-              ({percentComplete}% done)
+              ({percentComplete}% verified)
             </span>
           </div>
 
@@ -278,56 +364,57 @@ export default function QuickLabelerPage() {
           </div>
         </div>
 
-        {/* Filter Toggle: Unlabeled vs All */}
+        {/* Filter Mode Selector & Settings */}
         <div className="flex items-center gap-1">
-          <button
-            onClick={() => setFilterMode((m) => (m === 'unlabeled' ? 'all' : 'unlabeled'))}
-            className={`px-2 py-1 rounded text-[11px] font-bold border transition-colors flex items-center gap-1 ${
-              filterMode === 'unlabeled'
-                ? 'bg-purple-950/80 text-purple-300 border-purple-700/60'
-                : 'bg-slate-800 text-slate-300 border-slate-700'
-            }`}
-            title="Toggle between Unlabeled Only and All emails"
+          <select
+            value={filterMode}
+            onChange={(e) => {
+              setFilterMode(e.target.value as any);
+              setCurrentIndex(0);
+            }}
+            className="bg-slate-900 border border-slate-700 text-slate-200 text-[11px] font-bold rounded-lg px-2 py-1 focus:outline-none focus:ring-1 focus:ring-purple-500"
           >
-            <span>{filterMode === 'unlabeled' ? 'Queue' : 'All'}</span>
-            <span className="px-1 py-0.2 rounded-full bg-black/40 text-[9px] font-mono">
-              {filterMode === 'unlabeled' ? unlabeledCount : totalCount}
-            </span>
+            <option value="unverified">To Check ({unverifiedCount})</option>
+            <option value="all">All ({totalCount})</option>
+            <option value="verified">Verified ({verifiedCount})</option>
+          </select>
+
+          <button
+            type="button"
+            onClick={() => {
+              setTempCustomLabels([...customLabels]);
+              setIsConfigOpen(true);
+            }}
+            className="p-1.5 rounded-lg bg-slate-900 hover:bg-slate-800 text-slate-400 hover:text-white border border-slate-800 active:scale-95 transition-all"
+            title="Configure Additional Labels (Buttons 6-9)"
+          >
+            <Settings2 className="w-4 h-4 text-purple-300" />
           </button>
         </div>
       </header>
 
-      {/* 2. EMAIL SUBJECT & SENDER INFO BAR (Optimized for S24 FE screen width) */}
-      {currentBid ? (
+      {/* 2. LOADING STATE */}
+      {loading ? (
+        <div className="flex-1 flex flex-col items-center justify-center p-6 text-center space-y-3 bg-slate-950">
+          <RefreshCw className="w-8 h-8 text-purple-400 animate-spin" />
+          <h3 className="text-sm font-bold text-white">Loading Verification Queue...</h3>
+          <p className="text-xs text-slate-500">Fetching 500+ backfilled emails from Supabase</p>
+        </div>
+      ) : currentBid ? (
         <>
-          <div className="flex-none bg-slate-900 border-b border-slate-800 px-3.5 py-2.5 space-y-1">
+          {/* 3. EMAIL SUBJECT & SENDER INFO BAR */}
+          <div className="flex-none bg-slate-900 border-b border-slate-800 px-3.5 py-2 space-y-1">
             {/* Badges & Status Row */}
             <div className="flex items-center justify-between gap-2 text-[11px]">
               <div className="flex items-center gap-1.5 flex-wrap">
-                {/* Current Classification Badge */}
-                <span
-                  className={`px-2 py-0.5 rounded text-[10px] font-black uppercase tracking-wider ${
-                    getCurrentSticker(currentBid) === 'ITB'
-                      ? 'bg-blue-600 text-white'
-                      : getCurrentSticker(currentBid) === 'Addendum'
-                      ? 'bg-purple-600 text-white'
-                      : getCurrentSticker(currentBid) === 'Won'
-                      ? 'bg-emerald-600 text-white'
-                      : getCurrentSticker(currentBid) === 'Lost'
-                      ? 'bg-rose-600 text-white'
-                      : 'bg-slate-600 text-white'
-                  }`}
-                >
-                  {getCurrentSticker(currentBid)}
-                </span>
-
-                {isHumanLabeled(currentBid) ? (
-                  <span className="px-1.5 py-0.5 rounded text-[10px] bg-emerald-950/90 text-emerald-300 border border-emerald-800 flex items-center gap-1">
-                    <CheckCircle className="w-3 h-3 text-emerald-400" /> Human Labeled
+                {/* Human Verified vs AI Suggested Badge */}
+                {isHumanVerified(currentBid) ? (
+                  <span className="px-2 py-0.5 rounded text-[10px] font-black uppercase bg-emerald-500 text-slate-950 flex items-center gap-1">
+                    <CheckCircle className="w-3 h-3 text-slate-950" /> {getCurrentLabel(currentBid)} (Verified)
                   </span>
                 ) : (
-                  <span className="px-1.5 py-0.5 rounded text-[10px] bg-amber-950/80 text-amber-300 border border-amber-800/80 flex items-center gap-1">
-                    <Sparkles className="w-3 h-3 text-amber-400" /> AI Initial
+                  <span className="px-2 py-0.5 rounded text-[10px] font-bold bg-amber-500/20 text-amber-300 border border-amber-500/40 flex items-center gap-1">
+                    <Sparkles className="w-3 h-3 text-amber-400" /> AI Guess: {getCurrentLabel(currentBid)} (Pending Check)
                   </span>
                 )}
 
@@ -393,11 +480,10 @@ export default function QuickLabelerPage() {
             )}
           </div>
 
-          {/* 3. CENTER STAGE: EMAIL BODY IN PDF FORM (Scrollable dynamic container) */}
-          <main className="flex-1 min-h-0 bg-slate-950 relative overflow-hidden flex flex-col p-2">
+          {/* 4. CENTER STAGE: EMAIL BODY IN PDF PRINT FORM */}
+          <main className="flex-1 min-h-0 bg-slate-950 relative overflow-hidden flex flex-col p-1.5 sm:p-2">
             <div className="w-full h-full bg-white rounded-xl shadow-lg overflow-hidden border border-slate-800 flex flex-col">
               {viewFormat === 'pdf' ? (
-                /* PDF Document Render inside sandboxed iframe */
                 <iframe
                   key={currentBid.id}
                   src={`/api/bid-requests/${currentBid.id}/document`}
@@ -405,7 +491,6 @@ export default function QuickLabelerPage() {
                   title="Email Body in PDF Print Form"
                 />
               ) : (
-                /* Clean Raw Text Fallback */
                 <div className="w-full h-full p-4 overflow-y-auto text-slate-900 text-xs font-mono leading-relaxed bg-slate-50 whitespace-pre-wrap select-text">
                   {currentBid.email_body_text ||
                     currentBid.raw_payload?.bodyText ||
@@ -416,9 +501,9 @@ export default function QuickLabelerPage() {
             </div>
           </main>
 
-          {/* 4. BOTTOM THUMB CONTROL PAD: Tailored for Samsung Galaxy S24 FE One-Handed Labeling */}
-          <footer className="flex-none bg-slate-950 border-t border-slate-800 px-3 pt-2 pb-3.5 space-y-2">
-            {/* Auxiliary Row: Prev / Next Navigation */}
+          {/* 5. BOTTOM THUMB CONTROL PAD (S24 FE Phone & Desktop Keys 1-9) */}
+          <footer className="flex-none bg-slate-950 border-t border-slate-800 px-2.5 pt-1.5 pb-2.5 space-y-1.5">
+            {/* Auxiliary Row: Navigation & Shortcuts Hint */}
             <div className="flex items-center justify-between text-xs text-slate-400 px-1">
               <button
                 type="button"
@@ -430,8 +515,8 @@ export default function QuickLabelerPage() {
                 <span>Prev</span>
               </button>
 
-              <span className="text-[11px] font-mono text-slate-500">
-                Tap button to save &amp; advance
+              <span className="text-[10px] font-mono text-slate-500">
+                1-tap assigns &amp; advances
               </span>
 
               <button
@@ -445,30 +530,28 @@ export default function QuickLabelerPage() {
               </button>
             </div>
 
-            {/* 5 Big High-Contrast Thumb Buttons for S24 FE */}
-            <div className="space-y-1.5">
-              {/* Top Tier: The 2 Most Frequent Estimating Emails (ITB & Addendum) */}
-              <div className="grid grid-cols-2 gap-2">
-                {/* 1. ITB Button (Blue) */}
+            {/* BUTTON MATRIX (Thumb-Optimized for Samsung Galaxy S24 FE) */}
+            <div className="space-y-1">
+              {/* Row 1: The 2 Primary Inbound ITB Types */}
+              <div className="grid grid-cols-2 gap-1.5">
                 <button
                   type="button"
                   onClick={() => handleAssignLabel('ITB')}
-                  className="py-3 px-3 rounded-xl bg-blue-600 hover:bg-blue-500 active:bg-blue-700 active:scale-95 text-white font-black text-sm flex items-center justify-center gap-1.5 shadow-md border border-blue-400/40 transition-all cursor-pointer"
+                  className="py-2.5 px-2 rounded-xl bg-blue-600 hover:bg-blue-500 active:bg-blue-700 active:scale-95 text-white font-black text-xs flex items-center justify-center gap-1.5 shadow-md border border-blue-400/40 cursor-pointer"
                 >
-                  <Tag className="w-4 h-4 text-blue-200" />
-                  <span>ITB</span>
+                  <Tag className="w-3.5 h-3.5 text-blue-200" />
+                  <span>ITB (Invitation)</span>
                   <span className="text-[10px] font-mono text-blue-200 bg-black/25 px-1 py-0.2 rounded hidden sm:inline">
                     1
                   </span>
                 </button>
 
-                {/* 2. Addendum Button (Purple) */}
                 <button
                   type="button"
                   onClick={() => handleAssignLabel('Addendum')}
-                  className="py-3 px-3 rounded-xl bg-purple-600 hover:bg-purple-500 active:bg-purple-700 active:scale-95 text-white font-black text-sm flex items-center justify-center gap-1.5 shadow-md border border-purple-400/40 transition-all cursor-pointer"
+                  className="py-2.5 px-2 rounded-xl bg-purple-600 hover:bg-purple-500 active:bg-purple-700 active:scale-95 text-white font-black text-xs flex items-center justify-center gap-1.5 shadow-md border border-purple-400/40 cursor-pointer"
                 >
-                  <FileSpreadsheet className="w-4 h-4 text-purple-200" />
+                  <FileSpreadsheet className="w-3.5 h-3.5 text-purple-200" />
                   <span>Addendum</span>
                   <span className="text-[10px] font-mono text-purple-200 bg-black/25 px-1 py-0.2 rounded hidden sm:inline">
                     2
@@ -476,66 +559,81 @@ export default function QuickLabelerPage() {
                 </button>
               </div>
 
-              {/* Bottom Tier: Won, Lost, and Spam */}
+              {/* Row 2: Standard Status Outcomes (Won, Lost, Spam) */}
               <div className="grid grid-cols-3 gap-1.5">
-                {/* 3. Won Button (Emerald) */}
                 <button
                   type="button"
                   onClick={() => handleAssignLabel('Won')}
-                  className="py-2.5 px-2 rounded-xl bg-emerald-600 hover:bg-emerald-500 active:bg-emerald-700 active:scale-95 text-white font-black text-xs flex items-center justify-center gap-1 shadow-md border border-emerald-400/40 transition-all cursor-pointer"
+                  className="py-2 px-1 rounded-xl bg-emerald-600 hover:bg-emerald-500 active:bg-emerald-700 active:scale-95 text-white font-black text-[11px] flex items-center justify-center gap-1 shadow-md border border-emerald-400/40 cursor-pointer"
                 >
-                  <Trophy className="w-3.5 h-3.5 text-emerald-200" />
+                  <Trophy className="w-3 h-3 text-emerald-200" />
                   <span>Won</span>
                   <span className="text-[9px] font-mono text-emerald-200 bg-black/25 px-1 rounded hidden sm:inline">
                     3
                   </span>
                 </button>
 
-                {/* 4. Lost Button (Rose) */}
                 <button
                   type="button"
                   onClick={() => handleAssignLabel('Lost')}
-                  className="py-2.5 px-2 rounded-xl bg-rose-600 hover:bg-rose-500 active:bg-rose-700 active:scale-95 text-white font-black text-xs flex items-center justify-center gap-1 shadow-md border border-rose-400/40 transition-all cursor-pointer"
+                  className="py-2 px-1 rounded-xl bg-rose-600 hover:bg-rose-500 active:bg-rose-700 active:scale-95 text-white font-black text-[11px] flex items-center justify-center gap-1 shadow-md border border-rose-400/40 cursor-pointer"
                 >
-                  <XCircle className="w-3.5 h-3.5 text-rose-200" />
+                  <XCircle className="w-3 h-3 text-rose-200" />
                   <span>Lost</span>
                   <span className="text-[9px] font-mono text-rose-200 bg-black/25 px-1 rounded hidden sm:inline">
                     4
                   </span>
                 </button>
 
-                {/* 5. Spam Button (Slate) */}
                 <button
                   type="button"
                   onClick={() => handleAssignLabel('Spam')}
-                  className="py-2.5 px-2 rounded-xl bg-slate-700 hover:bg-slate-600 active:bg-slate-800 active:scale-95 text-white font-black text-xs flex items-center justify-center gap-1 shadow-md border border-slate-500/40 transition-all cursor-pointer"
+                  className="py-2 px-1 rounded-xl bg-slate-700 hover:bg-slate-600 active:bg-slate-800 active:scale-95 text-white font-black text-[11px] flex items-center justify-center gap-1 shadow-md border border-slate-500/40 cursor-pointer"
                 >
-                  <ShieldAlert className="w-3.5 h-3.5 text-slate-300" />
+                  <ShieldAlert className="w-3 h-3 text-slate-300" />
                   <span>Spam</span>
                   <span className="text-[9px] font-mono text-slate-300 bg-black/25 px-1 rounded hidden sm:inline">
                     5
                   </span>
                 </button>
               </div>
+
+              {/* Row 3: UP TO FOUR ADDITIONAL CUSTOM LABELS (Keys 6-9) */}
+              <div className="grid grid-cols-4 gap-1 pt-0.5">
+                {customLabels.map((custom) => (
+                  <button
+                    key={custom.key}
+                    type="button"
+                    onClick={() => handleAssignLabel(custom.name)}
+                    className={`py-1.5 px-1 rounded-lg font-bold text-[10px] flex items-center justify-center gap-0.5 shadow-sm border transition-all truncate active:scale-95 ${getColorClasses(
+                      custom.color
+                    )}`}
+                    title={`Assign "${custom.name}" (Desktop key: ${custom.key})`}
+                  >
+                    <span className="font-mono text-[9px] opacity-75">{custom.key}:</span>
+                    <span className="truncate">{custom.name}</span>
+                  </button>
+                ))}
+              </div>
             </div>
           </footer>
         </>
       ) : (
-        /* Empty State */
-        <div className="flex-1 flex flex-col items-center justify-center p-6 text-center space-y-4">
+        /* Empty / All Caught Up State */
+        <div className="flex-1 flex flex-col items-center justify-center p-6 text-center space-y-4 bg-slate-950">
           <div className="w-16 h-16 rounded-full bg-emerald-500/20 text-emerald-400 flex items-center justify-center border border-emerald-500/30">
             <CheckCircle className="w-8 h-8" />
           </div>
           <div className="space-y-1">
             <h3 className="text-lg font-bold text-white">All Caught Up!</h3>
             <p className="text-xs text-slate-400 max-w-xs">
-              {filterMode === 'unlabeled'
-                ? `You have labeled all emails in the queue (${labeledCount} total).`
-                : 'No emails found in this database.'}
+              {filterMode === 'unverified'
+                ? `You have manually checked and verified every email in the queue (${verifiedCount} verified).`
+                : 'No emails match this filter.'}
             </p>
           </div>
           <div className="flex items-center gap-2 pt-2">
-            {filterMode === 'unlabeled' && (
+            {filterMode === 'unverified' && (
               <button
                 onClick={() => setFilterMode('all')}
                 className="px-4 py-2 rounded-xl text-xs font-bold bg-purple-600 hover:bg-purple-500 text-white transition-all shadow-md"
@@ -549,6 +647,83 @@ export default function QuickLabelerPage() {
             >
               Back to Dashboard
             </Link>
+          </div>
+        </div>
+      )}
+
+      {/* 6. MODAL: CONFIGURE ADDITIONAL LABELS (KEYS 6-9) */}
+      {isConfigOpen && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/75 backdrop-blur-sm animate-in fade-in">
+          <div className="bg-slate-900 border border-slate-700 rounded-2xl max-w-sm w-full p-5 space-y-4 shadow-2xl">
+            <div className="flex items-center justify-between border-b border-slate-800 pb-2.5">
+              <div className="flex items-center gap-2">
+                <Settings2 className="w-4 h-4 text-purple-400" />
+                <h3 className="text-sm font-bold text-white">Custom Labels (Keys 6–9)</h3>
+              </div>
+              <button
+                onClick={() => setIsConfigOpen(false)}
+                className="text-slate-400 hover:text-white p-1 rounded-lg"
+              >
+                <X className="w-4 h-4" />
+              </button>
+            </div>
+
+            <p className="text-xs text-slate-400">
+              Customize up to four additional category labels. These map directly to keys <strong>6, 7, 8, 9</strong> on Desktop and appear as quick buttons on your phone.
+            </p>
+
+            <div className="space-y-3">
+              {tempCustomLabels.map((lbl, idx) => (
+                <div key={lbl.key} className="flex items-center gap-2">
+                  <span className="w-6 h-6 rounded-md bg-slate-800 border border-slate-700 font-mono text-xs font-bold flex items-center justify-center text-purple-300">
+                    {lbl.key}
+                  </span>
+                  <input
+                    type="text"
+                    value={lbl.name}
+                    onChange={(e) => {
+                      const updated = [...tempCustomLabels];
+                      updated[idx].name = e.target.value;
+                      setTempCustomLabels(updated);
+                    }}
+                    placeholder={`Category name for key ${lbl.key}`}
+                    className="flex-1 bg-slate-950 border border-slate-700 rounded-lg px-2.5 py-1.5 text-xs text-white focus:outline-none focus:ring-1 focus:ring-purple-500"
+                  />
+                  <select
+                    value={lbl.color}
+                    onChange={(e) => {
+                      const updated = [...tempCustomLabels];
+                      updated[idx].color = e.target.value as any;
+                      setTempCustomLabels(updated);
+                    }}
+                    className="bg-slate-950 border border-slate-700 rounded-lg px-2 py-1.5 text-xs text-slate-300"
+                  >
+                    <option value="amber">Amber</option>
+                    <option value="cyan">Cyan</option>
+                    <option value="indigo">Indigo</option>
+                    <option value="pink">Pink</option>
+                    <option value="emerald">Emerald</option>
+                  </select>
+                </div>
+              ))}
+            </div>
+
+            <div className="flex items-center justify-end gap-2 pt-2 border-t border-slate-800">
+              <button
+                type="button"
+                onClick={() => setTempCustomLabels(DEFAULT_CUSTOM_LABELS)}
+                className="px-3 py-1.5 rounded-lg text-xs font-semibold text-slate-400 hover:text-white"
+              >
+                Reset Defaults
+              </button>
+              <button
+                type="button"
+                onClick={() => saveCustomLabels(tempCustomLabels)}
+                className="px-4 py-1.5 rounded-lg text-xs font-bold bg-purple-600 hover:bg-purple-500 text-white shadow-md active:scale-95"
+              >
+                Save Labels
+              </button>
+            </div>
           </div>
         </div>
       )}

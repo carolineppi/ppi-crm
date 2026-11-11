@@ -19,7 +19,7 @@ async function exportDataset() {
 
   // Lightweight column projection: avoids fetching multi-megabyte base64 payloads
   const columns =
-    'id, email_intent, email_subject, email_body_text, sender_email, sender_name, attachments, duplicate_resolution, triage_status, estimator_status, email_received_at, created_at';
+    'id, email_intent, email_subject, email_body_text, sender_email, sender_name, attachments, duplicate_resolution, triage_status, estimator_status, raw_payload, email_received_at, created_at';
 
   while (true) {
     const from = page * pageSize;
@@ -94,12 +94,15 @@ async function exportDataset() {
   const jsonlRows: string[] = [];
 
   for (const r of allRecords) {
-    let label = 'ITB';
-    if (r.email_intent === 'addendum_update') label = 'Addendum';
-    else if (r.email_intent === 'bid_won') label = 'Won';
-    else if (r.email_intent === 'bid_lost') label = 'Lost';
-    else if (r.email_intent === 'spam_noise') label = 'Spam';
-    else if (r.email_intent === 'general_inquiry') label = 'General';
+    let label = r.raw_payload?.human_label || r.raw_payload?.custom_category;
+    if (!label) {
+      if (r.email_intent === 'addendum_update') label = 'Addendum';
+      else if (r.email_intent === 'bid_won') label = 'Won';
+      else if (r.email_intent === 'bid_lost') label = 'Lost';
+      else if (r.email_intent === 'spam_noise') label = 'Spam';
+      else if (r.email_intent === 'general_inquiry') label = 'General';
+      else label = 'ITB';
+    }
 
     labelCounts[label] = (labelCounts[label] || 0) + 1;
 
@@ -126,6 +129,9 @@ async function exportDataset() {
 
     // Human verification indicator
     const labelVerified =
+      r.duplicate_resolution === 'human_verified' ||
+      r.raw_payload?.is_labeled === true ||
+      r.raw_payload?.human_verified === true ||
       r.duplicate_resolution === 'confirmed_duplicate' ||
       r.duplicate_resolution === 'marked_distinct' ||
       r.triage_status === 'assigned' ||

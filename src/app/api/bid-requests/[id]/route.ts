@@ -2,7 +2,7 @@ import { NextRequest, NextResponse } from 'next/server';
 import { createServerSupabaseClient } from '@/lib/supabase/server';
 
 interface UpdatePayload {
-  newSticker?: 'ITB' | 'Addendum' | 'Won' | 'Lost' | 'Spam';
+  newSticker?: string;
   matchedBidNumber?: string | null;
   assignedEstimator?: string | null;
   bidDueDate?: string | null;
@@ -211,6 +211,19 @@ export async function PATCH(
         updates.triage_status = 'archived';
         updates.matched_bid_id = null;
         updates.matched_bid_number = null;
+      } else {
+        // CASE F: Custom User-Defined Label (Buttons 6-9)
+        updates.email_intent = 'general_inquiry';
+        updates.triage_status = 'ready_for_assignment';
+        updates.filter_status = 'inbox';
+        updates.raw_payload = {
+          ...(updates.raw_payload || currentRecord.raw_payload),
+          is_labeled: true,
+          human_verified: true,
+          labeled_at: new Date().toISOString(),
+          human_label: sticker,
+          custom_category: sticker,
+        };
       }
     }
 
