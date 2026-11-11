@@ -34,6 +34,8 @@ interface BidItem {
   sender_name: string;
   email_received_at: string;
   email_intent: string;
+  is_human_labeled?: boolean;
+  human_label?: string | null;
   duplicate_resolution?: string | null;
   triage_status?: string | null;
   estimator_status?: string | null;
@@ -125,9 +127,10 @@ export default function QuickLabelerPage() {
     setTimeout(() => setToast(null), 2500);
   };
 
-  // Human-checked check: only records marked with human_verified or is_labeled are verified
+  // Human-checked check: checks database is_human_labeled column, duplicate_resolution, and raw_payload
   const isHumanVerified = (b: BidItem) => {
     return (
+      b.is_human_labeled === true ||
       b.duplicate_resolution === 'human_verified' ||
       b.raw_payload?.is_labeled === true ||
       b.raw_payload?.human_verified === true
@@ -136,6 +139,7 @@ export default function QuickLabelerPage() {
 
   // Get current assigned label
   const getCurrentLabel = (b: BidItem): string => {
+    if (b.human_label) return b.human_label;
     if (b.raw_payload?.human_label) return b.raw_payload.human_label;
     if (b.raw_payload?.custom_category) return b.raw_payload.custom_category;
     if (b.email_intent === 'addendum_update') return 'Addendum';
@@ -194,6 +198,8 @@ export default function QuickLabelerPage() {
           return {
             ...b,
             email_intent: intent,
+            is_human_labeled: true,
+            human_label: label,
             duplicate_resolution: 'human_verified',
             raw_payload: {
               ...(b.raw_payload || {}),
@@ -225,7 +231,7 @@ export default function QuickLabelerPage() {
       // Persist to Supabase
       try {
         setIsSaving(true);
-        await fetch(`/api/bid-requests/${targetId}`, {
+        const res = await fetch(`/api/bid-requests/${targetId}`, {
           method: 'PATCH',
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({
@@ -234,6 +240,11 @@ export default function QuickLabelerPage() {
             duplicateResolution: 'human_verified',
           }),
         });
+        if (!res.ok) {
+          const errData = await res.json().catch(() => ({}));
+          console.error('Failed to save label to database:', errData);
+          showToast(`⚠ Error saving: ${errData.details || errData.error || 'Server error'}`);
+        }
       } catch (err) {
         console.error('Failed to save label:', err);
         showToast('⚠ Network error saving label');

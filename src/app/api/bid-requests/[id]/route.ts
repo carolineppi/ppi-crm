@@ -81,12 +81,16 @@ export async function PATCH(
       updates.duplicate_resolution = body.duplicateResolution;
     }
     if (body.isHumanLabeled) {
+      updates.is_human_labeled = true;
+      updates.human_label = body.newSticker || currentRecord.human_label || currentRecord.email_intent;
+      updates.human_labeled_at = new Date().toISOString();
       updates.duplicate_resolution = 'human_verified';
       updates.raw_payload = {
         ...(updates.raw_payload || currentRecord.raw_payload),
         is_labeled: true,
         labeled_at: new Date().toISOString(),
         human_verified: true,
+        human_label: body.newSticker || currentRecord.email_intent,
       };
     }
 

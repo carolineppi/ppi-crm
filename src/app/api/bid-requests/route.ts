@@ -41,6 +41,9 @@ export async function GET(request: NextRequest) {
         match_reason,
         match_status,
         estimator_status,
+        is_human_labeled,
+        human_label,
+        human_labeled_at,
         raw_payload,
         created_at
       `
@@ -79,6 +82,9 @@ export async function GET(request: NextRequest) {
         match_reason,
         match_status,
         estimator_status,
+        is_human_labeled,
+        human_label,
+        human_labeled_at,
         raw_payload,
         created_at
       `;
