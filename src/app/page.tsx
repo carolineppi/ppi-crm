@@ -38,6 +38,8 @@ import {
   AlertTriangle,
   Unlink,
   ArrowRightLeft,
+  HelpCircle,
+  Brain,
 } from 'lucide-react';
 import EmailDocumentViewer from '@/components/EmailDocumentViewer';
 import CalendarScheduleView from '@/components/CalendarScheduleView';
@@ -78,8 +80,10 @@ interface DisplayBidRequest {
   bodyText?: string | null;
   bodyHtml?: string | null;
 
-  // 5 Definitive Stickers
-  sticker: 'ITB' | 'Addendum' | 'Won' | 'Lost' | 'Spam' | 'General';
+  // Definitive Category Sticker (Human Label takes precedence over AI intent)
+  sticker: string;
+  isHumanLabeled?: boolean;
+  humanLabel?: string | null;
   filterStatus: 'inbox' | 'auto_filtered' | 'promoted_to_job' | 'archived';
 
   // AI & Forwarding Enrichment
@@ -110,7 +114,8 @@ const ESTIMATORS = ['Steven Gross', 'Jaxson Farnholtz', 'Matt Magnani', 'Mariam 
 
 export default function DispatchDashboard() {
   const [bids, setBids] = useState<DisplayBidRequest[]>([]);
-  const [activeFilter, setActiveFilter] = useState<'ALL' | 'ITB' | 'Addendum' | 'Won' | 'Lost' | 'Spam'>('ALL');
+  const [activeFilter, setActiveFilter] = useState<string>('ALL');
+  const [verificationFilter, setVerificationFilter] = useState<'all' | 'human_only' | 'unverified_only'>('all');
   const [viewMode, setViewMode] = useState<'feed' | 'calendar'>('feed');
   const [isUsingLiveDb, setIsUsingLiveDb] = useState(false);
   const [isLoading, setIsLoading] = useState(false);
@@ -126,7 +131,7 @@ export default function DispatchDashboard() {
   // Reset to page 1 whenever active filter or search query changes
   useEffect(() => {
     setCurrentPage(1);
-  }, [activeFilter, feedSearchQuery]);
+  }, [activeFilter, verificationFilter, feedSearchQuery]);
 
   // Review & Reclassification Modal State
   const [reviewingBid, setReviewingBid] = useState<DisplayBidRequest | null>(null);
@@ -166,11 +171,25 @@ export default function DispatchDashboard() {
       const data = await res.json();
       if (data.bidRequests && Array.isArray(data.bidRequests)) {
         const mapped: DisplayBidRequest[] = data.bidRequests.map((r: any) => {
-          let sticker: DisplayBidRequest['sticker'] = 'ITB';
-          if (r.email_intent === 'addendum_update') sticker = 'Addendum';
-          else if (r.email_intent === 'bid_won') sticker = 'Won';
-          else if (r.email_intent === 'bid_lost') sticker = 'Lost';
-          else if (r.email_intent === 'spam_noise') sticker = 'Spam';
+          const isHuman = Boolean(
+            r.is_human_labeled ||
+            r.duplicate_resolution === 'human_verified' ||
+            r.raw_payload?.is_labeled === true ||
+            r.raw_payload?.human_verified === true
+          );
+          const rawHumanLabel = r.human_label || r.raw_payload?.human_label || r.raw_payload?.custom_category;
+
+          let sticker: string = 'ITB';
+          if (isHuman && rawHumanLabel) {
+            // User's personal human label takes 100% authoritative precedence!
+            sticker = rawHumanLabel;
+          } else {
+            if (r.email_intent === 'addendum_update') sticker = 'Addendum';
+            else if (r.email_intent === 'bid_won') sticker = 'Won';
+            else if (r.email_intent === 'bid_lost') sticker = 'Lost';
+            else if (r.email_intent === 'spam_noise') sticker = 'Spam';
+            else if (r.email_intent === 'general_inquiry') sticker = 'General';
+          }
 
           const assignedName = r.raw_payload?.assigned_estimator_name || (r.assigned_estimator_id ? 'Assigned' : null);
 
@@ -223,6 +242,8 @@ export default function DispatchDashboard() {
             bodyText: r.email_body_text || r.raw_payload?.bodyText || r.raw_payload?.body || null,
             bodyHtml: r.email_body_html || r.raw_payload?.bodyHtml || null,
             sticker,
+            isHumanLabeled: isHuman,
+            humanLabel: rawHumanLabel || null,
             filterStatus: r.filter_status || 'inbox',
 
             isForwarded: r.is_forwarded,
@@ -275,11 +296,17 @@ export default function DispatchDashboard() {
     );
   });
 
-  // Filter based on active sticker filter bar and search query
+  // Filter based on verification status, active sticker filter bar, and search query
   const filteredBids = bids.filter((b) => {
-    // 1. Sticker filter
+    // 1. Verification filter mode (All vs Human Verified Only vs AI Pending)
+    if (verificationFilter === 'human_only' && !b.isHumanLabeled) return false;
+    if (verificationFilter === 'unverified_only' && b.isHumanLabeled) return false;
+
+    // 2. Sticker filter
     if (activeFilter === 'ALL') {
       if (b.sticker === 'Spam' || b.filterStatus === 'auto_filtered') return false;
+    } else if (activeFilter === 'Won') {
+      if (b.sticker !== 'Won' && b.sticker !== 'Contractor Awarded') return false;
     } else if (b.sticker !== activeFilter) {
       return false;
     }
@@ -542,11 +569,16 @@ export default function DispatchDashboard() {
   // Sticker counts
   const countITB = bids.filter((b) => b.sticker === 'ITB').length;
   const countAddendum = bids.filter((b) => b.sticker === 'Addendum').length;
-  const countWon = bids.filter((b) => b.sticker === 'Won').length;
+  const countRFI = bids.filter((b) => b.sticker === 'RFI/Forms').length;
+  const countReminder = bids.filter((b) => b.sticker === 'Date Reminder').length;
+  const countUnknown = bids.filter((b) => b.sticker === 'Unknown').length;
+  const countWon = bids.filter((b) => b.sticker === 'Won' || b.sticker === 'Contractor Awarded').length;
   const countLost = bids.filter((b) => b.sticker === 'Lost').length;
   const countSpam = bids.filter((b) => b.sticker === 'Spam').length;
+  const countHumanVerified = bids.filter((b) => b.isHumanLabeled).length;
+  const countUnverified = bids.filter((b) => !b.isHumanLabeled).length;
 
-  const renderStickerBadge = (sticker: DisplayBidRequest['sticker'], bid: DisplayBidRequest) => {
+  const renderStickerBadge = (sticker: string, bid: DisplayBidRequest) => {
     let badgeClass = 'bg-blue-600 text-white';
     let icon = null;
     let badgeText = sticker === 'ITB' ? 'ITB' : sticker;
@@ -563,6 +595,19 @@ export default function DispatchDashboard() {
         badgeClass = 'bg-emerald-600 text-white';
         icon = <Trophy className="w-3 h-3" />;
       }
+    } else if (sticker === 'Contractor Awarded') {
+      badgeClass = 'bg-amber-600 text-white shadow-xs';
+      icon = <Trophy className="w-3 h-3 text-amber-200" />;
+      badgeText = 'Contractor Awarded';
+    } else if (sticker === 'RFI/Forms') {
+      badgeClass = 'bg-cyan-600 text-white shadow-xs';
+      icon = <Tag className="w-3 h-3 text-cyan-200" />;
+    } else if (sticker === 'Date Reminder') {
+      badgeClass = 'bg-indigo-600 text-white shadow-xs';
+      icon = <Clock className="w-3 h-3 text-indigo-200" />;
+    } else if (sticker === 'Unknown') {
+      badgeClass = 'bg-slate-600 text-white shadow-xs';
+      icon = <HelpCircle className="w-3 h-3 text-slate-200" />;
     } else if (sticker === 'Lost') {
       badgeClass = 'bg-rose-600 text-white';
       icon = <XCircle className="w-3 h-3" />;
@@ -572,18 +617,30 @@ export default function DispatchDashboard() {
     }
 
     return (
-      <div className="inline-flex items-center gap-1 group">
+      <div className="inline-flex items-center gap-1.5 group flex-wrap">
         <span
           title={
-            bid.isGcWonPrime
-              ? 'General Contractor won prime contract; waiting on subcontractor selection'
-              : undefined
+            bid.isHumanLabeled
+              ? `Personally verified by user: "${sticker}"`
+              : `AI classified as ${sticker}`
           }
           className={`px-2.5 py-1 rounded font-black text-[11px] uppercase tracking-wider shadow-sm flex items-center gap-1 ${badgeClass}`}
         >
           {icon}
           {badgeText}
         </span>
+
+        {/* Human Verified Indicator */}
+        {bid.isHumanLabeled && (
+          <span
+            title="Personally reviewed and verified by user"
+            className="px-1.5 py-0.5 rounded text-[10px] font-bold bg-emerald-50 text-emerald-800 border border-emerald-300 flex items-center gap-1 shadow-2xs"
+          >
+            <UserCheck className="w-3 h-3 text-emerald-600" />
+            <span>User Verified</span>
+          </span>
+        )}
+
         <button
           onClick={() => openReviewModal(bid)}
           title="Calendar Manager: Review or Change Classification"
@@ -695,6 +752,18 @@ export default function DispatchDashboard() {
               S24 FE
             </span>
           </Link>
+
+          <Link
+            href="/model"
+            className="px-4 py-2 rounded-xl text-xs font-bold transition-all flex items-center gap-2 bg-emerald-50 hover:bg-emerald-100 text-emerald-800 border border-emerald-300 shadow-2xs"
+            title="ML Multiclass Classification Model Lab & 80/20 Test Metrics"
+          >
+            <Brain className="w-4 h-4 text-emerald-600" />
+            <span>ML Model Lab</span>
+            <span className="px-1.5 py-0.5 rounded-full text-[10px] bg-emerald-200/60 text-emerald-950 font-mono">
+              80/20 Test
+            </span>
+          </Link>
         </div>
 
         <div className="hidden sm:flex items-center gap-2 text-xs text-slate-500 pr-2">
@@ -714,39 +783,94 @@ export default function DispatchDashboard() {
         <>
           {/* QUICK CATEGORIZATION STICKER FILTER BAR & IN-FEED SEARCH */}
           <div className="bg-white p-3 rounded-xl border border-slate-200 shadow-sm flex flex-col md:flex-row md:items-center justify-between gap-3">
-            <div className="flex items-center gap-2 overflow-x-auto pb-1 md:pb-0">
-              <span className="text-xs text-slate-400 font-bold uppercase tracking-wider pl-2 pr-1">
-                Filter by Sticker:
+            <div className="flex items-center gap-2 overflow-x-auto pb-1 md:pb-0 flex-wrap">
+              {/* Human vs AI Verification Mode Filter */}
+              <div className="flex items-center gap-1 bg-slate-100 p-1 rounded-lg border border-slate-200 text-xs font-bold mr-1">
+                <button
+                  type="button"
+                  onClick={() => setVerificationFilter('all')}
+                  className={`px-2 py-1 rounded-md transition-all ${
+                    verificationFilter === 'all'
+                      ? 'bg-white text-slate-900 shadow-2xs'
+                      : 'text-slate-600 hover:text-slate-900'
+                  }`}
+                >
+                  All ({bids.length})
+                </button>
+                <button
+                  type="button"
+                  onClick={() => setVerificationFilter('human_only')}
+                  className={`px-2 py-1 rounded-md transition-all flex items-center gap-1 ${
+                    verificationFilter === 'human_only'
+                      ? 'bg-emerald-600 text-white shadow-2xs'
+                      : 'text-emerald-700 hover:bg-emerald-50'
+                  }`}
+                  title="Show only emails personally verified by user"
+                >
+                  <UserCheck className="w-3 h-3" />
+                  <span>👤 My Labels ({countHumanVerified})</span>
+                </button>
+                <button
+                  type="button"
+                  onClick={() => setVerificationFilter('unverified_only')}
+                  className={`px-2 py-1 rounded-md transition-all flex items-center gap-1 ${
+                    verificationFilter === 'unverified_only'
+                      ? 'bg-blue-600 text-white shadow-2xs'
+                      : 'text-blue-700 hover:bg-blue-50'
+                  }`}
+                  title="Show only unverified AI emails needing human review"
+                >
+                  <Sparkles className="w-3 h-3" />
+                  <span>🤖 AI Only ({countUnverified})</span>
+                </button>
+              </div>
+
+              <span className="text-xs text-slate-400 font-bold uppercase tracking-wider pl-1 pr-1 hidden lg:inline">
+                Stickers:
               </span>
 
               <button
                 onClick={() => setActiveFilter('ALL')}
-                className={`px-3 py-1.5 rounded-lg text-xs font-bold transition-all ${
+                className={`px-2.5 py-1.5 rounded-lg text-xs font-bold transition-all ${
                   activeFilter === 'ALL'
                     ? 'bg-slate-900 text-white shadow-sm'
                     : 'bg-slate-100 text-slate-600 hover:bg-slate-200'
                 }`}
               >
-                All Active ({bids.filter((b) => b.sticker !== 'Spam').length})
+                All Categories
               </button>
 
               <button
                 onClick={() => setActiveFilter('ITB')}
-                className={`px-3 py-1.5 rounded-lg text-xs font-bold transition-all flex items-center gap-1.5 ${
+                className={`px-2.5 py-1.5 rounded-lg text-xs font-bold transition-all flex items-center gap-1 ${
                   activeFilter === 'ITB'
                     ? 'bg-blue-600 text-white shadow-sm ring-2 ring-blue-300'
                     : 'bg-blue-50 text-blue-700 hover:bg-blue-100'
                 }`}
               >
-                <span>ITB (Invitation to Bid)</span>
+                <span>ITB</span>
                 <span className="px-1.5 py-0.2 rounded-full text-[10px] bg-white/20 font-black">
                   {countITB}
                 </span>
               </button>
 
               <button
+                onClick={() => setActiveFilter('RFI/Forms')}
+                className={`px-2.5 py-1.5 rounded-lg text-xs font-bold transition-all flex items-center gap-1 ${
+                  activeFilter === 'RFI/Forms'
+                    ? 'bg-cyan-600 text-white shadow-sm ring-2 ring-cyan-300'
+                    : 'bg-cyan-50 text-cyan-700 hover:bg-cyan-100'
+                }`}
+              >
+                <span>RFI/Forms</span>
+                <span className="px-1.5 py-0.2 rounded-full text-[10px] bg-white/20 font-black">
+                  {countRFI}
+                </span>
+              </button>
+
+              <button
                 onClick={() => setActiveFilter('Addendum')}
-                className={`px-3 py-1.5 rounded-lg text-xs font-bold transition-all flex items-center gap-1.5 ${
+                className={`px-2.5 py-1.5 rounded-lg text-xs font-bold transition-all flex items-center gap-1 ${
                   activeFilter === 'Addendum'
                     ? 'bg-purple-600 text-white shadow-sm ring-2 ring-purple-300'
                     : 'bg-purple-50 text-purple-700 hover:bg-purple-100'
@@ -759,14 +883,42 @@ export default function DispatchDashboard() {
               </button>
 
               <button
+                onClick={() => setActiveFilter('Date Reminder')}
+                className={`px-2.5 py-1.5 rounded-lg text-xs font-bold transition-all flex items-center gap-1 ${
+                  activeFilter === 'Date Reminder'
+                    ? 'bg-indigo-600 text-white shadow-sm ring-2 ring-indigo-300'
+                    : 'bg-indigo-50 text-indigo-700 hover:bg-indigo-100'
+                }`}
+              >
+                <span>Date Reminder</span>
+                <span className="px-1.5 py-0.2 rounded-full text-[10px] bg-white/20 font-black">
+                  {countReminder}
+                </span>
+              </button>
+
+              <button
+                onClick={() => setActiveFilter('Unknown')}
+                className={`px-2.5 py-1.5 rounded-lg text-xs font-bold transition-all flex items-center gap-1 ${
+                  activeFilter === 'Unknown'
+                    ? 'bg-slate-700 text-white shadow-sm ring-2 ring-slate-400'
+                    : 'bg-slate-100 text-slate-700 hover:bg-slate-200'
+                }`}
+              >
+                <span>Unknown</span>
+                <span className="px-1.5 py-0.2 rounded-full text-[10px] bg-white/20 font-black">
+                  {countUnknown}
+                </span>
+              </button>
+
+              <button
                 onClick={() => setActiveFilter('Won')}
-                className={`px-3 py-1.5 rounded-lg text-xs font-bold transition-all flex items-center gap-1.5 ${
+                className={`px-2.5 py-1.5 rounded-lg text-xs font-bold transition-all flex items-center gap-1 ${
                   activeFilter === 'Won'
                     ? 'bg-emerald-600 text-white shadow-sm ring-2 ring-emerald-300'
                     : 'bg-emerald-50 text-emerald-700 hover:bg-emerald-100'
                 }`}
               >
-                <span>Won</span>
+                <span>Won / Award</span>
                 <span className="px-1.5 py-0.2 rounded-full text-[10px] bg-white/20 font-black">
                   {countWon}
                 </span>
@@ -774,7 +926,7 @@ export default function DispatchDashboard() {
 
               <button
                 onClick={() => setActiveFilter('Lost')}
-                className={`px-3 py-1.5 rounded-lg text-xs font-bold transition-all flex items-center gap-1.5 ${
+                className={`px-2.5 py-1.5 rounded-lg text-xs font-bold transition-all flex items-center gap-1 ${
                   activeFilter === 'Lost'
                     ? 'bg-rose-600 text-white shadow-sm ring-2 ring-rose-300'
                     : 'bg-rose-50 text-rose-700 hover:bg-rose-100'
@@ -788,9 +940,9 @@ export default function DispatchDashboard() {
 
               <button
                 onClick={() => setActiveFilter('Spam')}
-                className={`px-3 py-1.5 rounded-lg text-xs font-bold transition-all flex items-center gap-1.5 ${
+                className={`px-2.5 py-1.5 rounded-lg text-xs font-bold transition-all flex items-center gap-1 ${
                   activeFilter === 'Spam'
-                    ? 'bg-slate-700 text-white shadow-sm'
+                    ? 'bg-slate-800 text-white shadow-sm'
                     : 'bg-slate-100 text-slate-500 hover:bg-slate-200'
                 }`}
               >

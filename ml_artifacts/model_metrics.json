@@ -1,0 +1,465 @@
+{
+  "trained_at": "2026-11-11T19:41:52.528822Z",
+  "total_samples": 625,
+  "train_samples": 500,
+  "test_samples": 125,
+  "test_accuracy": 75.2,
+  "macro_f1": 67.15,
+  "weighted_f1": 74.66,
+  "categories": [
+    "Addendum",
+    "Contractor Awarded",
+    "Date Reminder",
+    "General",
+    "ITB",
+    "Lost",
+    "RFI/Forms",
+    "Spam",
+    "Unknown",
+    "Won"
+  ],
+  "per_class_metrics": [
+    {
+      "label": "Addendum",
+      "support": 28,
+      "precision": 77.3,
+      "recall": 60.7,
+      "f1": 68.0
+    },
+    {
+      "label": "Contractor Awarded",
+      "support": 1,
+      "precision": 0.0,
+      "recall": 0.0,
+      "f1": 0.0
+    },
+    {
+      "label": "Date Reminder",
+      "support": 16,
+      "precision": 80.0,
+      "recall": 75.0,
+      "f1": 77.4
+    },
+    {
+      "label": "General",
+      "support": 0,
+      "precision": 0.0,
+      "recall": 0.0,
+      "f1": 0.0
+    },
+    {
+      "label": "ITB",
+      "support": 35,
+      "precision": 75.0,
+      "recall": 77.1,
+      "f1": 76.1
+    },
+    {
+      "label": "Lost",
+      "support": 2,
+      "precision": 66.7,
+      "recall": 100.0,
+      "f1": 80.0
+    },
+    {
+      "label": "RFI/Forms",
+      "support": 26,
+      "precision": 77.8,
+      "recall": 80.8,
+      "f1": 79.2
+    },
+    {
+      "label": "Spam",
+      "support": 2,
+      "precision": 66.7,
+      "recall": 100.0,
+      "f1": 80.0
+    },
+    {
+      "label": "Unknown",
+      "support": 15,
+      "precision": 68.4,
+      "recall": 86.7,
+      "f1": 76.5
+    },
+    {
+      "label": "Won",
+      "support": 0,
+      "precision": 0.0,
+      "recall": 0.0,
+      "f1": 0.0
+    }
+  ],
+  "confusion_matrix": [
+    [
+      17,
+      0,
+      0,
+      0,
+      4,
+      0,
+      4,
+      1,
+      2,
+      0
+    ],
+    [
+      0,
+      0,
+      0,
+      0,
+      1,
+      0,
+      0,
+      0,
+      0,
+      0
+    ],
+    [
+      1,
+      0,
+      12,
+      0,
+      2,
+      0,
+      0,
+      0,
+      1,
+      0
+    ],
+    [
+      0,
+      0,
+      0,
+      0,
+      0,
+      0,
+      0,
+      0,
+      0,
+      0
+    ],
+    [
+      2,
+      0,
+      1,
+      0,
+      27,
+      1,
+      1,
+      0,
+      3,
+      0
+    ],
+    [
+      0,
+      0,
+      0,
+      0,
+      0,
+      2,
+      0,
+      0,
+      0,
+      0
+    ],
+    [
+      1,
+      0,
+      2,
+      0,
+      2,
+      0,
+      21,
+      0,
+      0,
+      0
+    ],
+    [
+      0,
+      0,
+      0,
+      0,
+      0,
+      0,
+      0,
+      2,
+      0,
+      0
+    ],
+    [
+      1,
+      0,
+      0,
+      0,
+      0,
+      0,
+      1,
+      0,
+      13,
+      0
+    ],
+    [
+      0,
+      0,
+      0,
+      0,
+      0,
+      0,
+      0,
+      0,
+      0,
+      0
+    ]
+  ],
+  "misclassifications": [
+    {
+      "id": "d0c1900d-8d1c-4058-a50d-363ad7210998",
+      "subject": "BID DRAWINGS/INVITATION - Escapology - Annapolis Mall - Annapolis, MD",
+      "sender": "herman-stewart.com",
+      "actual": "Date Reminder",
+      "predicted": "Unknown",
+      "confidence": 35.6
+    },
+    {
+      "id": "5610f464-308b-4bca-8665-739e72758b7c",
+      "subject": "GBMC Pain Management Bid",
+      "sender": "jbc.bz",
+      "actual": "Unknown",
+      "predicted": "Addendum",
+      "confidence": 57.3
+    },
+    {
+      "id": "dd59ebcb-0dfc-4155-ba78-096bbc666ef2",
+      "subject": "Scopes of Work - FC Crisis Stabilization Center Phase II",
+      "sender": "kellerbrothers.com",
+      "actual": "Addendum",
+      "predicted": "ITB",
+      "confidence": 49.0
+    },
+    {
+      "id": "690c6911-58a4-4b86-b818-180e04fc1225",
+      "subject": "MEMO: Bids due 11/19 @ 12PM - DSG House of Sport - Richmond, VA",
+      "sender": "com2.smartbidnet.com",
+      "actual": "ITB",
+      "predicted": "Date Reminder",
+      "confidence": 23.2
+    },
+    {
+      "id": "a3a0093a-be33-406e-833d-b6de283dc0f9",
+      "subject": "Megamart Leesburg Bid Opportunity",
+      "sender": "morgankeller.com",
+      "actual": "ITB",
+      "predicted": "Addendum",
+      "confidence": 32.3
+    },
+    {
+      "id": "75079f6b-7d90-4f70-90f7-5e293d3fd891",
+      "subject": "Amendment 0002 - Design-Build -Consolidated Natural Resou...",
+      "sender": "buildingconnected.com",
+      "actual": "Addendum",
+      "predicted": "ITB",
+      "confidence": 32.8
+    },
+    {
+      "id": "d5992669-c749-49f6-a40e-5b8e65a2a1cf",
+      "subject": "Sprouts Bethesda - Intent to Bid",
+      "sender": "buch.us.com",
+      "actual": "ITB",
+      "predicted": "Unknown",
+      "confidence": 37.6
+    },
+    {
+      "id": "5d0e776c-7da5-4d94-8545-4b2f3bc2c544",
+      "subject": "Revised Permit Drawings: 310 Tyson Spec Suite",
+      "sender": "vantage-construction.com",
+      "actual": "RFI/Forms",
+      "predicted": "ITB",
+      "confidence": 32.9
+    },
+    {
+      "id": "552df049-ee5b-4607-b8ac-6fc02fc8ca83",
+      "subject": "NRECA - P1 Conference & Yoga Room - Invitation to Bid from rand* construction corporation",
+      "sender": "randcc.com",
+      "actual": "RFI/Forms",
+      "predicted": "ITB",
+      "confidence": 63.9
+    },
+    {
+      "id": "28e16bac-e8b4-4c3c-8fa5-7a4335df38f8",
+      "subject": "Old Navy #6452 - Washington, DC",
+      "sender": "eckinger.com",
+      "actual": "Date Reminder",
+      "predicted": "ITB",
+      "confidence": 20.7
+    },
+    {
+      "id": "1e2746b7-77e6-4b7a-845d-4162a1979dc5",
+      "subject": "1909 K Street Fitness Center Bid",
+      "sender": "hbwconstruction.com",
+      "actual": "Addendum",
+      "predicted": "RFI/Forms",
+      "confidence": 46.4
+    },
+    {
+      "id": "e1b02156-fa6e-40d8-ad43-3a45bf0a9e02",
+      "subject": "View Transition Academy - Scope of Work - VIEW Transition...",
+      "sender": "buildingconnected.com",
+      "actual": "Addendum",
+      "predicted": "ITB",
+      "confidence": 29.2
+    },
+    {
+      "id": "86378578-43ae-4a67-a714-e887581b74ef",
+      "subject": "Bid request from Rocchi Construction, Inc. for 9438 Balti Nat Pike: Specialties",
+      "sender": "buildertrend.net",
+      "actual": "ITB",
+      "predicted": "RFI/Forms",
+      "confidence": 38.0
+    },
+    {
+      "id": "ea297001-2697-45a2-a541-9ef7d31a67d8",
+      "subject": "Doyle Construction (ITB) - 4818 E. Harrisburg Pike Warehouse  (Elizabethtown, PA)",
+      "sender": "doyleconco.com",
+      "actual": "ITB",
+      "predicted": "Lost",
+      "confidence": 65.3
+    },
+    {
+      "id": "d822b594-beb1-4474-aafe-01cc575aac39",
+      "subject": "Scope of Work (Division 10) - Exeter Township Emergency Services Facility",
+      "sender": "eciconstruction.com",
+      "actual": "Addendum",
+      "predicted": "Spam",
+      "confidence": 31.7
+    },
+    {
+      "id": "c664ff1f-539d-4069-b66d-84018e73559a",
+      "subject": "Howard County Board of Elections | RFI Responses & Bids Due Tomorrow 11/10",
+      "sender": "ck-commercial.com",
+      "actual": "RFI/Forms",
+      "predicted": "Date Reminder",
+      "confidence": 81.0
+    },
+    {
+      "id": "6d5f497c-b32d-4ae4-ae37-5fa59c513400",
+      "subject": "W.M. Schlosser RFP - Veterans Administration Boiler Room Project",
+      "sender": "wmschlosser.com",
+      "actual": "Contractor Awarded",
+      "predicted": "ITB",
+      "confidence": 60.4
+    },
+    {
+      "id": "bc8e6133-9230-4a49-9d93-81ae0681f329",
+      "subject": "Kia of West Chester Service Center Addendum No. 5 Notice",
+      "sender": "com2.smartbidnet.com",
+      "actual": "ITB",
+      "predicted": "Addendum",
+      "confidence": 94.8
+    },
+    {
+      "id": "c3aea3b9-f6f9-47ea-9336-d78aa3c347be",
+      "subject": "Cromwell Maintenance Facility",
+      "sender": "clarkconstruction.com",
+      "actual": "Date Reminder",
+      "predicted": "Addendum",
+      "confidence": 32.0
+    },
+    {
+      "id": "a9aa768f-7d8e-4a67-bcac-49a7a01463a8",
+      "subject": "ITB DUE 11/16 - Suite 605 - Abundance Strategies",
+      "sender": "mandersco.com",
+      "actual": "ITB",
+      "predicted": "Unknown",
+      "confidence": 35.9
+    },
+    {
+      "id": "6784d8c0-cf02-4419-bf0e-36925909266e",
+      "subject": "TACO BELL - Sterling, VA project Bid Confirmation",
+      "sender": "teelconstruction.com",
+      "actual": "ITB",
+      "predicted": "Unknown",
+      "confidence": 41.8
+    },
+    {
+      "id": "e010ee01-a743-4762-b09c-cf9b1d3bea3c",
+      "subject": "HDS Added RFI Responses - Hawkers - Gaithersburg",
+      "sender": "buildingconnected.com",
+      "actual": "Addendum",
+      "predicted": "RFI/Forms",
+      "confidence": 87.2
+    },
+    {
+      "id": "73b52027-94af-4a97-b403-bf24bee11c03",
+      "subject": "VHC WIH Expansion - Scope Sheet - VHC Women & Infant Expa...",
+      "sender": "buildingconnected.com",
+      "actual": "RFI/Forms",
+      "predicted": "Addendum",
+      "confidence": 52.6
+    },
+    {
+      "id": "815431dd-9cc8-4aee-93f9-64f6ebd1bfe7",
+      "subject": "RFI due date reminder - CTRL Nightclub DC - Updated Drawings",
+      "sender": "buildingconnected.com",
+      "actual": "RFI/Forms",
+      "predicted": "Date Reminder",
+      "confidence": 72.4
+    },
+    {
+      "id": "c27ad338-a6dc-4bcd-ac82-c60da6796308",
+      "subject": "HDS Added RFI Responses - Hawkers - Gaithersburg",
+      "sender": "buildingconnected.com",
+      "actual": "Addendum",
+      "predicted": "RFI/Forms",
+      "confidence": 87.2
+    },
+    {
+      "id": "739bc76c-6cfb-49cf-8e62-db914fc709ff",
+      "subject": "Erickson Avery Point - Medical Center - Bidding",
+      "sender": "buch.us.com",
+      "actual": "Date Reminder",
+      "predicted": "ITB",
+      "confidence": 40.8
+    },
+    {
+      "id": "298b7b5f-170e-4acd-8084-917c51d53d9a",
+      "subject": "Alternates - Allen Distribution - Jackson Township",
+      "sender": "buildingconnected.com",
+      "actual": "Addendum",
+      "predicted": "RFI/Forms",
+      "confidence": 60.4
+    },
+    {
+      "id": "2cc72766-d0d1-44d2-af66-35c47e976220",
+      "subject": "Amendments 0001 and 0002 - CLBA Clara Barton Site Upgrades",
+      "sender": "buildingconnected.com",
+      "actual": "Addendum",
+      "predicted": "ITB",
+      "confidence": 51.9
+    },
+    {
+      "id": "82751534-b0d0-4c0f-8ca7-5314b0744a41",
+      "subject": "Bid Clarifications 11.11.26 - Hawkers Asian Street Food - Gaithersburg, MD",
+      "sender": "herman-stewart.com",
+      "actual": "Addendum",
+      "predicted": "Unknown",
+      "confidence": 39.1
+    },
+    {
+      "id": "f790ef32-fdf5-4b4f-9b33-86489ac6c59a",
+      "subject": "Bid Extension - Snowden Center Suites G/H/I",
+      "sender": "buildingconnected.com",
+      "actual": "Unknown",
+      "predicted": "RFI/Forms",
+      "confidence": 48.3
+    },
+    {
+      "id": "2756be61-9c68-4ebb-af1a-119680dff970",
+      "subject": "ITB Due 11/18 - 20 F St Suite 410",
+      "sender": "mandersco.com",
+      "actual": "Addendum",
+      "predicted": "Unknown",
+      "confidence": 36.3
+    }
+  ]
+}
