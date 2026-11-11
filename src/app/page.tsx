@@ -18,6 +18,7 @@ import {
   ChevronDown,
   ChevronRight,
   ChevronUp,
+  ChevronLeft,
   Link as LinkIcon,
   XCircle,
   Hash,
@@ -107,6 +108,16 @@ export default function DispatchDashboard() {
   const [expandedGroups, setExpandedGroups] = useState<Record<string, boolean>>({});
   const [expandedEmails, setExpandedEmails] = useState<Record<string, boolean>>({});
   const [toastMessage, setToastMessage] = useState<string | null>(null);
+
+  // Pagination & Search States
+  const [currentPage, setCurrentPage] = useState(1);
+  const [itemsPerPage, setItemsPerPage] = useState(50);
+  const [feedSearchQuery, setFeedSearchQuery] = useState('');
+
+  // Reset to page 1 whenever active filter or search query changes
+  useEffect(() => {
+    setCurrentPage(1);
+  }, [activeFilter, feedSearchQuery]);
 
   // Review & Reclassification Modal State
   const [reviewingBid, setReviewingBid] = useState<DisplayBidRequest | null>(null);
@@ -236,12 +247,32 @@ export default function DispatchDashboard() {
     );
   });
 
-  // Filter based on active sticker filter bar
+  // Filter based on active sticker filter bar and search query
   const filteredBids = bids.filter((b) => {
+    // 1. Sticker filter
     if (activeFilter === 'ALL') {
-      return b.sticker !== 'Spam' && b.filterStatus !== 'auto_filtered';
+      if (b.sticker === 'Spam' || b.filterStatus === 'auto_filtered') return false;
+    } else if (b.sticker !== activeFilter) {
+      return false;
     }
-    return b.sticker === activeFilter;
+
+    // 2. Search query filter
+    if (feedSearchQuery.trim()) {
+      const q = feedSearchQuery.toLowerCase();
+      const matchSubject = b.subject?.toLowerCase().includes(q);
+      const matchSender = b.senderName?.toLowerCase().includes(q) || b.senderEmail?.toLowerCase().includes(q);
+      const matchOriginalSender = b.originalSenderName?.toLowerCase().includes(q) || b.originalSenderEmail?.toLowerCase().includes(q);
+      const matchProject = b.projectName?.toLowerCase().includes(q);
+      const matchClient = b.clientCompany?.toLowerCase().includes(q);
+      const matchBidNum = b.bidNumber?.toLowerCase().includes(q) || b.matchedBidNumber?.toLowerCase().includes(q);
+      const matchJobCode = b.jobCode?.toLowerCase().includes(q);
+
+      if (!matchSubject && !matchSender && !matchOriginalSender && !matchProject && !matchClient && !matchBidNum && !matchJobCode) {
+        return false;
+      }
+    }
+
+    return true;
   });
 
   const groupedBids = filteredBids.reduce<Record<string, DisplayBidRequest[]>>((acc, bid) => {
@@ -249,6 +280,28 @@ export default function DispatchDashboard() {
     acc[bid.duplicateGroupId].push(bid);
     return acc;
   }, {});
+
+  // Pagination Calculations (default 50 per page like standard email clients)
+  const allGroupEntries = Object.entries(groupedBids);
+  const totalGroups = allGroupEntries.length;
+  const totalPages = Math.max(1, Math.ceil(totalGroups / itemsPerPage));
+  const safeCurrentPage = Math.min(Math.max(1, currentPage), totalPages);
+  const startIndex = (safeCurrentPage - 1) * itemsPerPage;
+  const endIndex = Math.min(startIndex + itemsPerPage, totalGroups);
+  const paginatedGroupEntries = allGroupEntries.slice(startIndex, endIndex);
+
+  const getPaginationPages = () => {
+    const delta = 2;
+    const range: (number | string)[] = [];
+    for (let i = 1; i <= totalPages; i++) {
+      if (i === 1 || i === totalPages || (i >= safeCurrentPage - delta && i <= safeCurrentPage + delta)) {
+        range.push(i);
+      } else if (range[range.length - 1] !== '...') {
+        range.push('...');
+      }
+    }
+    return range;
+  };
 
   const toggleGroup = (groupId: string) => {
     setExpandedGroups((prev) => ({
@@ -494,125 +547,200 @@ export default function DispatchDashboard() {
         />
       ) : (
         <>
-          {/* QUICK CATEGORIZATION STICKER FILTER BAR */}
-          <div className="bg-white p-3 rounded-xl border border-slate-200 shadow-sm flex items-center justify-between gap-2 overflow-x-auto">
-        <div className="flex items-center gap-2">
-          <span className="text-xs text-slate-400 font-bold uppercase tracking-wider pl-2 pr-1">
-            Filter by Sticker:
-          </span>
+          {/* QUICK CATEGORIZATION STICKER FILTER BAR & IN-FEED SEARCH */}
+          <div className="bg-white p-3 rounded-xl border border-slate-200 shadow-sm flex flex-col md:flex-row md:items-center justify-between gap-3">
+            <div className="flex items-center gap-2 overflow-x-auto pb-1 md:pb-0">
+              <span className="text-xs text-slate-400 font-bold uppercase tracking-wider pl-2 pr-1">
+                Filter by Sticker:
+              </span>
 
-          <button
-            onClick={() => setActiveFilter('ALL')}
-            className={`px-3 py-1.5 rounded-lg text-xs font-bold transition-all ${
-              activeFilter === 'ALL'
-                ? 'bg-slate-900 text-white shadow-sm'
-                : 'bg-slate-100 text-slate-600 hover:bg-slate-200'
-            }`}
-          >
-            All Active ({bids.filter((b) => b.sticker !== 'Spam').length})
-          </button>
+              <button
+                onClick={() => setActiveFilter('ALL')}
+                className={`px-3 py-1.5 rounded-lg text-xs font-bold transition-all ${
+                  activeFilter === 'ALL'
+                    ? 'bg-slate-900 text-white shadow-sm'
+                    : 'bg-slate-100 text-slate-600 hover:bg-slate-200'
+                }`}
+              >
+                All Active ({bids.filter((b) => b.sticker !== 'Spam').length})
+              </button>
 
-          <button
-            onClick={() => setActiveFilter('ITB')}
-            className={`px-3 py-1.5 rounded-lg text-xs font-bold transition-all flex items-center gap-1.5 ${
-              activeFilter === 'ITB'
-                ? 'bg-blue-600 text-white shadow-sm ring-2 ring-blue-300'
-                : 'bg-blue-50 text-blue-700 hover:bg-blue-100'
-            }`}
-          >
-            <span>ITB (Invitation to Bid)</span>
-            <span className="px-1.5 py-0.2 rounded-full text-[10px] bg-white/20 font-black">
-              {countITB}
-            </span>
-          </button>
+              <button
+                onClick={() => setActiveFilter('ITB')}
+                className={`px-3 py-1.5 rounded-lg text-xs font-bold transition-all flex items-center gap-1.5 ${
+                  activeFilter === 'ITB'
+                    ? 'bg-blue-600 text-white shadow-sm ring-2 ring-blue-300'
+                    : 'bg-blue-50 text-blue-700 hover:bg-blue-100'
+                }`}
+              >
+                <span>ITB (Invitation to Bid)</span>
+                <span className="px-1.5 py-0.2 rounded-full text-[10px] bg-white/20 font-black">
+                  {countITB}
+                </span>
+              </button>
 
-          <button
-            onClick={() => setActiveFilter('Addendum')}
-            className={`px-3 py-1.5 rounded-lg text-xs font-bold transition-all flex items-center gap-1.5 ${
-              activeFilter === 'Addendum'
-                ? 'bg-purple-600 text-white shadow-sm ring-2 ring-purple-300'
-                : 'bg-purple-50 text-purple-700 hover:bg-purple-100'
-            }`}
-          >
-            <span>Addendum</span>
-            <span className="px-1.5 py-0.2 rounded-full text-[10px] bg-white/20 font-black">
-              {countAddendum}
-            </span>
-          </button>
+              <button
+                onClick={() => setActiveFilter('Addendum')}
+                className={`px-3 py-1.5 rounded-lg text-xs font-bold transition-all flex items-center gap-1.5 ${
+                  activeFilter === 'Addendum'
+                    ? 'bg-purple-600 text-white shadow-sm ring-2 ring-purple-300'
+                    : 'bg-purple-50 text-purple-700 hover:bg-purple-100'
+                }`}
+              >
+                <span>Addendum</span>
+                <span className="px-1.5 py-0.2 rounded-full text-[10px] bg-white/20 font-black">
+                  {countAddendum}
+                </span>
+              </button>
 
-          <button
-            onClick={() => setActiveFilter('Won')}
-            className={`px-3 py-1.5 rounded-lg text-xs font-bold transition-all flex items-center gap-1.5 ${
-              activeFilter === 'Won'
-                ? 'bg-emerald-600 text-white shadow-sm ring-2 ring-emerald-300'
-                : 'bg-emerald-50 text-emerald-700 hover:bg-emerald-100'
-            }`}
-          >
-            <span>Won</span>
-            <span className="px-1.5 py-0.2 rounded-full text-[10px] bg-white/20 font-black">
-              {countWon}
-            </span>
-          </button>
+              <button
+                onClick={() => setActiveFilter('Won')}
+                className={`px-3 py-1.5 rounded-lg text-xs font-bold transition-all flex items-center gap-1.5 ${
+                  activeFilter === 'Won'
+                    ? 'bg-emerald-600 text-white shadow-sm ring-2 ring-emerald-300'
+                    : 'bg-emerald-50 text-emerald-700 hover:bg-emerald-100'
+                }`}
+              >
+                <span>Won</span>
+                <span className="px-1.5 py-0.2 rounded-full text-[10px] bg-white/20 font-black">
+                  {countWon}
+                </span>
+              </button>
 
-          <button
-            onClick={() => setActiveFilter('Lost')}
-            className={`px-3 py-1.5 rounded-lg text-xs font-bold transition-all flex items-center gap-1.5 ${
-              activeFilter === 'Lost'
-                ? 'bg-rose-600 text-white shadow-sm ring-2 ring-rose-300'
-                : 'bg-rose-50 text-rose-700 hover:bg-rose-100'
-            }`}
-          >
-            <span>Lost</span>
-            <span className="px-1.5 py-0.2 rounded-full text-[10px] bg-white/20 font-black">
-              {countLost}
-            </span>
-          </button>
-        </div>
+              <button
+                onClick={() => setActiveFilter('Lost')}
+                className={`px-3 py-1.5 rounded-lg text-xs font-bold transition-all flex items-center gap-1.5 ${
+                  activeFilter === 'Lost'
+                    ? 'bg-rose-600 text-white shadow-sm ring-2 ring-rose-300'
+                    : 'bg-rose-50 text-rose-700 hover:bg-rose-100'
+                }`}
+              >
+                <span>Lost</span>
+                <span className="px-1.5 py-0.2 rounded-full text-[10px] bg-white/20 font-black">
+                  {countLost}
+                </span>
+              </button>
 
-        <button
-          onClick={() => setActiveFilter('Spam')}
-          className={`px-3 py-1.5 rounded-lg text-xs font-bold transition-all flex items-center gap-1.5 ${
-            activeFilter === 'Spam'
-              ? 'bg-slate-700 text-white shadow-sm'
-              : 'bg-slate-100 text-slate-500 hover:bg-slate-200'
-          }`}
-        >
-          <span>Spam / Noise</span>
-          <span className="px-1.5 py-0.2 rounded-full text-[10px] bg-white/20 font-black">
-            {countSpam}
-          </span>
-        </button>
-      </div>
+              <button
+                onClick={() => setActiveFilter('Spam')}
+                className={`px-3 py-1.5 rounded-lg text-xs font-bold transition-all flex items-center gap-1.5 ${
+                  activeFilter === 'Spam'
+                    ? 'bg-slate-700 text-white shadow-sm'
+                    : 'bg-slate-100 text-slate-500 hover:bg-slate-200'
+                }`}
+              >
+                <span>Spam</span>
+                <span className="px-1.5 py-0.2 rounded-full text-[10px] bg-white/20 font-black">
+                  {countSpam}
+                </span>
+              </button>
+            </div>
 
-      {/* Main Grouped Dispatch List */}
-      <div className="bg-white rounded-xl border border-slate-200 shadow-sm overflow-hidden">
-        <div className="p-5 border-b border-slate-200 flex items-center justify-between">
-          <div>
-            <h3 className="text-base font-semibold text-slate-900">
-              {activeFilter === 'ALL' && 'All Active Inbound Opportunities'}
-              {activeFilter === 'ITB' && 'New ITBs (Invitations to Bid) — Assign to Estimators'}
-              {activeFilter === 'Addendum' && 'Addendums & Drawings — Linked to Existing Bid Folders'}
-              {activeFilter === 'Won' && 'Won Bids — Ready for Active Job Phase Promotion'}
-              {activeFilter === 'Lost' && 'Lost / Cancelled Opportunities'}
-              {activeFilter === 'Spam' && 'Auto-Filtered Noise & Vendor Solicitations'}
-            </h3>
-            <p className="text-xs text-slate-500">
-              {activeFilter === 'ITB' && 'Every unique ITB receives an internal Bid Number (BID-26-XXXX) and requires an assigned estimator.'}
-              {activeFilter !== 'ITB' && activeFilter !== 'Spam' && 'These do not get assigned separately. They attach directly to an active Bid Number.'}
-            </p>
+            {/* In-Feed Search Input */}
+            <div className="relative min-w-[260px] flex-shrink-0">
+              <Search className="w-3.5 h-3.5 text-slate-400 absolute left-3 top-1/2 -translate-y-1/2" />
+              <input
+                type="text"
+                value={feedSearchQuery}
+                onChange={(e) => setFeedSearchQuery(e.target.value)}
+                placeholder="Search subject, GC, project..."
+                className="w-full pl-8 pr-7 py-1.5 bg-slate-50 border border-slate-200 rounded-lg text-xs text-slate-800 placeholder-slate-400 focus:outline-none focus:ring-2 focus:ring-blue-500 focus:bg-white transition-all"
+              />
+              {feedSearchQuery && (
+                <button
+                  type="button"
+                  onClick={() => setFeedSearchQuery('')}
+                  className="absolute right-2.5 top-1/2 -translate-y-1/2 text-slate-400 hover:text-slate-600"
+                >
+                  <X className="w-3.5 h-3.5" />
+                </button>
+              )}
+            </div>
           </div>
-          <span className="text-xs text-slate-400 font-medium">
-            {Object.keys(groupedBids).length} Project Group{Object.keys(groupedBids).length === 1 ? '' : 's'}
-          </span>
-        </div>
 
-        {Object.keys(groupedBids).length === 0 ? (
-          <div className="p-12 text-center text-slate-400 text-sm">
-            No emails found matching the &quot;{activeFilter}&quot; sticker.
-          </div>
-        ) : (
-          <div className="divide-y divide-slate-200">
-            {Object.entries(groupedBids).map(([groupId, groupItems]) => {
+          {/* Main Grouped Dispatch List */}
+          <div id="dispatch-feed-list" className="bg-white rounded-xl border border-slate-200 shadow-sm overflow-hidden scroll-mt-6">
+            <div className="p-4 sm:p-5 border-b border-slate-200 flex flex-col md:flex-row md:items-center justify-between gap-4">
+              <div>
+                <h3 className="text-base font-semibold text-slate-900">
+                  {activeFilter === 'ALL' && 'All Active Inbound Opportunities'}
+                  {activeFilter === 'ITB' && 'New ITBs (Invitations to Bid) — Assign to Estimators'}
+                  {activeFilter === 'Addendum' && 'Addendums & Drawings — Linked to Existing Bid Folders'}
+                  {activeFilter === 'Won' && 'Won Bids — Ready for Active Job Phase Promotion'}
+                  {activeFilter === 'Lost' && 'Lost / Cancelled Opportunities'}
+                  {activeFilter === 'Spam' && 'Auto-Filtered Noise & Vendor Solicitations'}
+                </h3>
+                <p className="text-xs text-slate-500">
+                  {activeFilter === 'ITB' && 'Every unique ITB receives an internal Bid Number (BID-26-XXXX) and requires an assigned estimator.'}
+                  {activeFilter !== 'ITB' && activeFilter !== 'Spam' && 'These do not get assigned separately. They attach directly to an active Bid Number.'}
+                </p>
+              </div>
+
+              {/* Email-client style Top Pagination Controls */}
+              <div className="flex items-center gap-3 self-end md:self-center">
+                {/* Page Size Selector */}
+                <div className="flex items-center gap-1.5 text-xs text-slate-500">
+                  <span className="hidden sm:inline">Per page:</span>
+                  <select
+                    value={itemsPerPage}
+                    onChange={(e) => {
+                      setItemsPerPage(Number(e.target.value));
+                      setCurrentPage(1);
+                    }}
+                    className="text-xs bg-slate-50 border border-slate-300 rounded px-2 py-1 font-medium text-slate-700 hover:bg-slate-100 cursor-pointer focus:ring-1 focus:ring-blue-500"
+                  >
+                    <option value={25}>25</option>
+                    <option value={50}>50</option>
+                    <option value={100}>100</option>
+                  </select>
+                </div>
+
+                {/* Range indicator (e.g., 1–50 of 384) */}
+                <span className="text-xs font-semibold text-slate-700 font-mono">
+                  {totalGroups === 0 ? '0 of 0' : `${startIndex + 1}–${endIndex} of ${totalGroups}`}
+                </span>
+
+                {/* Prev / Next Chevrons */}
+                <div className="flex items-center border border-slate-300 rounded-lg overflow-hidden bg-white shadow-2xs">
+                  <button
+                    type="button"
+                    onClick={() => {
+                      setCurrentPage((p) => Math.max(1, p - 1));
+                      const el = document.getElementById('dispatch-feed-list');
+                      if (el) el.scrollIntoView({ behavior: 'smooth', block: 'start' });
+                    }}
+                    disabled={safeCurrentPage <= 1}
+                    title="Previous page"
+                    className="p-1.5 text-slate-600 hover:text-slate-900 hover:bg-slate-100 disabled:opacity-30 disabled:hover:bg-white disabled:cursor-not-allowed border-r border-slate-200 transition-colors"
+                  >
+                    <ChevronLeft className="w-4 h-4" />
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => {
+                      setCurrentPage((p) => Math.min(totalPages, p + 1));
+                      const el = document.getElementById('dispatch-feed-list');
+                      if (el) el.scrollIntoView({ behavior: 'smooth', block: 'start' });
+                    }}
+                    disabled={safeCurrentPage >= totalPages}
+                    title="Next page"
+                    className="p-1.5 text-slate-600 hover:text-slate-900 hover:bg-slate-100 disabled:opacity-30 disabled:hover:bg-white disabled:cursor-not-allowed transition-colors"
+                  >
+                    <ChevronRight className="w-4 h-4" />
+                  </button>
+                </div>
+              </div>
+            </div>
+
+            {totalGroups === 0 ? (
+              <div className="p-12 text-center text-slate-400 text-sm">
+                {feedSearchQuery
+                  ? `No emails found matching "${feedSearchQuery}" in ${activeFilter}.`
+                  : `No emails found matching the "${activeFilter}" sticker.`}
+              </div>
+            ) : (
+              <div className="divide-y divide-slate-200">
+                {paginatedGroupEntries.map(([groupId, groupItems]) => {
               const isExpanded = expandedGroups[groupId] ?? false;
               const primary = groupItems.find((b) => !b.isFlaggedDuplicate) || groupItems[0];
               const duplicates = groupItems.filter((b) => b.id !== primary.id);
@@ -909,6 +1037,108 @@ export default function DispatchDashboard() {
                 </div>
               );
             })}
+          </div>
+        )}
+
+        {/* Bottom Pagination Bar */}
+        {totalGroups > 0 && (
+          <div className="p-4 bg-slate-50 border-t border-slate-200 flex flex-col sm:flex-row items-center justify-between gap-4 text-xs">
+            <div className="text-slate-500 font-medium">
+              Showing <span className="font-bold text-slate-800">{startIndex + 1}</span> to{' '}
+              <span className="font-bold text-slate-800">{endIndex}</span> of{' '}
+              <span className="font-bold text-slate-800">{totalGroups}</span> project groups
+              <span className="text-slate-400 ml-1">({filteredBids.length} total emails)</span>
+            </div>
+
+            <div className="flex items-center gap-1.5 flex-wrap justify-center">
+              {/* First Page */}
+              <button
+                type="button"
+                onClick={() => {
+                  setCurrentPage(1);
+                  const el = document.getElementById('dispatch-feed-list');
+                  if (el) el.scrollIntoView({ behavior: 'smooth', block: 'start' });
+                }}
+                disabled={safeCurrentPage <= 1}
+                className="px-2.5 py-1.5 rounded-lg border border-slate-300 bg-white text-slate-700 font-medium hover:bg-slate-100 disabled:opacity-30 disabled:hover:bg-white disabled:cursor-not-allowed transition-colors shadow-2xs"
+                title="First Page"
+              >
+                First
+              </button>
+
+              {/* Prev Page */}
+              <button
+                type="button"
+                onClick={() => {
+                  setCurrentPage((p) => Math.max(1, p - 1));
+                  const el = document.getElementById('dispatch-feed-list');
+                  if (el) el.scrollIntoView({ behavior: 'smooth', block: 'start' });
+                }}
+                disabled={safeCurrentPage <= 1}
+                className="px-2.5 py-1.5 rounded-lg border border-slate-300 bg-white text-slate-700 font-medium hover:bg-slate-100 disabled:opacity-30 disabled:hover:bg-white disabled:cursor-not-allowed transition-colors shadow-2xs flex items-center gap-1"
+              >
+                <ChevronLeft className="w-3.5 h-3.5" />
+                <span>Prev</span>
+              </button>
+
+              {/* Numbered Page Buttons */}
+              <div className="flex items-center gap-1">
+                {getPaginationPages().map((p, idx) =>
+                  p === '...' ? (
+                    <span key={`ellipsis-${idx}`} className="px-2 text-slate-400 font-bold">
+                      ...
+                    </span>
+                  ) : (
+                    <button
+                      key={`page-${p}`}
+                      type="button"
+                      onClick={() => {
+                        setCurrentPage(Number(p));
+                        const el = document.getElementById('dispatch-feed-list');
+                        if (el) el.scrollIntoView({ behavior: 'smooth', block: 'start' });
+                      }}
+                      className={`min-w-[32px] h-8 px-2 rounded-lg font-bold text-xs transition-colors shadow-2xs ${
+                        safeCurrentPage === p
+                          ? 'bg-blue-600 text-white shadow-sm ring-2 ring-blue-300'
+                          : 'bg-white border border-slate-300 text-slate-700 hover:bg-slate-100'
+                      }`}
+                    >
+                      {p}
+                    </button>
+                  )
+                )}
+              </div>
+
+              {/* Next Page */}
+              <button
+                type="button"
+                onClick={() => {
+                  setCurrentPage((p) => Math.min(totalPages, p + 1));
+                  const el = document.getElementById('dispatch-feed-list');
+                  if (el) el.scrollIntoView({ behavior: 'smooth', block: 'start' });
+                }}
+                disabled={safeCurrentPage >= totalPages}
+                className="px-2.5 py-1.5 rounded-lg border border-slate-300 bg-white text-slate-700 font-medium hover:bg-slate-100 disabled:opacity-30 disabled:hover:bg-white disabled:cursor-not-allowed transition-colors shadow-2xs flex items-center gap-1"
+              >
+                <span>Next</span>
+                <ChevronRight className="w-3.5 h-3.5" />
+              </button>
+
+              {/* Last Page */}
+              <button
+                type="button"
+                onClick={() => {
+                  setCurrentPage(totalPages);
+                  const el = document.getElementById('dispatch-feed-list');
+                  if (el) el.scrollIntoView({ behavior: 'smooth', block: 'start' });
+                }}
+                disabled={safeCurrentPage >= totalPages}
+                className="px-2.5 py-1.5 rounded-lg border border-slate-300 bg-white text-slate-700 font-medium hover:bg-slate-100 disabled:opacity-30 disabled:hover:bg-white disabled:cursor-not-allowed transition-colors shadow-2xs"
+                title="Last Page"
+              >
+                Last
+              </button>
+            </div>
           </div>
         )}
       </div>
