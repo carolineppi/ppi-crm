@@ -1,10 +1,14 @@
 """
 Production-grade Hybrid Rule-Weighted ML Classifier for Construction Bid Emails.
-Combines:
-1. Positional Deterministic Rules (Subject & Top-Message high-precision priors)
-2. Positional Text Weighting (Subject x3, Top-Message x2, Body x1)
-3. Domain Keywords (Scopes of work, Bulletins, Prequalification, Planrooms)
-4. Balanced Soft-Voting Ensemble (LogisticRegression + ComplementNB)
+Excludes 'Unknown' category per requirements (leaving definitive business categories).
+Applies comprehensive deterministic domain rules for:
+- ITB
+- Addendum (including Federal/GSA Amendments, Bulletins, Scopes of Work, Alternates, Photos)
+- RFI/Forms (RFIs, Bid Forms, Wage scales, Site walk)
+- Date Reminder (Reminders, Due Today/Tomorrow, Bid Deadlines, Follow-ups)
+- Contractor Awarded / Won
+- Lost
+- Spam
 """
 
 import os
@@ -15,8 +19,6 @@ from collections import Counter
 from sklearn.model_selection import StratifiedShuffleSplit
 from sklearn.feature_extraction.text import TfidfVectorizer
 from sklearn.linear_model import LogisticRegression
-from sklearn.naive_bayes import ComplementNB
-from sklearn.ensemble import VotingClassifier
 from sklearn.metrics import classification_report, accuracy_score, confusion_matrix
 from scipy.sparse import hstack, csr_matrix
 import joblib
@@ -26,62 +28,65 @@ OUTPUT_DIR = 'ml_artifacts'
 MODEL_PATH = os.path.join(OUTPUT_DIR, 'classifier_pipeline.joblib')
 METRICS_PATH = os.path.join(OUTPUT_DIR, 'model_metrics.json')
 
-def extract_domain_rule_vector(r):
+def extract_advanced_domain_rules(r):
     """
-    Extracts high-precision deterministic rules based on positional location.
-    Location is everything: Subject >> Top 3 Lines >> Body Footer.
+    Extracts high-precision domain rules across all commercial construction categories.
+    Position-aware: Subject >> Top 3 Lines >> Body Footer.
     """
     subj = (r.get('clean_subject') or r.get('original_subject') or '').lower()
     top = (r.get('top_message') or '').lower()
     body = (r.get('body_core_preview') or '').lower()
-    full = f"{subj} {top} {body}"
     att_names = " ".join(r.get('attachment_names', [])).lower()
+    full_top = f"{subj} {top}"
     
-    # Rule 1: Explicit Addendum in Subject (92% accurate on its own)
-    r_addend_subj = 1.0 if re.search(r'\baddend(um|a)\b', subj) else 0.0
+    # --- 1. ADDENDUM RULES ---
+    # Rule A1: Explicit Addendum or Federal Amendment in Subject
+    r_addend_subj = 1.0 if re.search(r'\b(addend(um|a)|amendment\s*\d+|amendments?\b)\b', subj) else 0.0
+    # Rule A2: Supplementary construction revisions in Subject (Alternates, Scopes of work, Bulletins, Photos)
+    r_addend_supp = 1.0 if re.search(r'\b(bulletin\s*\d*|revision\s*\d*|rev\s*\d+|alternate(s)?|scopes? of work|site photos?|site pictures?|bid notice\s*\d+|clarification\s*(#|no\.?|\d+))\b', subj) else 0.0
+    # Rule A3: Addendum / bulletin in attachment names
+    r_addend_att = 1.0 if re.search(r'\b(addend|bulletin|revised|amendment)\b', att_names) else 0.0
     
-    # Rule 2: Construction supplement terms in Subject (Bulletins, Alternates, Scopes of Work, Site Photos)
-    r_addend_supp = 1.0 if re.search(r'\b(bulletin|revision|rev\s*\d+|alternate(s)?|scopes? of work|site photos?|site pictures?)\b', subj) else 0.0
+    # --- 2. DATE REMINDER RULES ---
+    # Rule D1: Direct reminder words in subject
+    r_remind_subj = 1.0 if re.search(r'\b(reminder|due today|closing soon|bids due|deadline|last call|due tomorrow|bid due date|submit your bid|proposal reminder|bidding status|follow-up|follow up|participation follow-up|due\s+\d{1,2}/\d{1,2})\b', subj) else 0.0
+    # Rule D2: Top message reminder
+    r_remind_top = 1.0 if re.search(r'\b(reminder|bids due|due today|due tomorrow|deadline|closing soon|submit your bid|extended to|are you able to provide pricing|please confirm)\b', top) else 0.0
     
-    # Rule 3: Addendum in attachment filename
-    r_addend_att = 1.0 if re.search(r'\baddend(um|a)\b', att_names) else 0.0
+    # --- 3. RFI / FORMS RULES ---
+    # Rule R1: RFI in subject (when not an explicit addendum)
+    r_rfi_subj = 1.0 if re.search(r'\b(rfi\b|request for information|pre-bid|pre bid|bid form|workbook|key rates|wage rate|prevailing wage|site walk|sign-in sheet|tax exempt)\b', subj) and not r_addend_subj else 0.0
+    # Rule R2: RFI in top message
+    r_rfi_top = 1.0 if re.search(r'\b(rfi response|rfi responses|bid form|wage scale|pre-bid rfi|questions and answers|q&a)\b', top) else 0.0
     
-    # Rule 4: Date Reminder in Subject or Top 3 lines
-    r_remind_subj = 1.0 if re.search(r'\b(reminder|due today|closing soon|bids due|deadline|last call|due tomorrow|bid due date extension)\b', subj) else 0.0
-    r_remind_top = 1.0 if re.search(r'\b(reminder|bids due|due today|due tomorrow|deadline|closing soon)\b', top) else 0.0
-    
-    # Rule 5: RFI / Clarification in Subject
-    r_rfi_subj = 1.0 if re.search(r'\brfi\b|\brequest for information\b|\bclarification\b', subj) and not r_addend_subj else 0.0
-    r_rfi_top = 1.0 if re.search(r'\brfi\b|\brequest for information\b|\bclarification response\b', top) else 0.0
-    
-    # Rule 6: ITB / Bid Opportunity in Subject
-    r_itb_subj = 1.0 if re.search(r'\b(invitation to bid|itb|request for proposal|rfp|bid invitation|seeking bids|bidding opportunity|bid request|new project|plans available)\b', subj) else 0.0
-    
-    # Rule 7: Pre-qualification / TradeTapp (identifies what was previously clogging Unknown)
-    r_prequal = 1.0 if re.search(r'\b(tradetapp|qualify|qualification application|compass|prequal)\b', full) else 0.0
-    
-    # Rule 8: Awards & Wins
-    r_award = 1.0 if re.search(r'\b(awarded|contractor awarded|intent to award|notice of award|winning bid|subcontract agreement)\b', subj) else 0.0
-    
-    # Rule 9: Lost / Regret
-    r_lost = 1.0 if re.search(r'\b(regret to inform|bid results|not selected|awarded to another|lost)\b', subj) else 0.0
-    
-    # Rule 10: Marketing / Spam
-    r_spam = 1.0 if re.search(r'\b(seo|lead generation|website design|marketing agency|payroll|unsecured loan|merchant funding)\b', subj + ' ' + top) else 0.0
+    # --- 4. ITB RULES ---
+    # Rule I1: Explicit invitation to bid in subject
+    r_itb_subj = 1.0 if re.search(r'\b(invitation to bid|itb|request for proposal|rfp|bid invitation|seeking bids|bidding opportunity|bid request|new project for bid|request for budgeting|invite to bid|new bid opportunity|bid drawings)\b', subj) else 0.0
+    # Rule I2: Top message invitation
+    r_itb_top = 1.0 if re.search(r'\b(invitation to bid|pricing a new project|requesting subcontractor bids|seeking proposals)\b', top) else 0.0
+
+    # --- 5. AWARD / WON RULES ---
+    r_award = 1.0 if re.search(r'\b(awarded|contractor awarded|intent to award|notice of award|winning bid|subcontract agreement|award update|bid result)\b', full_top) else 0.0
+
+    # --- 6. LOST RULES ---
+    r_lost = 1.0 if re.search(r'\b(regret to inform|not selected|awarded to another|lost)\b', full_top) else 0.0
+
+    # --- 7. SPAM RULES ---
+    r_spam = 1.0 if re.search(r'\b(seo|lead generation|website design|marketing agency|payroll|unsecured loan|merchant funding|backup code|reset your password)\b', full_top) else 0.0
 
     return [
-        r_addend_subj * 3.5,
-        r_addend_supp * 2.5,
-        r_addend_att * 2.0,
-        r_remind_subj * 3.5,
-        r_remind_top * 2.0,
-        r_rfi_subj * 3.0,
-        r_rfi_top * 1.5,
-        r_itb_subj * 3.0,
-        r_prequal * 3.0,
-        r_award * 4.0,
-        r_lost * 4.0,
-        r_spam * 4.0,
+        r_addend_subj * 4.0,
+        r_addend_supp * 3.0,
+        r_addend_att * 2.5,
+        r_remind_subj * 4.0,
+        r_remind_top * 3.0,
+        r_rfi_subj * 3.5,
+        r_rfi_top * 2.5,
+        r_itb_subj * 3.5,
+        r_itb_top * 2.0,
+        r_award * 5.0,
+        r_lost * 5.0,
+        r_spam * 5.0,
         1.0 if r.get('has_drawings') else 0.0,
         min(r.get('attachment_count', 0), 5) * 0.2
     ]
@@ -90,15 +95,18 @@ def prepare_weighted_text(r):
     subj = (r.get('clean_subject') or r.get('original_subject') or '')
     top = (r.get('top_message') or '')
     body = (r.get('body_core_preview') or '')
-    # Tripling the subject and doubling top message forces the vectorizer to focus on intent over boilerplate
-    return f"{subj} {subj} {subj} {top} {top} {body[:600]}"
+    # 4x subject weight + 2x top message focuses attention on intent
+    return f"{subj} {subj} {subj} {subj} {top} {top} {body[:500]}"
 
 def train_and_evaluate():
-    print("🚀 Loading labeled dataset...")
+    print("🚀 Loading labeled dataset (excluding 'Unknown')...")
     with open(DATASET_PATH, 'r', encoding='utf-8') as f:
-        records = [json.loads(line) for line in f]
+        all_records = [json.loads(line) for line in f]
     
-    print(f"Loaded {len(records)} records.")
+    # Exclude Unknown category per instructions
+    records = [r for r in all_records if r.get('label') != 'Unknown']
+    
+    print(f"Total raw: {len(all_records)}, Active business records: {len(records)} (76 Unknown excluded)")
     
     labels = [r['label'] for r in records]
     label_counts = Counter(labels)
@@ -121,15 +129,15 @@ def train_and_evaluate():
     train_text = [prepare_weighted_text(r) for r in train_records]
     test_text = [prepare_weighted_text(r) for r in test_records]
     
-    train_dense = np.array([extract_domain_rule_vector(r) for r in train_records])
-    test_dense = np.array([extract_domain_rule_vector(r) for r in test_records])
+    train_dense = np.array([extract_advanced_domain_rules(r) for r in train_records])
+    test_dense = np.array([extract_advanced_domain_rules(r) for r in test_records])
     
     y_train = [r['label'] for r in train_records]
     y_test = [r['label'] for r in test_records]
     
     # TF-IDF Vectorizer
     vectorizer = TfidfVectorizer(
-        max_features=4500,
+        max_features=6000,
         ngram_range=(1, 3),
         min_df=2,
         sublinear_tf=True
@@ -141,20 +149,19 @@ def train_and_evaluate():
     X_train = hstack([X_train_sparse, csr_matrix(train_dense)])
     X_test = hstack([X_test_sparse, csr_matrix(test_dense)])
     
-    # Soft voting ensemble
-    clf_lr = LogisticRegression(C=3.5, class_weight='balanced', max_iter=1000, random_state=42)
-    clf_nb = ComplementNB(alpha=0.35)
-    
-    ensemble = VotingClassifier(
-        estimators=[('lr', clf_lr), ('nb', clf_nb)],
-        voting='soft'
+    # Balanced, well-regularized Logistic Regression
+    clf = LogisticRegression(
+        C=5.0,
+        class_weight='balanced',
+        max_iter=1500,
+        random_state=42
     )
     
-    print("Training rule-weighted ensemble model...")
-    ensemble.fit(X_train, y_train)
+    print("Training rule-weighted classifier...")
+    clf.fit(X_train, y_train)
     
-    y_pred = ensemble.predict(X_test)
-    y_proba = ensemble.predict_proba(X_test)
+    y_pred = clf.predict(X_test)
+    y_proba = clf.predict_proba(X_test)
     
     acc = accuracy_score(y_test, y_pred)
     unique_classes = sorted(list(set(y_test) | set(y_pred)))
@@ -171,8 +178,8 @@ def train_and_evaluate():
     
     pipeline_bundle = {
         'vectorizer': vectorizer,
-        'model': ensemble,
-        'classes': list(ensemble.classes_)
+        'model': clf,
+        'classes': list(clf.classes_)
     }
     joblib.dump(pipeline_bundle, MODEL_PATH)
     print(f"Saved model to {MODEL_PATH}")

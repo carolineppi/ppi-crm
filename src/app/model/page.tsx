@@ -206,7 +206,7 @@ export default function ModelLabPage() {
             Commercial Email Classification Lab
           </h1>
           <p className="text-slate-300 text-xs sm:text-sm leading-relaxed">
-            Evaluates machine learning models trained on <strong>{metrics?.total_samples || '600+'}</strong> emails labeled by Partition Plus. Evaluated with an <strong>80/20 Stratified Train/Test Split</strong> across all standard and custom categories.
+            Evaluates machine learning models trained on <strong>{metrics?.total_samples || '549'}</strong> business emails labeled by Partition Plus (with ambiguous <em>Unknown</em> emails excluded per instructions). Evaluated with an <strong>80/20 Stratified Train/Test Split</strong> across all active commercial categories.
           </p>
         </div>
       </div>
@@ -261,10 +261,10 @@ export default function ModelLabPage() {
                 <Zap className="w-3.5 h-3.5 text-amber-600" /> Pipeline Architecture
               </span>
               <div className="text-base font-bold text-slate-800 tracking-tight leading-snug">
-                Hybrid Ensemble
+                Rule-Weighted Classifier
               </div>
               <p className="text-[11px] text-slate-500 font-medium">
-                Calibrated LinearSVC + ComplementNB + Logistic Regression
+                Domain Priors + Positional N-grams + Regularized Logistic Regression
               </p>
             </div>
           </div>
@@ -274,34 +274,34 @@ export default function ModelLabPage() {
             <div className="flex items-center gap-2">
               <Sparkles className="w-5 h-5 text-amber-600 flex-shrink-0" />
               <h3 className="font-bold text-amber-950 text-sm">
-                Roadmap to &gt;98% Accuracy: Why Bag-of-Words Tops at ~75% and How We Bridge the Gap
+                Active Architecture: Deterministic Domain Rules + Weighted Machine Learning
               </h3>
             </div>
             <div className="grid grid-cols-1 md:grid-cols-3 gap-3 text-[11px] text-amber-900 leading-relaxed pt-1">
               <div className="bg-white/80 p-3 rounded-xl border border-amber-200/60 space-y-1">
                 <span className="font-bold text-amber-950 flex items-center gap-1">
-                  1. The "Unknown" Bucket (76 emails)
+                  1. "Unknown" Category Excluded
                 </span>
                 <p>
-                  12% of the dataset is labeled "Unknown" (emails that were ambiguous to classify). Disentangling these or giving them explicit criteria immediately boosts test accuracy by ~10%.
+                  76 ambiguous emails were excluded from training per your instructions. The model now focuses exclusively on definitive business categories (ITB, Addendum, RFI/Forms, Date Reminder, Won, Lost, Spam).
                 </p>
               </div>
 
               <div className="bg-white/80 p-3 rounded-xl border border-amber-200/60 space-y-1">
                 <span className="font-bold text-amber-950 flex items-center gap-1">
-                  2. Forward Headers vs Top Notes
+                  2. Full Deterministic Rules Applied
                 </span>
                 <p>
-                  A forwarded email thread often says "ITB" in the subject from weeks ago, but the latest message says "Reminder: Bids Due Today". Hierarchical thread splitting ensures the latest note takes precedence.
+                  Domain rules for Federal Amendments, Scopes of Work, Bulletins, Alternates, Reminders, and RFIs inject high-priority positional weights (Subject &gt; Top message &gt; Body).
                 </p>
               </div>
 
               <div className="bg-white/80 p-3 rounded-xl border border-amber-200/60 space-y-1">
                 <span className="font-bold text-amber-950 flex items-center gap-1">
-                  3. Multi-Tier Hybrid Pipeline
+                  3. Multi-Tier Hybrid Production
                 </span>
                 <p>
-                  Pairing this fast ML classifier with our LLM extraction layer and Human-in-the-Loop review delivers practical 99%+ accuracy across your estimating calendar.
+                  Rule-weighted ML delivers instantaneous zero-cost triage in milliseconds. The LLM is then targeted specifically for deep entity extraction (job name, address, due dates).
                 </p>
               </div>
             </div>
