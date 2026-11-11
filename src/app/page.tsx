@@ -1,6 +1,6 @@
 'use client';
 
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useMemo } from 'react';
 import Link from 'next/link';
 import {
   Inbox,
@@ -40,6 +40,12 @@ import {
   ArrowRightLeft,
   HelpCircle,
   Brain,
+  ArrowLeft,
+  FolderArchive,
+  RotateCcw,
+  Columns,
+  ListFilter,
+  AlertCircle,
 } from 'lucide-react';
 import EmailDocumentViewer from '@/components/EmailDocumentViewer';
 import CalendarScheduleView from '@/components/CalendarScheduleView';
@@ -64,6 +70,7 @@ interface DisplayBidRequest {
   duplicateGroupId: string;
   isFlaggedDuplicate: boolean;
   duplicateReasons: string[];
+  duplicateResolution?: string | null;
   triageStatus: 'pending_triage' | 'in_triage' | 'ready_for_assignment' | 'assigned' | 'archived';
   priority: 'low' | 'normal' | 'high' | 'urgent';
   assignedEstimator: string | null;
@@ -84,7 +91,7 @@ interface DisplayBidRequest {
   sticker: string;
   isHumanLabeled?: boolean;
   humanLabel?: string | null;
-  filterStatus: 'inbox' | 'auto_filtered' | 'promoted_to_job' | 'archived';
+  filterStatus: 'inbox' | 'auto_filtered' | 'promoted_to_job' | 'archived' | 'duplicate_folder';
 
   // AI & Forwarding Enrichment
   isForwarded?: boolean;
@@ -102,21 +109,33 @@ interface DisplayBidRequest {
   matchStatus?: string | null;
 }
 
-function formatBytes(bytes?: number): string {
-  if (!bytes || bytes === 0) return '0 B';
-  const k = 1024;
-  const sizes = ['B', 'KB', 'MB', 'GB'];
-  const i = Math.floor(Math.log(bytes) / Math.log(k));
-  return `${parseFloat((bytes / Math.pow(k, i)).toFixed(1))} ${sizes[i]}`;
+interface CrossContractorMatch {
+  bid: DisplayBidRequest;
+  matchedOn: 'group' | 'job_code' | 'project_name' | 'project_address';
+  contractorName: string;
+  assignedEstimator: string | null;
+  bidNumber?: string | null;
 }
 
 const ESTIMATORS = ['Steven Gross', 'Jaxson Farnholtz', 'Matt Magnani', 'Mariam Azab'];
+
+const CATEGORIES = [
+  'ITB',
+  'Addendum / RFI',
+  'Date Reminder',
+  'Won',
+  'Lost',
+  'Spam',
+];
 
 export default function DispatchDashboard() {
   const [bids, setBids] = useState<DisplayBidRequest[]>([]);
   const [activeFilter, setActiveFilter] = useState<string>('ALL');
   const [verificationFilter, setVerificationFilter] = useState<'all' | 'human_only' | 'unverified_only'>('all');
   const [viewMode, setViewMode] = useState<'feed' | 'calendar'>('feed');
+  const [layoutMode, setLayoutMode] = useState<'split' | 'list'>('split');
+  const [selectedEmailId, setSelectedEmailId] = useState<string | null>(null);
+  const [isMobileDetailOpen, setIsMobileDetailOpen] = useState(false);
   const [isUsingLiveDb, setIsUsingLiveDb] = useState(false);
   const [isLoading, setIsLoading] = useState(false);
   const [expandedGroups, setExpandedGroups] = useState<Record<string, boolean>>({});
@@ -128,14 +147,14 @@ export default function DispatchDashboard() {
   const [itemsPerPage, setItemsPerPage] = useState(50);
   const [feedSearchQuery, setFeedSearchQuery] = useState('');
 
-  // Reset to page 1 whenever active filter or search query changes
+  // Reset to page 1 whenever active filter, verification filter, or search changes
   useEffect(() => {
     setCurrentPage(1);
   }, [activeFilter, verificationFilter, feedSearchQuery]);
 
   // Review & Reclassification Modal State
   const [reviewingBid, setReviewingBid] = useState<DisplayBidRequest | null>(null);
-  const [targetSticker, setTargetSticker] = useState<DisplayBidRequest['sticker']>('ITB');
+  const [targetSticker, setTargetSticker] = useState<string>('ITB');
   const [selectedBidNumberToLink, setSelectedBidNumberToLink] = useState<string>('');
   const [selectedEstimatorForITB, setSelectedEstimatorForITB] = useState<string>('');
   const [selectedDueDateForITB, setSelectedDueDateForITB] = useState<string>('');
@@ -182,7 +201,14 @@ export default function DispatchDashboard() {
           let sticker: string = 'ITB';
           if (isHuman && rawHumanLabel) {
             // User's personal human label takes 100% authoritative precedence!
-            if (rawHumanLabel === 'Addendum' || rawHumanLabel === 'RFI/Forms' || rawHumanLabel === 'Addendum / RFI') {
+            // Unify Addendum, RFI/Forms, RFI / Scope into 'Addendum / RFI'
+            if (
+              rawHumanLabel === 'Addendum' ||
+              rawHumanLabel === 'RFI/Forms' ||
+              rawHumanLabel === 'RFI / Scope' ||
+              rawHumanLabel === 'Scopes of Work' ||
+              rawHumanLabel === 'Addendum / RFI'
+            ) {
               sticker = 'Addendum / RFI';
             } else if (rawHumanLabel === 'General') {
               sticker = 'ITB';
@@ -232,8 +258,9 @@ export default function DispatchDashboard() {
             clientCompany,
             projectAddress,
             duplicateGroupId: r.duplicate_group_id || r.id,
-            isFlaggedDuplicate: r.is_flagged_duplicate,
+            isFlaggedDuplicate: Boolean(r.is_flagged_duplicate),
             duplicateReasons: r.duplicate_reasons || [],
+            duplicateResolution: r.duplicate_resolution || null,
             triageStatus: r.triage_status || 'pending_triage',
             priority: r.priority || 'normal',
             assignedEstimator: assignedName,
@@ -287,90 +314,292 @@ export default function DispatchDashboard() {
   }, []);
 
   // Distinct list of active ITBs that have generated Bid Numbers (for linking Addendums/Wons/Losses)
-  const activeITBsWithNumbers = bids.filter(
-    (b) => b.bidNumber && b.sticker === 'ITB'
-  );
+  const activeITBsWithNumbers = useMemo(() => {
+    return bids.filter((b) => b.bidNumber && b.sticker === 'ITB');
+  }, [bids]);
 
-  const filteredBidsForLinking = activeITBsWithNumbers.filter((b) => {
-    if (!bidSearchQuery.trim()) return true;
-    const q = bidSearchQuery.toLowerCase();
-    return (
-      b.bidNumber?.toLowerCase().includes(q) ||
-      b.subject.toLowerCase().includes(q) ||
-      b.senderName.toLowerCase().includes(q) ||
-      b.jobCode?.toLowerCase().includes(q)
-    );
-  });
+  // Sibling & Cross-Contractor Matching Engine:
+  // Detects if the same project has been received from a DIFFERENT GC contractor
+  const findCrossContractorMatches = (target: DisplayBidRequest): CrossContractorMatch[] => {
+    if (!target) return [];
+    const targetSender = (target.originalSenderEmail || target.senderEmail || '').toLowerCase();
+    const targetCompany = (target.clientCompany || target.originalSenderName || target.senderName || '').toLowerCase().trim();
+    const targetProject = (target.projectName || '').toLowerCase().trim();
+    const targetAddress = (target.projectAddress || '').toLowerCase().trim();
+    const targetJobCode = (target.jobCode || '').toLowerCase().trim();
 
-  // Filter based on verification status, active sticker filter bar, and search query
-  const filteredBids = bids.filter((b) => {
-    // 1. Verification filter mode (All vs Human Verified Only vs AI Pending)
-    if (verificationFilter === 'human_only' && !b.isHumanLabeled) return false;
-    if (verificationFilter === 'unverified_only' && b.isHumanLabeled) return false;
+    const matches: CrossContractorMatch[] = [];
+    const seenIds = new Set<string>();
 
-    // 2. Sticker filter
-    if (activeFilter === 'ALL') {
-      if (b.sticker === 'Spam' || b.filterStatus === 'auto_filtered') return false;
-    } else if (activeFilter === 'Won') {
-      if (b.sticker !== 'Won' && b.sticker !== 'Contractor Awarded') return false;
-    } else if (activeFilter === 'Addendum / RFI' || activeFilter === 'Addendum' || activeFilter === 'RFI/Forms') {
-      if (b.sticker !== 'Addendum / RFI' && b.sticker !== 'Addendum' && b.sticker !== 'RFI/Forms') return false;
-    } else if (b.sticker !== activeFilter) {
-      return false;
-    }
+    for (const other of bids) {
+      if (other.id === target.id) continue;
+      if (seenIds.has(other.id)) continue;
 
-    // 2. Search query filter
-    if (feedSearchQuery.trim()) {
-      const q = feedSearchQuery.toLowerCase();
-      const matchSubject = b.subject?.toLowerCase().includes(q);
-      const matchSender = b.senderName?.toLowerCase().includes(q) || b.senderEmail?.toLowerCase().includes(q);
-      const matchOriginalSender = b.originalSenderName?.toLowerCase().includes(q) || b.originalSenderEmail?.toLowerCase().includes(q);
-      const matchProject = b.projectName?.toLowerCase().includes(q);
-      const matchClient = b.clientCompany?.toLowerCase().includes(q);
-      const matchBidNum = b.bidNumber?.toLowerCase().includes(q) || b.matchedBidNumber?.toLowerCase().includes(q);
-      const matchJobCode = b.jobCode?.toLowerCase().includes(q);
+      const otherSender = (other.originalSenderEmail || other.senderEmail || '').toLowerCase();
+      const otherCompany = (other.clientCompany || other.originalSenderName || other.senderName || '').toLowerCase().trim();
 
-      if (!matchSubject && !matchSender && !matchOriginalSender && !matchProject && !matchClient && !matchBidNum && !matchJobCode) {
-        return false;
+      // Must be a different sender or contractor company
+      const isDifferentContractor =
+        (targetSender && otherSender && targetSender !== otherSender) ||
+        (targetCompany && otherCompany && targetCompany !== otherCompany && !targetCompany.includes(otherCompany) && !otherCompany.includes(targetCompany));
+
+      if (!isDifferentContractor) continue;
+
+      // 1. Same duplicate group id (already linked or clustered)
+      if (target.duplicateGroupId && other.duplicateGroupId && target.duplicateGroupId === other.duplicateGroupId) {
+        seenIds.add(other.id);
+        matches.push({
+          bid: other,
+          matchedOn: 'group',
+          contractorName: other.clientCompany || other.originalSenderName || other.senderName,
+          assignedEstimator: other.assignedEstimator,
+          bidNumber: other.bidNumber || other.matchedBidNumber || null,
+        });
+        continue;
+      }
+
+      // 2. Same job code
+      if (targetJobCode && other.jobCode && targetJobCode === other.jobCode.toLowerCase().trim()) {
+        seenIds.add(other.id);
+        matches.push({
+          bid: other,
+          matchedOn: 'job_code',
+          contractorName: other.clientCompany || other.originalSenderName || other.senderName,
+          assignedEstimator: other.assignedEstimator,
+          bidNumber: other.bidNumber || other.matchedBidNumber || null,
+        });
+        continue;
+      }
+
+      // 3. Same project name (at least 6 characters)
+      if (targetProject && targetProject.length >= 6 && other.projectName) {
+        const otherProj = other.projectName.toLowerCase().trim();
+        if (otherProj.length >= 6 && (targetProject === otherProj || targetProject.includes(otherProj) || otherProj.includes(targetProject))) {
+          seenIds.add(other.id);
+          matches.push({
+            bid: other,
+            matchedOn: 'project_name',
+            contractorName: other.clientCompany || other.originalSenderName || other.senderName,
+            assignedEstimator: other.assignedEstimator,
+            bidNumber: other.bidNumber || other.matchedBidNumber || null,
+          });
+          continue;
+        }
+      }
+
+      // 4. Same project address
+      if (targetAddress && targetAddress.length >= 8 && other.projectAddress) {
+        const otherAddr = other.projectAddress.toLowerCase().trim();
+        if (otherAddr.length >= 8 && (targetAddress.slice(0, 16) === otherAddr.slice(0, 16))) {
+          seenIds.add(other.id);
+          matches.push({
+            bid: other,
+            matchedOn: 'project_address',
+            contractorName: other.clientCompany || other.originalSenderName || other.senderName,
+            assignedEstimator: other.assignedEstimator,
+            bidNumber: other.bidNumber || other.matchedBidNumber || null,
+          });
+          continue;
+        }
       }
     }
 
-    return true;
-  });
-
-  const groupedBids = filteredBids.reduce<Record<string, DisplayBidRequest[]>>((acc, bid) => {
-    acc[bid.duplicateGroupId] = acc[bid.duplicateGroupId] || [];
-    acc[bid.duplicateGroupId].push(bid);
-    return acc;
-  }, {});
-
-  // Pagination Calculations (default 50 per page like standard email clients)
-  const allGroupEntries = Object.entries(groupedBids);
-  const totalGroups = allGroupEntries.length;
-  const totalPages = Math.max(1, Math.ceil(totalGroups / itemsPerPage));
-  const safeCurrentPage = Math.min(Math.max(1, currentPage), totalPages);
-  const startIndex = (safeCurrentPage - 1) * itemsPerPage;
-  const endIndex = Math.min(startIndex + itemsPerPage, totalGroups);
-  const paginatedGroupEntries = allGroupEntries.slice(startIndex, endIndex);
-
-  const getPaginationPages = () => {
-    const delta = 2;
-    const range: (number | string)[] = [];
-    for (let i = 1; i <= totalPages; i++) {
-      if (i === 1 || i === totalPages || (i >= safeCurrentPage - delta && i <= safeCurrentPage + delta)) {
-        range.push(i);
-      } else if (range[range.length - 1] !== '...') {
-        range.push('...');
-      }
-    }
-    return range;
+    return matches;
   };
 
-  const toggleGroup = (groupId: string) => {
-    setExpandedGroups((prev) => ({
-      ...prev,
-      [groupId]: !prev[groupId],
-    }));
+  // Due Date Extension Detection Helper
+  const checkDueDateExtension = (bid: DisplayBidRequest): { isExtension: boolean; revisedDate: string | null; reason: string } => {
+    if (!bid) return { isExtension: false, revisedDate: null, reason: '' };
+    if (bid.isDueDateRevised && bid.revisedDueDate) {
+      return {
+        isExtension: true,
+        revisedDate: bid.revisedDueDate,
+        reason: 'Addendum revised due date',
+      };
+    }
+    const text = `${bid.subject} ${bid.bodyText || ''}`.slice(0, 1000);
+    const extensionRegex = /(?:due\s*date|bid\s*date|bid\s*due|deadline|submittal\s*date)\s*(?:is\s*)?(?:extended|extended\s*to|moved\s*to|revised\s*to|changed\s*to|postponed\s*to)\s*([A-Za-z0-9\/\,\.\s\-]{4,25})/i;
+    const match = text.match(extensionRegex);
+    if (match && match[1]) {
+      const parsed = normalizeDateToYyyyMmDd(match[1].trim());
+      if (parsed && parsed !== bid.bidDueDate) {
+        return {
+          isExtension: true,
+          revisedDate: parsed,
+          reason: `Detected extension phrase in email: "${match[0].slice(0, 50)}"`,
+        };
+      }
+    }
+    return { isExtension: false, revisedDate: null, reason: '' };
+  };
+
+  // Duplicate Detection Helper
+  const checkDuplicateStatus = (bid: DisplayBidRequest): { isDuplicate: boolean; duplicateOfBid?: DisplayBidRequest; reason: string } => {
+    if (!bid) return { isDuplicate: false, reason: '' };
+    if (bid.filterStatus === 'duplicate_folder' || bid.duplicateResolution === 'duplicate') {
+      return { isDuplicate: true, reason: 'Moved to Duplicates Folder' };
+    }
+    if (bid.isFlaggedDuplicate) {
+      const reason = bid.duplicateReasons?.length ? bid.duplicateReasons.join(', ') : 'Flagged as duplicate or related inquiry';
+      const primary = bids.find((b) => b.duplicateGroupId === bid.duplicateGroupId && b.id !== bid.id && !b.isFlaggedDuplicate);
+      return { isDuplicate: true, duplicateOfBid: primary, reason };
+    }
+    const identical = bids.find((b) => b.id !== bid.id && b.subject === bid.subject && b.senderEmail === bid.senderEmail);
+    if (identical) {
+      return { isDuplicate: true, duplicateOfBid: identical, reason: 'Identical sender & subject as an earlier email' };
+    }
+    return { isDuplicate: false, reason: '' };
+  };
+
+  // Main Queue Filter:
+  // Duplicates are strictly isolated into the "Duplicates" folder!
+  const filteredBids = useMemo(() => {
+    return bids.filter((b) => {
+      // 1. Verification filter mode
+      if (verificationFilter === 'human_only' && !b.isHumanLabeled) return false;
+      if (verificationFilter === 'unverified_only' && b.isHumanLabeled) return false;
+
+      // 2. Duplicate folder determination
+      const isMarkedDuplicate = b.filterStatus === 'duplicate_folder' || b.duplicateResolution === 'duplicate';
+
+      if (activeFilter === 'Duplicates') {
+        return isMarkedDuplicate || b.isFlaggedDuplicate;
+      }
+
+      // If not viewing Duplicates folder, exclude items sent to duplicates
+      if (isMarkedDuplicate) {
+        return false;
+      }
+
+      // 3. Category / Folder filter
+      if (activeFilter === 'ALL') {
+        // Main active queue excludes Spam and Auto-Filtered
+        if (b.sticker === 'Spam' || b.filterStatus === 'auto_filtered') return false;
+      } else if (activeFilter === 'Won') {
+        if (b.sticker !== 'Won' && b.sticker !== 'Contractor Awarded') return false;
+      } else if (activeFilter === 'Addendum / RFI') {
+        // Unified Addendum / RFI category (combines Addendum, RFI/Forms, RFI / Scope)
+        if (b.sticker !== 'Addendum / RFI' && b.sticker !== 'Addendum' && b.sticker !== 'RFI/Forms' && b.sticker !== 'RFI / Scope') return false;
+      } else if (activeFilter === 'Spam') {
+        if (b.sticker !== 'Spam' && b.filterStatus !== 'auto_filtered') return false;
+      } else if (b.sticker !== activeFilter) {
+        return false;
+      }
+
+      // 4. Search query filter
+      if (feedSearchQuery.trim()) {
+        const q = feedSearchQuery.toLowerCase();
+        const matchSubject = b.subject?.toLowerCase().includes(q);
+        const matchSender = b.senderName?.toLowerCase().includes(q) || b.senderEmail?.toLowerCase().includes(q);
+        const matchOriginalSender = b.originalSenderName?.toLowerCase().includes(q) || b.originalSenderEmail?.toLowerCase().includes(q);
+        const matchProject = b.projectName?.toLowerCase().includes(q);
+        const matchClient = b.clientCompany?.toLowerCase().includes(q);
+        const matchBidNum = b.bidNumber?.toLowerCase().includes(q) || b.matchedBidNumber?.toLowerCase().includes(q);
+        const matchJobCode = b.jobCode?.toLowerCase().includes(q);
+        const matchAddress = b.projectAddress?.toLowerCase().includes(q);
+
+        if (!matchSubject && !matchSender && !matchOriginalSender && !matchProject && !matchClient && !matchBidNum && !matchJobCode && !matchAddress) {
+          return false;
+        }
+      }
+
+      return true;
+    });
+  }, [bids, activeFilter, verificationFilter, feedSearchQuery]);
+
+  // Keep selected email active or default to the first email in the filtered queue
+  useEffect(() => {
+    if (filteredBids.length > 0) {
+      if (!selectedEmailId || !filteredBids.some((b) => b.id === selectedEmailId)) {
+        setSelectedEmailId(filteredBids[0].id);
+      }
+    } else {
+      setSelectedEmailId(null);
+    }
+  }, [filteredBids, selectedEmailId]);
+
+  // Currently selected email object
+  const selectedBid = useMemo(() => {
+    return bids.find((b) => b.id === selectedEmailId) || filteredBids[0] || null;
+  }, [bids, selectedEmailId, filteredBids]);
+
+  // Lazy-fetch full email HTML body if not yet loaded when selecting an email
+  useEffect(() => {
+    if (!selectedBid || selectedBid.bodyHtml !== undefined) return;
+    const bidId = selectedBid.id;
+
+    fetch(`/api/bid-requests/${bidId}`)
+      .then((res) => res.json())
+      .then((data) => {
+        if (data.bidRequest) {
+          setBids((prev) =>
+            prev.map((b) =>
+              b.id === bidId
+                ? {
+                    ...b,
+                    bodyHtml: data.bidRequest.email_body_html || data.bidRequest.raw_payload?.bodyHtml || null,
+                    bodyText: b.bodyText || data.bidRequest.email_body_text || data.bidRequest.raw_payload?.bodyText || null,
+                  }
+                : b
+            )
+          );
+        }
+      })
+      .catch((err) => console.error('Error fetching detail body:', err));
+  }, [selectedBid]);
+
+  // Sibling / Duplicate Grouping for Grouped List View
+  const groupedBids = useMemo(() => {
+    return filteredBids.reduce<Record<string, DisplayBidRequest[]>>((acc, bid) => {
+      acc[bid.duplicateGroupId] = acc[bid.duplicateGroupId] || [];
+      acc[bid.duplicateGroupId].push(bid);
+      return acc;
+    }, {});
+  }, [filteredBids]);
+
+  // Pagination for Queue List & Grouped View
+  const totalItems = filteredBids.length;
+  const totalPages = Math.max(1, Math.ceil(totalItems / itemsPerPage));
+  const safeCurrentPage = Math.min(Math.max(1, currentPage), totalPages);
+  const startIndex = (safeCurrentPage - 1) * itemsPerPage;
+  const endIndex = Math.min(startIndex + itemsPerPage, totalItems);
+  const paginatedBids = filteredBids.slice(startIndex, endIndex);
+
+  // Grouped entries pagination
+  const allGroupEntries = Object.entries(groupedBids);
+  const totalGroups = allGroupEntries.length;
+  const totalGroupPages = Math.max(1, Math.ceil(totalGroups / itemsPerPage));
+  const paginatedGroupEntries = allGroupEntries.slice(
+    (safeCurrentPage - 1) * itemsPerPage,
+    Math.min(safeCurrentPage * itemsPerPage, totalGroups)
+  );
+
+  // Stepping through emails in the Reading Pane (Prev / Next)
+  const currentEmailIndex = useMemo(() => {
+    if (!selectedBid) return -1;
+    return filteredBids.findIndex((b) => b.id === selectedBid.id);
+  }, [filteredBids, selectedBid]);
+
+  const handleSelectNextEmail = () => {
+    if (currentEmailIndex < filteredBids.length - 1) {
+      const nextBid = filteredBids[currentEmailIndex + 1];
+      setSelectedEmailId(nextBid.id);
+      const nextPageIndex = Math.floor((currentEmailIndex + 1) / itemsPerPage) + 1;
+      if (nextPageIndex !== safeCurrentPage) {
+        setCurrentPage(nextPageIndex);
+      }
+    }
+  };
+
+  const handleSelectPrevEmail = () => {
+    if (currentEmailIndex > 0) {
+      const prevBid = filteredBids[currentEmailIndex - 1];
+      setSelectedEmailId(prevBid.id);
+      const prevPageIndex = Math.floor((currentEmailIndex - 1) / itemsPerPage) + 1;
+      if (prevPageIndex !== safeCurrentPage) {
+        setCurrentPage(prevPageIndex);
+      }
+    }
   };
 
   // 1. Direct Estimator & Due Date Assignment (Persisted to Supabase)
@@ -379,7 +608,6 @@ export default function DispatchDashboard() {
     estimator?: string | null,
     dueDate?: string | null
   ) => {
-    // Optimistic UI update
     setBids((prev) =>
       prev.map((b) =>
         b.id === bidId
@@ -414,7 +642,173 @@ export default function DispatchDashboard() {
     }
   };
 
-  // 2. Open Human-in-the-Loop Review Modal
+  // 2. Quick Category Sticker Change (Authoritative Human Label)
+  const handleQuickCategoryChange = async (bidId: string, newSticker: string) => {
+    const normalized = (newSticker === 'Addendum' || newSticker === 'RFI/Forms' || newSticker === 'RFI / Scope')
+      ? 'Addendum / RFI'
+      : newSticker;
+
+    setBids((prev) =>
+      prev.map((b) =>
+        b.id === bidId
+          ? {
+              ...b,
+              sticker: normalized,
+              isHumanLabeled: true,
+              humanLabel: normalized,
+            }
+          : b
+      )
+    );
+
+    showToast(`✔ Category set to [${normalized}] (User Verified)`);
+
+    try {
+      const res = await fetch(`/api/bid-requests/${bidId}`, {
+        method: 'PATCH',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ newSticker: normalized, isHumanLabeled: true }),
+      });
+      if (!res.ok) {
+        showToast('Error saving category to server');
+        await fetchLiveBids();
+      }
+    } catch {
+      showToast('Network error saving category');
+    }
+  };
+
+  // 3. Move Email to Duplicates Folder
+  const handleMoveToDuplicates = async (bidId: string) => {
+    // Advance to next email in queue
+    const idx = filteredBids.findIndex((b) => b.id === bidId);
+    if (idx < filteredBids.length - 1) {
+      setSelectedEmailId(filteredBids[idx + 1].id);
+    } else if (idx > 0) {
+      setSelectedEmailId(filteredBids[idx - 1].id);
+    }
+
+    setBids((prev) =>
+      prev.map((b) =>
+        b.id === bidId
+          ? {
+              ...b,
+              filterStatus: 'duplicate_folder',
+              duplicateResolution: 'duplicate',
+              isFlaggedDuplicate: true,
+            }
+          : b
+      )
+    );
+
+    showToast('📁 Moved email to Duplicates folder');
+
+    try {
+      const res = await fetch(`/api/bid-requests/${bidId}`, {
+        method: 'PATCH',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ moveToDuplicates: true }),
+      });
+      if (!res.ok) {
+        showToast('Error saving to server');
+        await fetchLiveBids();
+      }
+    } catch {
+      showToast('Network error saving status');
+    }
+  };
+
+  // 4. Restore Email from Duplicates Folder back into Inbox
+  const handleRestoreFromDuplicates = async (bidId: string) => {
+    setBids((prev) =>
+      prev.map((b) =>
+        b.id === bidId
+          ? {
+              ...b,
+              filterStatus: 'inbox',
+              duplicateResolution: 'marked_distinct',
+              isFlaggedDuplicate: false,
+            }
+          : b
+      )
+    );
+
+    showToast('↩ Restored email to Active Inbox');
+
+    try {
+      const res = await fetch(`/api/bid-requests/${bidId}`, {
+        method: 'PATCH',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ restoreFromDuplicates: true }),
+      });
+      if (!res.ok) {
+        showToast('Error updating status on server');
+        await fetchLiveBids();
+      }
+    } catch {
+      showToast('Network error updating status');
+    }
+  };
+
+  // 5. Link with Sibling Contractor Project
+  const handleLinkToOtherContractor = async (
+    sourceBidId: string,
+    targetBidNumber: string,
+    targetEstimator?: string
+  ) => {
+    try {
+      const payload: any = { linkToBidNumber: targetBidNumber };
+      if (targetEstimator) payload.assignedEstimator = targetEstimator;
+
+      const res = await fetch(`/api/bid-requests/${sourceBidId}`, {
+        method: 'PATCH',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(payload),
+      });
+      if (res.ok) {
+        showToast(`✔ Linked to ${targetBidNumber}! Shared folder and estimator updated.`);
+        await fetchLiveBids();
+      } else {
+        showToast('Failed to link bids');
+      }
+    } catch {
+      showToast('Network error linking bids');
+    }
+  };
+
+  // 6. Accept Revised Due Date (from Addendum)
+  const handleAcceptRevisedDueDate = async (bidId: string, revisedDueDate: string) => {
+    setBids((prev) =>
+      prev.map((b) =>
+        b.id === bidId
+          ? {
+              ...b,
+              bidDueDate: revisedDueDate,
+              isDueDateRevised: false,
+            }
+          : b
+      )
+    );
+
+    try {
+      const res = await fetch(`/api/bid-requests/${bidId}`, {
+        method: 'PATCH',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ acceptRevisedDueDate: true, revisedDueDate }),
+      });
+      if (res.ok) {
+        showToast(`✔ Calendar bid due date updated to ${formatFriendlyDate(revisedDueDate)}!`);
+        await fetchLiveBids();
+      } else {
+        const err = await res.json();
+        showToast(`Failed to update due date: ${err.error || 'Server error'}`);
+      }
+    } catch (e: any) {
+      showToast(`Error: ${e.message}`);
+    }
+  };
+
+  // 7. Open Human-in-the-Loop Review Modal
   const openReviewModal = (bid: DisplayBidRequest) => {
     setReviewingBid(bid);
     setTargetSticker(bid.sticker);
@@ -428,7 +822,7 @@ export default function DispatchDashboard() {
     setShowModalEmailBody(true);
   };
 
-  // 3. Save Reclassification & Workflow Transition
+  // 8. Save Reclassification & Workflow Transition
   const handleSaveReclassification = async () => {
     if (!reviewingBid) return;
     setIsSavingReclassification(true);
@@ -445,7 +839,7 @@ export default function DispatchDashboard() {
           payload.assignedEstimator = selectedEstimatorForITB || null;
           payload.bidDueDate = selectedDueDateForITB || null;
         }
-      } else if (targetSticker === 'Addendum') {
+      } else if (targetSticker === 'Addendum' || targetSticker === 'Addendum / RFI') {
         payload.matchedBidNumber = selectedBidNumberToLink || null;
         if (addendumRevisedDueDateInput) {
           payload.acceptRevisedDueDate = true;
@@ -479,7 +873,7 @@ export default function DispatchDashboard() {
     }
   };
 
-  // 4. Standalone Link / Relink Modal Open & Handlers
+  // 9. Standalone Link / Relink Modal Open & Handlers
   const openLinkModal = (bid: DisplayBidRequest) => {
     setLinkingBid(bid);
     setTargetBidNumberForLink(bid.matchedBidNumber || (activeITBsWithNumbers[0]?.bidNumber || ''));
@@ -514,7 +908,7 @@ export default function DispatchDashboard() {
     }
   };
 
-  // 5. Unlink Bid Handler (Calendar Manager Manual Intervention)
+  // 10. Unlink Bid Handler
   const handleUnlinkBid = async (bidId: string) => {
     if (!confirm('Are you sure you want to unlink this email? It will become an independent bid folder with its own bid number.')) {
       return;
@@ -538,26 +932,6 @@ export default function DispatchDashboard() {
     }
   };
 
-  // 6. Accept Revised Due Date Handler (from Addendum)
-  const handleAcceptRevisedDueDate = async (bidId: string, revisedDueDate: string) => {
-    try {
-      const res = await fetch(`/api/bid-requests/${bidId}`, {
-        method: 'PATCH',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ acceptRevisedDueDate: true, revisedDueDate }),
-      });
-      if (res.ok) {
-        showToast(`✔ Calendar bid due date updated to ${formatFriendlyDate(revisedDueDate)}!`);
-        await fetchLiveBids();
-      } else {
-        const err = await res.json();
-        showToast(`Failed to update due date: ${err.error || 'Server error'}`);
-      }
-    } catch (e: any) {
-      showToast(`Error: ${e.message}`);
-    }
-  };
-
   // Filter list of active ITBs for linking modal
   const filteredBidsForRelinking = activeITBsWithNumbers.filter((b) => {
     if (!linkingBid) return false;
@@ -574,29 +948,56 @@ export default function DispatchDashboard() {
     );
   });
 
-  // Sticker counts
-  const countITB = bids.filter((b) => b.sticker === 'ITB').length;
-  const countAddendumRFI = bids.filter((b) => b.sticker === 'Addendum / RFI' || b.sticker === 'Addendum' || b.sticker === 'RFI/Forms').length;
-  const countAddendum = bids.filter((b) => b.sticker === 'Addendum').length;
-  const countRFI = bids.filter((b) => b.sticker === 'RFI/Forms').length;
-  const countReminder = bids.filter((b) => b.sticker === 'Date Reminder').length;
-  const countUnknown = bids.filter((b) => b.sticker === 'Unknown').length;
-  const countWon = bids.filter((b) => b.sticker === 'Won' || b.sticker === 'Contractor Awarded').length;
-  const countLost = bids.filter((b) => b.sticker === 'Lost').length;
-  const countSpam = bids.filter((b) => b.sticker === 'Spam').length;
+  // Filter list of active ITBs for reclassification modal
+  const filteredBidsForLinking = activeITBsWithNumbers.filter((b) => {
+    if (!bidSearchQuery.trim()) return true;
+    const q = bidSearchQuery.toLowerCase();
+    return (
+      b.bidNumber?.toLowerCase().includes(q) ||
+      b.subject.toLowerCase().includes(q) ||
+      b.senderName.toLowerCase().includes(q) ||
+      b.jobCode?.toLowerCase().includes(q)
+    );
+  });
+
+  // Counts for Category Tabs (excluding Duplicates from active folders)
+  const isDup = (b: DisplayBidRequest) => b.filterStatus === 'duplicate_folder' || b.duplicateResolution === 'duplicate';
+  const countAllQueue = bids.filter((b) => b.sticker !== 'Spam' && b.filterStatus !== 'auto_filtered' && !isDup(b)).length;
+  const countITB = bids.filter((b) => b.sticker === 'ITB' && !isDup(b)).length;
+  const countAddendumRFI = bids.filter((b) => (b.sticker === 'Addendum / RFI' || b.sticker === 'Addendum' || b.sticker === 'RFI/Forms' || b.sticker === 'RFI / Scope') && !isDup(b)).length;
+  const countReminder = bids.filter((b) => b.sticker === 'Date Reminder' && !isDup(b)).length;
+  const countWon = bids.filter((b) => (b.sticker === 'Won' || b.sticker === 'Contractor Awarded') && !isDup(b)).length;
+  const countLost = bids.filter((b) => b.sticker === 'Lost' && !isDup(b)).length;
+  const countDuplicates = bids.filter((b) => isDup(b) || b.isFlaggedDuplicate).length;
+  const countSpam = bids.filter((b) => b.sticker === 'Spam' || b.filterStatus === 'auto_filtered').length;
   const countHumanVerified = bids.filter((b) => b.isHumanLabeled).length;
   const countUnverified = bids.filter((b) => !b.isHumanLabeled).length;
+
+  // Selected email AI alerts
+  const crossContractorMatches = useMemo(() => {
+    return selectedBid ? findCrossContractorMatches(selectedBid) : [];
+  }, [selectedBid, bids]);
+
+  const dueDateExt = useMemo(() => {
+    return selectedBid ? checkDueDateExtension(selectedBid) : { isExtension: false, revisedDate: null, reason: '' };
+  }, [selectedBid]);
+
+  const dupDetails = useMemo(() => {
+    return selectedBid ? checkDuplicateStatus(selectedBid) : { isDuplicate: false, reason: '' };
+  }, [selectedBid, bids]);
 
   const renderStickerBadge = (sticker: string, bid: DisplayBidRequest) => {
     let badgeClass = 'bg-blue-600 text-white';
     let icon = null;
     let badgeText = sticker === 'ITB' ? 'ITB' : sticker;
 
-    if (sticker === 'Addendum / RFI' || sticker === 'Addendum') {
-      badgeClass = 'bg-purple-600 text-white';
-      icon = <FileSpreadsheet className="w-3 h-3" />;
-      badgeText = 'Addendum / RFI';
-    } else if (sticker === 'RFI/Forms') {
+    if (
+      sticker === 'Addendum / RFI' ||
+      sticker === 'Addendum' ||
+      sticker === 'RFI/Forms' ||
+      sticker === 'RFI / Scope' ||
+      sticker === 'Scopes of Work'
+    ) {
       badgeClass = 'bg-purple-600 text-white';
       icon = <FileSpreadsheet className="w-3 h-3" />;
       badgeText = 'Addendum / RFI';
@@ -613,15 +1014,9 @@ export default function DispatchDashboard() {
       badgeClass = 'bg-amber-600 text-white shadow-xs';
       icon = <Trophy className="w-3 h-3 text-amber-200" />;
       badgeText = 'Contractor Awarded';
-    } else if (sticker === 'RFI/Forms') {
-      badgeClass = 'bg-cyan-600 text-white shadow-xs';
-      icon = <Tag className="w-3 h-3 text-cyan-200" />;
     } else if (sticker === 'Date Reminder') {
       badgeClass = 'bg-indigo-600 text-white shadow-xs';
       icon = <Clock className="w-3 h-3 text-indigo-200" />;
-    } else if (sticker === 'Unknown') {
-      badgeClass = 'bg-slate-600 text-white shadow-xs';
-      icon = <HelpCircle className="w-3 h-3 text-slate-200" />;
     } else if (sticker === 'Lost') {
       badgeClass = 'bg-rose-600 text-white';
       icon = <XCircle className="w-3 h-3" />;
@@ -635,10 +1030,10 @@ export default function DispatchDashboard() {
         <span
           title={
             bid.isHumanLabeled
-              ? `Personally verified by user: "${sticker}"`
-              : `AI classified as ${sticker}`
+              ? `Personally verified by user: "${badgeText}"`
+              : `AI classified as ${badgeText}`
           }
-          className={`px-2.5 py-1 rounded font-black text-[11px] uppercase tracking-wider shadow-sm flex items-center gap-1 ${badgeClass}`}
+          className={`px-2 py-0.5 rounded font-black text-[10px] uppercase tracking-wider shadow-xs flex items-center gap-1 ${badgeClass}`}
         >
           {icon}
           {badgeText}
@@ -648,27 +1043,18 @@ export default function DispatchDashboard() {
         {bid.isHumanLabeled && (
           <span
             title="Personally reviewed and verified by user"
-            className="px-1.5 py-0.5 rounded text-[10px] font-bold bg-emerald-50 text-emerald-800 border border-emerald-300 flex items-center gap-1 shadow-2xs"
+            className="px-1.5 py-0.5 rounded text-[9px] font-bold bg-emerald-50 text-emerald-800 border border-emerald-300 flex items-center gap-0.5 shadow-2xs"
           >
-            <UserCheck className="w-3 h-3 text-emerald-600" />
-            <span>User Verified</span>
+            <UserCheck className="w-2.5 h-2.5 text-emerald-600" />
+            <span>Verified</span>
           </span>
         )}
-
-        <button
-          onClick={() => openReviewModal(bid)}
-          title="Calendar Manager: Review or Change Classification"
-          className="p-1 rounded bg-slate-100 hover:bg-slate-200 text-slate-500 hover:text-slate-800 transition-colors border border-slate-300 text-[10px] font-semibold flex items-center gap-0.5"
-        >
-          <Edit3 className="w-3 h-3" />
-          <span>Edit</span>
-        </button>
       </div>
     );
   };
 
   return (
-    <div className="space-y-6">
+    <div className="space-y-4">
       {/* Toast Notification */}
       {toastMessage && (
         <div className="fixed bottom-6 right-6 z-50 px-4 py-3 bg-slate-900 text-white rounded-xl shadow-xl flex items-center gap-2 text-xs font-semibold animate-in fade-in slide-in-from-bottom-3 border border-slate-700">
@@ -678,112 +1064,135 @@ export default function DispatchDashboard() {
       )}
 
       {/* Top Banner */}
-      <div className="bg-gradient-to-r from-blue-900 via-indigo-900 to-slate-900 rounded-2xl p-6 text-white shadow-md">
+      <div className="bg-gradient-to-r from-blue-950 via-slate-900 to-indigo-950 rounded-2xl p-5 text-white shadow-md">
         <div className="flex flex-col md:flex-row md:items-center justify-between gap-4">
           <div>
-            <div className="flex items-center gap-2 mb-1">
-              <h2 className="text-2xl font-bold tracking-tight">
-                Calendar Manager Dispatch Dashboard
+            <div className="flex items-center gap-2.5 mb-1">
+              <h2 className="text-xl sm:text-2xl font-bold tracking-tight flex items-center gap-2">
+                <Mail className="w-5 h-5 text-blue-400" />
+                Calendar Manager Dispatch & Email Queue
               </h2>
               {isUsingLiveDb && (
                 <span className="px-2 py-0.5 rounded text-[11px] font-semibold bg-emerald-500/20 text-emerald-300 border border-emerald-500/30 flex items-center gap-1">
-                  <Database className="w-3 h-3" /> Supabase Live ({bids.length} Ingested)
+                  <Database className="w-3 h-3" /> Live ({bids.length})
                 </span>
               )}
             </div>
-            <p className="text-blue-200 text-sm flex items-center gap-1.5">
-              <Sparkles className="w-4 h-4 text-amber-300" />
-              <strong>Human-in-the-Loop Triage:</strong> Review and adjust AI classifications anytime. ITBs generate Bid Numbers and assign estimators; Addendums & Awards link directly to existing project folders.
+            <p className="text-blue-200 text-xs sm:text-sm flex items-center gap-1.5">
+              <Sparkles className="w-4 h-4 text-amber-300 flex-shrink-0" />
+              <strong>Intelligent Inbound Queue:</strong> Inspect emails alongside top AI notes — multi-contractor job alerts, due date extensions, duplicate filtering, and instant estimator assignment.
             </p>
           </div>
 
-          <div className="flex items-center gap-2">
+          <div className="flex items-center gap-2 flex-wrap">
             <button
               onClick={fetchLiveBids}
               disabled={isLoading}
               title="Refresh Live Data"
-              className="p-2.5 rounded-lg bg-white/10 hover:bg-white/20 text-white transition-colors flex items-center gap-2 text-xs font-medium"
+              className="p-2 px-3 rounded-lg bg-white/10 hover:bg-white/20 text-white transition-colors flex items-center gap-1.5 text-xs font-semibold"
             >
-              <RefreshCw className={`w-4 h-4 ${isLoading ? 'animate-spin' : ''}`} />
+              <RefreshCw className={`w-3.5 h-3.5 ${isLoading ? 'animate-spin' : ''}`} />
               Refresh
             </button>
+
+            <Link
+              href="/estimator"
+              className="px-3 py-2 rounded-lg text-xs font-bold transition-all flex items-center gap-1.5 bg-indigo-500/20 hover:bg-indigo-500/30 text-indigo-200 border border-indigo-400/30"
+            >
+              <Briefcase className="w-3.5 h-3.5 text-indigo-300" />
+              <span>Estimators ({bids.filter((b) => b.assignedEstimator).length})</span>
+            </Link>
+
+            <Link
+              href="/label"
+              className="px-3 py-2 rounded-lg text-xs font-bold transition-all flex items-center gap-1.5 bg-purple-500/20 hover:bg-purple-500/30 text-purple-200 border border-purple-400/30"
+              title="Mobile Data Labeling App"
+            >
+              <Tag className="w-3.5 h-3.5 text-purple-300" />
+              <span>Labeler</span>
+            </Link>
+
+            <Link
+              href="/model"
+              className="px-3 py-2 rounded-lg text-xs font-bold transition-all flex items-center gap-1.5 bg-emerald-500/20 hover:bg-emerald-500/30 text-emerald-200 border border-emerald-400/30"
+              title="ML Multiclass Classification Model Lab"
+            >
+              <Brain className="w-3.5 h-3.5 text-emerald-300" />
+              <span>ML Lab (87.3%)</span>
+            </Link>
           </div>
         </div>
       </div>
 
-      {/* VIEW SWITCHER TABS: INBOUND FEED vs CALENDAR SCHEDULE VIEW */}
-      <div className="bg-white p-2.5 rounded-2xl border border-slate-200 shadow-sm flex flex-col sm:flex-row sm:items-center justify-between gap-3">
-        <div className="flex items-center gap-2">
+      {/* VIEW SWITCHER & LAYOUT MODE BAR */}
+      <div className="bg-white p-2.5 rounded-2xl border border-slate-200 shadow-xs flex flex-col sm:flex-row sm:items-center justify-between gap-3">
+        <div className="flex items-center gap-2 flex-wrap">
           <button
             onClick={() => setViewMode('feed')}
-            className={`px-4 py-2 rounded-xl text-xs font-bold transition-all flex items-center gap-2 ${
+            className={`px-3.5 py-1.5 rounded-xl text-xs font-bold transition-all flex items-center gap-1.5 ${
               viewMode === 'feed'
                 ? 'bg-slate-900 text-white shadow-sm'
                 : 'text-slate-600 hover:bg-slate-100'
             }`}
           >
-            <Inbox className="w-4 h-4" />
-            <span>Inbound Dispatch Feed</span>
-            <span className="px-1.5 py-0.5 rounded-full text-[10px] bg-white/20 font-mono">
-              {bids.filter((b) => b.sticker !== 'Spam').length}
+            <Inbox className="w-3.5 h-3.5" />
+            <span>Inbound Queue</span>
+            <span className="px-1.5 py-0.2 rounded-full text-[10px] bg-white/20 font-mono">
+              {countAllQueue}
             </span>
           </button>
 
           <button
             onClick={() => setViewMode('calendar')}
-            className={`px-4 py-2 rounded-xl text-xs font-bold transition-all flex items-center gap-2 ${
+            className={`px-3.5 py-1.5 rounded-xl text-xs font-bold transition-all flex items-center gap-1.5 ${
               viewMode === 'calendar'
                 ? 'bg-blue-600 text-white shadow-sm ring-2 ring-blue-300'
                 : 'text-slate-600 hover:bg-slate-100'
             }`}
           >
-            <CalendarIcon className="w-4 h-4" />
+            <CalendarIcon className="w-3.5 h-3.5" />
             <span>Calendar Schedule View</span>
-            <span className="px-1.5 py-0.5 rounded-full text-[10px] bg-white/20 font-mono">
-              {bids.filter((b) => (b.bidDueDate || b.normalizedAiDueDate) && b.sticker !== 'Spam').length} Scheduled
+            <span className="px-1.5 py-0.2 rounded-full text-[10px] bg-white/20 font-mono">
+              {bids.filter((b) => (b.bidDueDate || b.normalizedAiDueDate) && b.sticker !== 'Spam').length}
             </span>
           </button>
-
-          <Link
-            href="/estimator"
-            className="px-4 py-2 rounded-xl text-xs font-bold transition-all flex items-center gap-2 bg-indigo-50 hover:bg-indigo-100 text-indigo-700 border border-indigo-200 shadow-2xs"
-          >
-            <Briefcase className="w-4 h-4 text-indigo-600" />
-            <span>Estimator Portal</span>
-            <span className="px-1.5 py-0.5 rounded-full text-[10px] bg-indigo-200/60 text-indigo-900 font-mono">
-              {bids.filter((b) => b.assignedEstimator).length} Assigned
-            </span>
-          </Link>
-
-          <Link
-            href="/label"
-            className="px-4 py-2 rounded-xl text-xs font-bold transition-all flex items-center gap-2 bg-purple-50 hover:bg-purple-100 text-purple-700 border border-purple-200 shadow-2xs"
-            title="Mobile Data Labeling App (Optimized for Samsung Galaxy S24 FE)"
-          >
-            <Tag className="w-4 h-4 text-purple-600" />
-            <span>Quick Labeler</span>
-            <span className="px-1.5 py-0.5 rounded-full text-[10px] bg-purple-200/60 text-purple-900 font-mono">
-              S24 FE
-            </span>
-          </Link>
-
-          <Link
-            href="/model"
-            className="px-4 py-2 rounded-xl text-xs font-bold transition-all flex items-center gap-2 bg-emerald-50 hover:bg-emerald-100 text-emerald-800 border border-emerald-300 shadow-2xs"
-            title="ML Multiclass Classification Model Lab & 80/20 Test Metrics"
-          >
-            <Brain className="w-4 h-4 text-emerald-600" />
-            <span>ML Model Lab</span>
-            <span className="px-1.5 py-0.5 rounded-full text-[10px] bg-emerald-200/60 text-emerald-950 font-mono">
-              80/20 Test
-            </span>
-          </Link>
         </div>
 
-        <div className="hidden sm:flex items-center gap-2 text-xs text-slate-500 pr-2">
-          <Sparkles className="w-3.5 h-3.5 text-amber-500" />
-          <span>Auto-suggests bid due dates directly from email bodies</span>
-        </div>
+        {/* Layout Toggle (Gmail Split Queue vs Grouped Cards) */}
+        {viewMode === 'feed' && (
+          <div className="flex items-center gap-2">
+            <span className="text-xs text-slate-400 font-semibold hidden md:inline">Layout:</span>
+            <div className="inline-flex items-center p-1 bg-slate-100 rounded-xl border border-slate-200 text-xs font-bold">
+              <button
+                type="button"
+                onClick={() => setLayoutMode('split')}
+                className={`px-2.5 py-1 rounded-lg transition-all flex items-center gap-1.5 ${
+                  layoutMode === 'split'
+                    ? 'bg-white text-blue-700 shadow-2xs font-extrabold'
+                    : 'text-slate-600 hover:text-slate-900'
+                }`}
+                title="Gmail Split View: Email Queue on Left, Reading Pane on Right"
+              >
+                <Columns className="w-3.5 h-3.5 text-blue-600" />
+                <span>Gmail Queue (2-Pane)</span>
+              </button>
+
+              <button
+                type="button"
+                onClick={() => setLayoutMode('list')}
+                className={`px-2.5 py-1 rounded-lg transition-all flex items-center gap-1.5 ${
+                  layoutMode === 'list'
+                    ? 'bg-white text-slate-900 shadow-2xs font-extrabold'
+                    : 'text-slate-600 hover:text-slate-900'
+                }`}
+                title="Grouped Cards View: Overview of Projects and Sibling Inquiries"
+              >
+                <ListFilter className="w-3.5 h-3.5" />
+                <span>Grouped Cards</span>
+              </button>
+            </div>
+          </div>
+        )}
       </div>
 
       {viewMode === 'calendar' ? (
@@ -795,15 +1204,15 @@ export default function DispatchDashboard() {
         />
       ) : (
         <>
-          {/* QUICK CATEGORIZATION STICKER FILTER BAR & IN-FEED SEARCH */}
-          <div className="bg-white p-3 rounded-xl border border-slate-200 shadow-sm flex flex-col md:flex-row md:items-center justify-between gap-3">
-            <div className="flex items-center gap-2 overflow-x-auto pb-1 md:pb-0 flex-wrap">
+          {/* CATEGORY & FOLDER FILTER TABS + SEARCH BAR */}
+          <div className="bg-white p-3 rounded-2xl border border-slate-200 shadow-xs flex flex-col md:flex-row md:items-center justify-between gap-3">
+            <div className="flex items-center gap-1.5 overflow-x-auto pb-1 md:pb-0 flex-wrap">
               {/* Human vs AI Verification Mode Filter */}
-              <div className="flex items-center gap-1 bg-slate-100 p-1 rounded-lg border border-slate-200 text-xs font-bold mr-1">
+              <div className="flex items-center gap-1 bg-slate-100 p-1 rounded-xl border border-slate-200 text-xs font-bold mr-1">
                 <button
                   type="button"
                   onClick={() => setVerificationFilter('all')}
-                  className={`px-2 py-1 rounded-md transition-all ${
+                  className={`px-2 py-1 rounded-lg transition-all ${
                     verificationFilter === 'all'
                       ? 'bg-white text-slate-900 shadow-2xs'
                       : 'text-slate-600 hover:text-slate-900'
@@ -814,7 +1223,7 @@ export default function DispatchDashboard() {
                 <button
                   type="button"
                   onClick={() => setVerificationFilter('human_only')}
-                  className={`px-2 py-1 rounded-md transition-all flex items-center gap-1 ${
+                  className={`px-2 py-1 rounded-lg transition-all flex items-center gap-1 ${
                     verificationFilter === 'human_only'
                       ? 'bg-emerald-600 text-white shadow-2xs'
                       : 'text-emerald-700 hover:bg-emerald-50'
@@ -827,38 +1236,40 @@ export default function DispatchDashboard() {
                 <button
                   type="button"
                   onClick={() => setVerificationFilter('unverified_only')}
-                  className={`px-2 py-1 rounded-md transition-all flex items-center gap-1 ${
+                  className={`px-2 py-1 rounded-lg transition-all flex items-center gap-1 ${
                     verificationFilter === 'unverified_only'
                       ? 'bg-blue-600 text-white shadow-2xs'
                       : 'text-blue-700 hover:bg-blue-50'
                   }`}
-                  title="Show only unverified AI emails needing human review"
+                  title="Show only unverified AI emails needing review"
                 >
                   <Sparkles className="w-3 h-3" />
                   <span>🤖 AI Only ({countUnverified})</span>
                 </button>
               </div>
 
-              <span className="text-xs text-slate-400 font-bold uppercase tracking-wider pl-1 pr-1 hidden lg:inline">
-                Stickers:
-              </span>
-
+              {/* Main Queue Tab */}
               <button
                 onClick={() => setActiveFilter('ALL')}
-                className={`px-2.5 py-1.5 rounded-lg text-xs font-bold transition-all ${
+                className={`px-2.5 py-1.5 rounded-lg text-xs font-bold transition-all flex items-center gap-1.5 ${
                   activeFilter === 'ALL'
-                    ? 'bg-slate-900 text-white shadow-sm'
-                    : 'bg-slate-100 text-slate-600 hover:bg-slate-200'
+                    ? 'bg-slate-900 text-white shadow-xs'
+                    : 'bg-slate-100 text-slate-700 hover:bg-slate-200'
                 }`}
               >
-                All Categories
+                <Inbox className="w-3.5 h-3.5" />
+                <span>All Queue</span>
+                <span className="px-1.5 py-0.2 rounded-full text-[10px] bg-white/20 font-black">
+                  {countAllQueue}
+                </span>
               </button>
 
+              {/* ITB Tab */}
               <button
                 onClick={() => setActiveFilter('ITB')}
                 className={`px-2.5 py-1.5 rounded-lg text-xs font-bold transition-all flex items-center gap-1 ${
                   activeFilter === 'ITB'
-                    ? 'bg-blue-600 text-white shadow-sm ring-2 ring-blue-300'
+                    ? 'bg-blue-600 text-white shadow-xs ring-2 ring-blue-300'
                     : 'bg-blue-50 text-blue-700 hover:bg-blue-100'
                 }`}
               >
@@ -868,25 +1279,28 @@ export default function DispatchDashboard() {
                 </span>
               </button>
 
+              {/* Unified Addendum / RFI Tab */}
               <button
                 onClick={() => setActiveFilter('Addendum / RFI')}
                 className={`px-2.5 py-1.5 rounded-lg text-xs font-bold transition-all flex items-center gap-1 ${
-                  activeFilter === 'Addendum / RFI' || activeFilter === 'Addendum' || activeFilter === 'RFI/Forms'
-                    ? 'bg-purple-600 text-white shadow-sm ring-2 ring-purple-300'
+                  activeFilter === 'Addendum / RFI'
+                    ? 'bg-purple-600 text-white shadow-xs ring-2 ring-purple-300'
                     : 'bg-purple-50 text-purple-700 hover:bg-purple-100'
                 }`}
               >
+                <FileSpreadsheet className="w-3.5 h-3.5" />
                 <span>Addendum / RFI</span>
                 <span className="px-1.5 py-0.2 rounded-full text-[10px] bg-white/20 font-black">
                   {countAddendumRFI}
                 </span>
               </button>
 
+              {/* Date Reminder Tab */}
               <button
                 onClick={() => setActiveFilter('Date Reminder')}
                 className={`px-2.5 py-1.5 rounded-lg text-xs font-bold transition-all flex items-center gap-1 ${
                   activeFilter === 'Date Reminder'
-                    ? 'bg-indigo-600 text-white shadow-sm ring-2 ring-indigo-300'
+                    ? 'bg-indigo-600 text-white shadow-xs ring-2 ring-indigo-300'
                     : 'bg-indigo-50 text-indigo-700 hover:bg-indigo-100'
                 }`}
               >
@@ -896,39 +1310,28 @@ export default function DispatchDashboard() {
                 </span>
               </button>
 
-              <button
-                onClick={() => setActiveFilter('Unknown')}
-                className={`px-2.5 py-1.5 rounded-lg text-xs font-bold transition-all flex items-center gap-1 ${
-                  activeFilter === 'Unknown'
-                    ? 'bg-slate-700 text-white shadow-sm ring-2 ring-slate-400'
-                    : 'bg-slate-100 text-slate-700 hover:bg-slate-200'
-                }`}
-              >
-                <span>Unknown</span>
-                <span className="px-1.5 py-0.2 rounded-full text-[10px] bg-white/20 font-black">
-                  {countUnknown}
-                </span>
-              </button>
-
+              {/* Won / Award Tab */}
               <button
                 onClick={() => setActiveFilter('Won')}
                 className={`px-2.5 py-1.5 rounded-lg text-xs font-bold transition-all flex items-center gap-1 ${
                   activeFilter === 'Won'
-                    ? 'bg-emerald-600 text-white shadow-sm ring-2 ring-emerald-300'
+                    ? 'bg-emerald-600 text-white shadow-xs ring-2 ring-emerald-300'
                     : 'bg-emerald-50 text-emerald-700 hover:bg-emerald-100'
                 }`}
               >
-                <span>Won / Award</span>
+                <Trophy className="w-3.5 h-3.5" />
+                <span>Won</span>
                 <span className="px-1.5 py-0.2 rounded-full text-[10px] bg-white/20 font-black">
                   {countWon}
                 </span>
               </button>
 
+              {/* Lost Tab */}
               <button
                 onClick={() => setActiveFilter('Lost')}
                 className={`px-2.5 py-1.5 rounded-lg text-xs font-bold transition-all flex items-center gap-1 ${
                   activeFilter === 'Lost'
-                    ? 'bg-rose-600 text-white shadow-sm ring-2 ring-rose-300'
+                    ? 'bg-rose-600 text-white shadow-xs ring-2 ring-rose-300'
                     : 'bg-rose-50 text-rose-700 hover:bg-rose-100'
                 }`}
               >
@@ -938,14 +1341,33 @@ export default function DispatchDashboard() {
                 </span>
               </button>
 
+              {/* Dedicated Duplicates Folder Tab */}
+              <button
+                onClick={() => setActiveFilter('Duplicates')}
+                className={`px-2.5 py-1.5 rounded-lg text-xs font-bold transition-all flex items-center gap-1 ${
+                  activeFilter === 'Duplicates'
+                    ? 'bg-amber-600 text-white shadow-xs ring-2 ring-amber-300'
+                    : 'bg-amber-50 text-amber-800 hover:bg-amber-100'
+                }`}
+                title="Emails filtered or flagged as exact duplicates"
+              >
+                <FolderArchive className="w-3.5 h-3.5 text-amber-700" />
+                <span>📁 Duplicates</span>
+                <span className="px-1.5 py-0.2 rounded-full text-[10px] bg-white/20 font-black">
+                  {countDuplicates}
+                </span>
+              </button>
+
+              {/* Spam Tab */}
               <button
                 onClick={() => setActiveFilter('Spam')}
                 className={`px-2.5 py-1.5 rounded-lg text-xs font-bold transition-all flex items-center gap-1 ${
                   activeFilter === 'Spam'
-                    ? 'bg-slate-800 text-white shadow-sm'
+                    ? 'bg-slate-800 text-white shadow-xs'
                     : 'bg-slate-100 text-slate-500 hover:bg-slate-200'
                 }`}
               >
+                <ShieldAlert className="w-3.5 h-3.5" />
                 <span>Spam</span>
                 <span className="px-1.5 py-0.2 rounded-full text-[10px] bg-white/20 font-black">
                   {countSpam}
@@ -954,7 +1376,7 @@ export default function DispatchDashboard() {
             </div>
 
             {/* In-Feed Search Input */}
-            <div className="relative min-w-[260px] flex-shrink-0">
+            <div className="relative min-w-[240px] flex-shrink-0">
               <Search className="w-3.5 h-3.5 text-slate-400 absolute left-3 top-1/2 -translate-y-1/2" />
               <input
                 type="text"
@@ -975,601 +1397,953 @@ export default function DispatchDashboard() {
             </div>
           </div>
 
-          {/* Main Grouped Dispatch List */}
-          <div id="dispatch-feed-list" className="bg-white rounded-xl border border-slate-200 shadow-sm overflow-hidden scroll-mt-6">
-            <div className="p-4 sm:p-5 border-b border-slate-200 flex flex-col md:flex-row md:items-center justify-between gap-4">
-              <div>
-                <h3 className="text-base font-semibold text-slate-900">
-                  {activeFilter === 'ALL' && 'All Active Inbound Opportunities'}
-                  {activeFilter === 'ITB' && 'New ITBs (Invitations to Bid) — Assign to Estimators'}
-                  {activeFilter === 'Addendum' && 'Addendums & Drawings — Linked to Existing Bid Folders'}
-                  {activeFilter === 'Won' && 'Won Bids — Ready for Active Job Phase Promotion'}
-                  {activeFilter === 'Lost' && 'Lost / Cancelled Opportunities'}
-                  {activeFilter === 'Spam' && 'Auto-Filtered Noise & Vendor Solicitations'}
-                </h3>
-                <p className="text-xs text-slate-500">
-                  {activeFilter === 'ITB' && 'Every unique ITB receives an internal Bid Number (BID-26-XXXX) and requires an assigned estimator.'}
-                  {activeFilter !== 'ITB' && activeFilter !== 'Spam' && 'These do not get assigned separately. They attach directly to an active Bid Number.'}
-                </p>
-              </div>
+          {/* GMAIL-STYLE 2-PANE SPLIT VIEW (DEFAULT) */}
+          {layoutMode === 'split' ? (
+            <div className="bg-white rounded-2xl border border-slate-200 shadow-sm overflow-hidden flex flex-col lg:flex-row min-h-[720px] max-h-[88vh]">
+              {/* LEFT COLUMN: EMAIL QUEUE LIST */}
+              <div
+                className={`w-full lg:w-[410px] xl:w-[460px] flex-shrink-0 border-r border-slate-200 flex flex-col bg-slate-50/50 ${
+                  isMobileDetailOpen ? 'hidden lg:flex' : 'flex'
+                }`}
+              >
+                {/* Queue Mini Header with Pagination & Navigation */}
+                <div className="p-3 bg-white border-b border-slate-200 flex items-center justify-between gap-2 text-xs">
+                  <div className="font-semibold text-slate-700 flex items-center gap-1.5">
+                    <Inbox className="w-4 h-4 text-blue-600" />
+                    <span>Inbound Queue</span>
+                    <span className="text-slate-400 font-normal">
+                      ({totalItems} {totalItems === 1 ? 'email' : 'emails'})
+                    </span>
+                  </div>
 
-              {/* Email-client style Top Pagination Controls */}
-              <div className="flex items-center gap-3 self-end md:self-center">
-                {/* Page Size Selector */}
-                <div className="flex items-center gap-1.5 text-xs text-slate-500">
-                  <span className="hidden sm:inline">Per page:</span>
-                  <select
-                    value={itemsPerPage}
-                    onChange={(e) => {
-                      setItemsPerPage(Number(e.target.value));
-                      setCurrentPage(1);
-                    }}
-                    className="text-xs bg-slate-50 border border-slate-300 rounded px-2 py-1 font-medium text-slate-700 hover:bg-slate-100 cursor-pointer focus:ring-1 focus:ring-blue-500"
-                  >
-                    <option value={25}>25</option>
-                    <option value={50}>50</option>
-                    <option value={100}>100</option>
-                  </select>
-                </div>
-
-                {/* Range indicator (e.g., 1–50 of 384) */}
-                <span className="text-xs font-semibold text-slate-700 font-mono">
-                  {totalGroups === 0 ? '0 of 0' : `${startIndex + 1}–${endIndex} of ${totalGroups}`}
-                </span>
-
-                {/* Prev / Next Chevrons */}
-                <div className="flex items-center border border-slate-300 rounded-lg overflow-hidden bg-white shadow-2xs">
-                  <button
-                    type="button"
-                    onClick={() => {
-                      setCurrentPage((p) => Math.max(1, p - 1));
-                      const el = document.getElementById('dispatch-feed-list');
-                      if (el) el.scrollIntoView({ behavior: 'smooth', block: 'start' });
-                    }}
-                    disabled={safeCurrentPage <= 1}
-                    title="Previous page"
-                    className="p-1.5 text-slate-600 hover:text-slate-900 hover:bg-slate-100 disabled:opacity-30 disabled:hover:bg-white disabled:cursor-not-allowed border-r border-slate-200 transition-colors"
-                  >
-                    <ChevronLeft className="w-4 h-4" />
-                  </button>
-                  <button
-                    type="button"
-                    onClick={() => {
-                      setCurrentPage((p) => Math.min(totalPages, p + 1));
-                      const el = document.getElementById('dispatch-feed-list');
-                      if (el) el.scrollIntoView({ behavior: 'smooth', block: 'start' });
-                    }}
-                    disabled={safeCurrentPage >= totalPages}
-                    title="Next page"
-                    className="p-1.5 text-slate-600 hover:text-slate-900 hover:bg-slate-100 disabled:opacity-30 disabled:hover:bg-white disabled:cursor-not-allowed transition-colors"
-                  >
-                    <ChevronRight className="w-4 h-4" />
-                  </button>
-                </div>
-              </div>
-            </div>
-
-            {totalGroups === 0 ? (
-              <div className="p-12 text-center text-slate-400 text-sm">
-                {feedSearchQuery
-                  ? `No emails found matching "${feedSearchQuery}" in ${activeFilter}.`
-                  : `No emails found matching the "${activeFilter}" sticker.`}
-              </div>
-            ) : (
-              <div className="divide-y divide-slate-200">
-                {paginatedGroupEntries.map(([groupId, groupItems]) => {
-                  const isExpanded = expandedGroups[groupId] ?? false;
-                  const primary = groupItems.find((b) => !b.isFlaggedDuplicate) || groupItems[0];
-                  const duplicates = groupItems.filter((b) => b.id !== primary.id);
-
-                  // Multi-GC detection across all bidding contractors in this job folder
-                  const uniqueGCs = Array.from(
-                    new Set(
-                      groupItems
-                        .map((item) => item.clientCompany || item.originalSenderName || item.senderName)
-                        .filter(Boolean)
-                    )
-                  );
-                  const isMultiGCGroup = uniqueGCs.length > 1;
-
-                  // Detect any unaccepted due date revision from an Addendum
-                  const dueDateRevisionItem = groupItems.find(
-                    (item) => item.isDueDateRevised && item.revisedDueDate
-                  );
-
-                  return (
-                    <div key={groupId} className="p-5 hover:bg-slate-50/50 transition-colors space-y-3">
-                      {/* Addendum Due Date Extension Alert Banner */}
-                      {dueDateRevisionItem && (
-                        <div className="p-3 bg-amber-50 rounded-xl border border-amber-300 text-xs text-amber-950 flex flex-col sm:flex-row sm:items-center justify-between gap-3 shadow-2xs animate-in fade-in">
-                          <div className="flex items-start sm:items-center gap-2">
-                            <AlertTriangle className="w-4 h-4 text-amber-600 flex-shrink-0 mt-0.5 sm:mt-0" />
-                            <div>
-                              <span className="font-bold text-amber-900">⏰ Addendum Due Date Extension Detected:</span>{' '}
-                              <span>
-                                An addendum revised the bid due date to{' '}
-                                <strong className="text-amber-950 underline decoration-amber-500">
-                                  {formatFriendlyDate(dueDateRevisionItem.revisedDueDate!)}
-                                </strong>
-                                .
-                              </span>
-                            </div>
-                          </div>
-                          <button
-                            type="button"
-                            onClick={() =>
-                              handleAcceptRevisedDueDate(
-                                dueDateRevisionItem.id,
-                                dueDateRevisionItem.revisedDueDate!
-                              )
-                            }
-                            className="px-3 py-1.5 bg-emerald-600 hover:bg-emerald-700 text-white rounded-lg font-bold text-xs shadow-2xs flex items-center gap-1.5 transition-colors self-start sm:self-auto flex-shrink-0"
-                          >
-                            <Check className="w-3.5 h-3.5" />
-                            <span>Accept & Update Calendar</span>
-                          </button>
-                        </div>
-                      )}
-
-                      {/* Multi-GC Sibling Banner */}
-                      {isMultiGCGroup && (
-                        <div className="p-3 bg-indigo-50/90 rounded-xl border border-indigo-200 text-xs text-indigo-950 flex flex-col sm:flex-row sm:items-center justify-between gap-2 shadow-2xs">
-                          <div className="flex items-start sm:items-center gap-2">
-                            <Building2 className="w-4 h-4 text-indigo-700 flex-shrink-0 mt-0.5 sm:mt-0" />
-                            <div>
-                              <span className="font-bold text-indigo-900">Multi-GC Bidding Sibling Group:</span>{' '}
-                              <span>
-                                Multiple general contractors (<strong>{uniqueGCs.join(', ')}</strong>) are bidding this same facility. One takeoff covers all quotes.
-                              </span>
-                            </div>
-                          </div>
-                        </div>
-                      )}
-
-                      <div className="flex items-start justify-between gap-4">
-                        <div className="flex items-start gap-3 flex-1">
-                          <button
-                            onClick={() => toggleGroup(groupId)}
-                            className="mt-1 text-slate-400 hover:text-slate-600 focus:outline-none"
-                          >
-                            {isExpanded ? (
-                              <ChevronDown className="w-5 h-5 text-slate-600" />
-                            ) : (
-                              <ChevronRight className="w-5 h-5" />
-                            )}
-                          </button>
-
-                          <div className="space-y-2 flex-1">
-                            {/* Categorization Sticker + Bid # + Subject */}
-                            <div className="flex items-center gap-2.5 flex-wrap">
-                              {renderStickerBadge(primary.sticker, primary)}
-
-                              {/* Internal Bid Number for ITBs */}
-                              {primary.sticker === 'ITB' && primary.bidNumber && (
-                                <span className="px-2.5 py-0.5 rounded text-xs font-mono font-bold bg-blue-100 text-blue-900 border border-blue-200 flex items-center gap-1">
-                                  <Hash className="w-3 h-3 text-blue-600" /> {primary.bidNumber}
-                                </span>
-                              )}
-
-                              {/* Matched Bid Number for Addendum / Won / Lost */}
-                              {primary.sticker !== 'ITB' && primary.matchedBidNumber && (
-                                <span className="px-2.5 py-0.5 rounded text-xs font-mono font-bold bg-purple-100 text-purple-900 border border-purple-200 flex items-center gap-1">
-                                  <LinkIcon className="w-3 h-3 text-purple-600" /> Attached to {primary.matchedBidNumber}
-                                </span>
-                              )}
-
-                              {/* Multi-GC Indicator Badge */}
-                              {isMultiGCGroup && (
-                                <span className="px-2.5 py-0.5 rounded text-xs font-bold bg-indigo-100 text-indigo-900 border border-indigo-200 flex items-center gap-1 shadow-2xs">
-                                  <Building2 className="w-3 h-3 text-indigo-700" /> Multi-GC ({uniqueGCs.length} Contractors)
-                                </span>
-                              )}
-
-                              {primary.jobCode && (
-                                <span className="px-2 py-0.5 rounded text-xs font-semibold bg-slate-100 text-slate-800">
-                                  {primary.jobCode}
-                                </span>
-                              )}
-
-                              <span className="font-semibold text-slate-900 text-base">
-                                {primary.subject}
-                              </span>
-
-                              {duplicates.length > 0 && (
-                                <span className="px-2 py-0.5 rounded-full text-xs font-medium bg-amber-100 text-amber-800 flex items-center gap-1">
-                                  <Copy className="w-3 h-3" />
-                                  {duplicates.length} Related Inquiry
-                                </span>
-                              )}
-                            </div>
-
-                        {/* Forwarded Header / GC Details */}
-                        <div className="text-xs text-slate-600 flex items-center gap-3 flex-wrap">
-                          {primary.isForwarded ? (
-                            <span className="inline-flex items-center gap-1 text-indigo-700 bg-indigo-50 px-2 py-0.5 rounded font-medium border border-indigo-100">
-                              <UserCheck className="w-3.5 h-3.5 text-indigo-500" />
-                              GC / Client: <strong>{primary.originalSenderName || primary.senderName}</strong> &lt;{primary.originalSenderEmail || primary.senderEmail}&gt;
-                              <span className="text-indigo-400 font-normal">↳ (via {primary.forwardedBy || 'Coworker'})</span>
-                            </span>
-                          ) : (
-                            <span>Sender: <strong>{primary.senderName}</strong> &lt;{primary.senderEmail}&gt;</span>
-                          )}
-
-                          <span className="text-slate-400">•</span>
-                          <span>Received: {primary.receivedAt}</span>
-                          <span className="text-slate-400">•</span>
-                          <span className="flex items-center gap-1">
-                            <Paperclip className="w-3.5 h-3.5" />
-                            {primary.attachmentsCount} Attachment{primary.attachmentsCount > 1 ? 's' : ''}
-                          </span>
-                        </div>
-
-                        {/* AI Matching Info (for Addendum, Won, Lost) */}
-                        {primary.sticker !== 'ITB' && primary.matchedBidNumber && (
-                          <div className="p-2.5 bg-purple-50/70 rounded-lg border border-purple-200 text-xs text-purple-900 flex items-center justify-between">
-                            <div className="flex items-center gap-2">
-                              <Sparkles className="w-4 h-4 text-purple-600 flex-shrink-0" />
-                              <span>
-                                <strong>Linked Bid Folder:</strong> Attached to <strong>{primary.matchedBidNumber}</strong> {primary.matchReason ? `(${primary.matchReason})` : ''}
-                              </span>
-                            </div>
-                            <button
-                              onClick={() => openReviewModal(primary)}
-                              className="text-[11px] font-bold text-purple-700 hover:text-purple-900 underline"
-                            >
-                              Change Link
-                            </button>
-                          </div>
-                        )}
-
-                        {/* AI Scope Summary Card */}
-                        {primary.scopeSummary && (
-                          <div className="p-3 bg-slate-50 rounded-lg border border-slate-200 text-xs text-slate-700 space-y-1">
-                            <div className="flex items-center gap-1.5 text-indigo-700 font-semibold">
-                              <Sparkles className="w-3.5 h-3.5" />
-                              AI Scope Summary:
-                            </div>
-                            <p className="leading-relaxed">{primary.scopeSummary}</p>
-                          </div>
-                        )}
-
-                        {/* View Email Content Dropdown Button */}
-                        <div className="pt-0.5">
-                          <button
-                            type="button"
-                            onClick={() => toggleEmailDropdown(primary.id)}
-                            className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-md text-xs font-semibold text-slate-700 bg-slate-100 hover:bg-slate-200 border border-slate-200 transition-colors shadow-2xs"
-                          >
-                            <FileText className="w-3.5 h-3.5 text-blue-600" />
-                            <span>{expandedEmails[primary.id] ? 'Hide Document / PDF' : 'View Email Document / PDF'}</span>
-                            <ChevronDown className={`w-3.5 h-3.5 text-slate-400 transition-transform ${expandedEmails[primary.id] ? 'rotate-180' : ''}`} />
-                          </button>
-                        </div>
-
-                        {/* Expandable Document / PDF Viewer on Card */}
-                        {expandedEmails[primary.id] && (
-                          <div className="mt-2.5 animate-in fade-in slide-in-from-top-1">
-                            <EmailDocumentViewer
-                              id={primary.id}
-                              subject={primary.subject}
-                              senderName={primary.senderName}
-                              senderEmail={primary.senderEmail}
-                              receivedAt={primary.receivedAt}
-                              isForwarded={primary.isForwarded}
-                              forwardedBy={primary.forwardedBy}
-                              originalSenderName={primary.originalSenderName}
-                              originalSenderEmail={primary.originalSenderEmail}
-                              bodyText={primary.bodyText}
-                              bodyHtml={primary.bodyHtml}
-                              attachments={primary.attachments}
-                              maxHeight="h-[480px]"
-                            />
-                          </div>
-                        )}
-                      </div>
-                    </div>
-
-                    {/* Operational Action Column */}
-                    <div className="flex items-center gap-3">
-                      {/* RULE: ONLY ITBs ARE ASSIGNED TO ESTIMATORS & SCHEDULED ON CALENDAR */}
-                      {primary.sticker === 'ITB' && (
-                        <div className="flex flex-col sm:flex-row sm:items-center gap-2 bg-slate-50 p-2 rounded-xl border border-slate-200">
-                          {/* Estimator Selector */}
-                          <div className="flex items-center gap-1.5">
-                            <span className="text-xs text-slate-500 font-semibold">Estimator:</span>
-                            <select
-                              value={primary.assignedEstimator || ''}
-                              onChange={(e) => handleAssignEstimatorAndDate(primary.id, e.target.value, undefined)}
-                              className="text-xs border border-slate-300 rounded-lg px-2.5 py-1.5 bg-white text-slate-800 font-medium focus:ring-2 focus:ring-blue-500 shadow-2xs"
-                            >
-                              <option value="">Assign Estimator...</option>
-                              {ESTIMATORS.map((est) => (
-                                <option key={est} value={est}>
-                                  {est}
-                                </option>
-                              ))}
-                            </select>
-                          </div>
-
-                          {/* Calendar Bid Due Date */}
-                          <div className="flex items-center gap-1.5">
-                            <span className="text-xs text-slate-500 font-semibold flex items-center gap-1">
-                              <CalendarIcon className="w-3.5 h-3.5 text-blue-600" />
-                              Due:
-                            </span>
-                            <input
-                              type="date"
-                              value={primary.bidDueDate || ''}
-                              onChange={(e) => handleAssignEstimatorAndDate(primary.id, undefined, e.target.value)}
-                              className="text-xs border border-slate-300 rounded-lg px-2 py-1 bg-white text-slate-800 font-medium focus:ring-2 focus:ring-blue-500 shadow-2xs"
-                            />
-
-                            {/* AI Suggestion Chip if not yet confirmed */}
-                            {!primary.bidDueDate && primary.normalizedAiDueDate && (
-                              <button
-                                type="button"
-                                onClick={() => handleAssignEstimatorAndDate(primary.id, undefined, primary.normalizedAiDueDate)}
-                                className="inline-flex items-center gap-1 px-2 py-1 rounded-md bg-indigo-50 hover:bg-indigo-100 text-indigo-700 text-[11px] font-bold border border-indigo-200 shadow-2xs transition-colors"
-                                title={`Accept AI detected date: ${primary.rawAiDueDate || primary.normalizedAiDueDate}`}
-                              >
-                                <Sparkles className="w-3 h-3 text-indigo-600" />
-                                <span>Accept AI: {formatFriendlyDate(primary.normalizedAiDueDate).split(',')[1]}</span>
-                              </button>
-                            )}
-
-                            {primary.bidDueDate && (
-                              <span className={`px-2 py-0.5 rounded text-[10px] font-bold border ${getDueDateStatus(primary.bidDueDate).badgeClass}`}>
-                                {getDueDateStatus(primary.bidDueDate).label}
-                              </span>
-                            )}
-                          </div>
-                        </div>
-                      )}
-
-                      {/* WON: PROMOTE TO ACTIVE JOB */}
-                      {primary.sticker === 'Won' && (
-                        <button className="px-3.5 py-2 rounded-lg text-xs font-semibold bg-emerald-600 hover:bg-emerald-700 text-white transition-colors shadow-sm flex items-center gap-1.5">
-                          <CheckCircle className="w-3.5 h-3.5" /> Promote to Active Job
-                        </button>
-                      )}
-
-                      {/* ADDENDUM: AUTO-LINKED NOTICE */}
-                      {primary.sticker === 'Addendum' && (
-                        <div className="text-right">
-                          <span className="inline-flex items-center px-2.5 py-1 rounded-md text-xs font-medium bg-purple-50 text-purple-700 border border-purple-200">
-                            Attached to Folder
-                          </span>
-                        </div>
-                      )}
-
-                      {/* LOST: ARCHIVED NOTICE */}
-                      {primary.sticker === 'Lost' && (
-                        <span className="inline-flex items-center px-2.5 py-1 rounded-md text-xs font-medium bg-rose-50 text-rose-700 border border-rose-200">
-                          Closed / Archived
-                        </span>
-                      )}
-
-                      {/* Link to Project (Calendar Manager Manual Intervention) */}
+                  <div className="flex items-center gap-2">
+                    <span className="text-[11px] font-mono text-slate-500">
+                      {totalItems === 0 ? '0 of 0' : `${startIndex + 1}–${endIndex} of ${totalItems}`}
+                    </span>
+                    <div className="flex items-center border border-slate-200 rounded-lg bg-white overflow-hidden shadow-2xs">
                       <button
                         type="button"
-                        onClick={() => openLinkModal(primary)}
-                        title="Link or merge this inquiry into an existing project folder (e.g. Multi-GC bidding)"
-                        className="p-2 rounded-lg border border-slate-300 bg-white hover:bg-slate-100 text-slate-700 text-xs font-semibold flex items-center gap-1 shadow-2xs transition-colors"
+                        onClick={() => setCurrentPage((p) => Math.max(1, p - 1))}
+                        disabled={safeCurrentPage <= 1}
+                        title="Previous page"
+                        className="p-1 text-slate-600 hover:text-slate-900 hover:bg-slate-100 disabled:opacity-30 disabled:cursor-not-allowed border-r border-slate-200"
                       >
-                        <LinkIcon className="w-3.5 h-3.5 text-blue-600" />
-                        <span className="hidden sm:inline">Link / Move</span>
+                        <ChevronLeft className="w-3.5 h-3.5" />
+                      </button>
+                      <button
+                        type="button"
+                        onClick={() => setCurrentPage((p) => Math.min(totalPages, p + 1))}
+                        disabled={safeCurrentPage >= totalPages}
+                        title="Next page"
+                        className="p-1 text-slate-600 hover:text-slate-900 hover:bg-slate-100 disabled:opacity-30 disabled:cursor-not-allowed"
+                      >
+                        <ChevronRight className="w-3.5 h-3.5" />
                       </button>
                     </div>
                   </div>
+                </div>
 
-                  {/* Expanded Duplicate Children View */}
-                  {isExpanded && duplicates.length > 0 && (
-                    <div className="mt-4 ml-8 pl-4 border-l-2 border-amber-300 space-y-3">
-                      <p className="text-xs font-semibold text-amber-900 uppercase tracking-wider flex items-center gap-1">
-                        <Copy className="w-3.5 h-3.5 text-amber-600" />
-                        Related Inquiries / Coworker Forwards Grouped Under This Bid
-                      </p>
+                {/* Scrollable Email Items List */}
+                <div className="flex-1 overflow-y-auto divide-y divide-slate-100">
+                  {paginatedBids.length === 0 ? (
+                    <div className="p-8 text-center text-slate-400 text-xs">
+                      {feedSearchQuery
+                        ? `No emails found matching "${feedSearchQuery}".`
+                        : `No emails in ${activeFilter}.`}
+                    </div>
+                  ) : (
+                    paginatedBids.map((bid) => {
+                      const isSelected = selectedEmailId === bid.id;
+                      const hasMultiGC = findCrossContractorMatches(bid).length > 0;
+                      const hasDueExt = checkDueDateExtension(bid).isExtension;
+                      const isDupItem = checkDuplicateStatus(bid).isDuplicate;
 
-                      {duplicates.map((dup) => (
+                      return (
                         <div
-                          key={dup.id}
-                          className="p-3 bg-amber-50/60 rounded-lg border border-amber-200/80 text-xs space-y-2"
+                          key={bid.id}
+                          onClick={() => {
+                            setSelectedEmailId(bid.id);
+                            setIsMobileDetailOpen(true);
+                          }}
+                          className={`p-3.5 cursor-pointer transition-all text-xs relative ${
+                            isSelected
+                              ? 'bg-blue-50/90 border-l-4 border-blue-600 shadow-2xs'
+                              : 'bg-white hover:bg-slate-50 text-slate-700'
+                          }`}
                         >
-                          <div className="flex items-center justify-between">
-                            <div className="font-medium text-slate-800 flex items-center gap-2">
-                              {renderStickerBadge(dup.sticker, dup)}
-                              <span className="text-amber-700">↳</span>
-                              {dup.subject}
+                          {/* Row 1: Sender / Contractor & Time */}
+                          <div className="flex items-center justify-between gap-2 mb-1">
+                            <span
+                              className={`truncate font-bold ${
+                                isSelected ? 'text-blue-950 font-black' : 'text-slate-900'
+                              }`}
+                            >
+                              {bid.clientCompany || bid.originalSenderName || bid.senderName}
+                            </span>
+                            <span className="text-[10px] text-slate-400 font-mono flex-shrink-0">
+                              {bid.receivedAt}
+                            </span>
+                          </div>
+
+                          {/* Row 2: Subject */}
+                          <p
+                            className={`truncate text-xs mb-1.5 ${
+                              isSelected
+                                ? 'text-blue-900 font-semibold'
+                                : bid.isHumanLabeled
+                                ? 'text-slate-700'
+                                : 'text-slate-900 font-medium'
+                            }`}
+                          >
+                            {bid.subject}
+                          </p>
+
+                          {/* Row 3: Badges Line (Sticker, Multi-GC, Due Ext, Estimator, Attachments) */}
+                          <div className="flex items-center gap-1.5 flex-wrap">
+                            {renderStickerBadge(bid.sticker, bid)}
+
+                            {/* Internal Bid Number */}
+                            {bid.bidNumber && (
+                              <span className="font-mono text-[10px] font-bold text-blue-700 bg-blue-100/70 px-1.5 py-0.5 rounded">
+                                {bid.bidNumber}
+                              </span>
+                            )}
+
+                            {/* Multi-GC Sibling Alert Badge */}
+                            {hasMultiGC && (
+                              <span
+                                title="Multiple GCs bidding this same project"
+                                className="px-1.5 py-0.5 rounded text-[10px] font-bold bg-indigo-100 text-indigo-900 border border-indigo-200 flex items-center gap-0.5"
+                              >
+                                <Building2 className="w-2.5 h-2.5 text-indigo-700" />
+                                <span>Multi-GC</span>
+                              </span>
+                            )}
+
+                            {/* Due Date Extension Badge */}
+                            {hasDueExt && (
+                              <span
+                                title="Due date extension detected"
+                                className="px-1.5 py-0.5 rounded text-[10px] font-bold bg-amber-100 text-amber-900 border border-amber-300 flex items-center gap-0.5"
+                              >
+                                <Clock className="w-2.5 h-2.5 text-amber-700" />
+                                <span>Due Ext</span>
+                              </span>
+                            )}
+
+                            {/* Duplicate Badge */}
+                            {isDupItem && (
+                              <span
+                                title="Duplicate or related inquiry"
+                                className="px-1.5 py-0.5 rounded text-[10px] font-bold bg-rose-100 text-rose-900 border border-rose-200 flex items-center gap-0.5"
+                              >
+                                <Copy className="w-2.5 h-2.5 text-rose-700" />
+                                <span>Dup</span>
+                              </span>
+                            )}
+
+                            {/* Estimator Avatar/Name Tag */}
+                            {bid.assignedEstimator && (
+                              <span
+                                className={`px-1.5 py-0.5 rounded text-[10px] font-bold border ${getEstimatorColor(
+                                  bid.assignedEstimator
+                                )}`}
+                              >
+                                {bid.assignedEstimator.split(' ')[0]}
+                              </span>
+                            )}
+
+                            {/* Attachments Icon */}
+                            {bid.attachmentsCount > 0 && (
+                              <span className="text-[10px] text-slate-500 flex items-center gap-0.5 ml-auto">
+                                <Paperclip className="w-2.5 h-2.5 text-slate-400" />
+                                <span>{bid.attachmentsCount}</span>
+                              </span>
+                            )}
+                          </div>
+                        </div>
+                      );
+                    })
+                  )}
+                </div>
+              </div>
+
+              {/* RIGHT COLUMN: READING PANE & AI INTELLIGENCE */}
+              <div
+                className={`flex-1 flex flex-col bg-slate-50/40 overflow-hidden ${
+                  isMobileDetailOpen ? 'flex' : 'hidden lg:flex'
+                }`}
+              >
+                {selectedBid ? (
+                  <>
+                    {/* Top Action Toolbar (Gmail-style) */}
+                    <div className="bg-white border-b border-slate-200 px-4 sm:px-6 py-3 flex items-center justify-between gap-3 flex-wrap">
+                      {/* Left: Mobile Back Button + Prev/Next Steppers */}
+                      <div className="flex items-center gap-2">
+                        {/* Mobile Back Button */}
+                        <button
+                          type="button"
+                          onClick={() => setIsMobileDetailOpen(false)}
+                          className="lg:hidden p-1.5 rounded-lg text-slate-600 hover:bg-slate-100 transition-colors"
+                          title="Back to queue list"
+                        >
+                          <ArrowLeft className="w-4 h-4" />
+                        </button>
+
+                        {/* Prev / Next buttons */}
+                        <div className="flex items-center border border-slate-300 rounded-lg overflow-hidden bg-white shadow-2xs">
+                          <button
+                            type="button"
+                            onClick={handleSelectPrevEmail}
+                            disabled={currentEmailIndex <= 0}
+                            title="Previous email in queue"
+                            className="p-1.5 text-slate-700 hover:text-slate-950 hover:bg-slate-100 disabled:opacity-30 disabled:cursor-not-allowed border-r border-slate-200 transition-colors"
+                          >
+                            <ChevronLeft className="w-4 h-4" />
+                          </button>
+                          <button
+                            type="button"
+                            onClick={handleSelectNextEmail}
+                            disabled={currentEmailIndex >= filteredBids.length - 1}
+                            title="Next email in queue"
+                            className="p-1.5 text-slate-700 hover:text-slate-950 hover:bg-slate-100 disabled:opacity-30 disabled:cursor-not-allowed transition-colors"
+                          >
+                            <ChevronRight className="w-4 h-4" />
+                          </button>
+                        </div>
+
+                        <span className="text-xs font-semibold text-slate-500 font-mono">
+                          {currentEmailIndex + 1} of {filteredBids.length}
+                        </span>
+                      </div>
+
+                      {/* Right: Quick Action Controls */}
+                      <div className="flex items-center gap-2 flex-wrap">
+                        {/* Quick Category Selector */}
+                        <div className="flex items-center gap-1">
+                          <span className="text-[11px] text-slate-500 font-bold hidden sm:inline">
+                            Category:
+                          </span>
+                          <select
+                            value={selectedBid.sticker}
+                            onChange={(e) => handleQuickCategoryChange(selectedBid.id, e.target.value)}
+                            className="text-xs font-bold border border-slate-300 rounded-lg px-2 py-1 bg-white text-slate-800 shadow-2xs focus:ring-2 focus:ring-blue-500"
+                          >
+                            {CATEGORIES.map((cat) => (
+                              <option key={cat} value={cat}>
+                                {cat}
+                              </option>
+                            ))}
+                          </select>
+                        </div>
+
+                        {/* Estimator Assignment Picker */}
+                        <div className="flex items-center gap-1">
+                          <span className="text-[11px] text-slate-500 font-bold hidden sm:inline">
+                            Estimator:
+                          </span>
+                          <select
+                            value={selectedBid.assignedEstimator || ''}
+                            onChange={(e) =>
+                              handleAssignEstimatorAndDate(selectedBid.id, e.target.value || null, undefined)
+                            }
+                            className="text-xs font-medium border border-slate-300 rounded-lg px-2 py-1 bg-white text-slate-800 shadow-2xs focus:ring-2 focus:ring-blue-500"
+                          >
+                            <option value="">Unassigned...</option>
+                            {ESTIMATORS.map((est) => (
+                              <option key={est} value={est}>
+                                {est}
+                              </option>
+                            ))}
+                          </select>
+                        </div>
+
+                        {/* Bid Due Date Picker */}
+                        <div className="flex items-center gap-1">
+                          <span className="text-[11px] text-slate-500 font-bold hidden sm:inline">
+                            Due:
+                          </span>
+                          <input
+                            type="date"
+                            value={selectedBid.bidDueDate || ''}
+                            onChange={(e) =>
+                              handleAssignEstimatorAndDate(selectedBid.id, undefined, e.target.value || null)
+                            }
+                            className="text-xs font-medium border border-slate-300 rounded-lg px-2 py-1 bg-white text-slate-800 shadow-2xs focus:ring-2 focus:ring-blue-500"
+                          />
+                        </div>
+
+                        {/* Move to Duplicates Folder Button */}
+                        {selectedBid.filterStatus !== 'duplicate_folder' ? (
+                          <button
+                            type="button"
+                            onClick={() => handleMoveToDuplicates(selectedBid.id)}
+                            className="p-1.5 px-2.5 rounded-lg border border-slate-300 bg-white hover:bg-amber-50 text-amber-800 hover:border-amber-300 text-xs font-bold transition-colors shadow-2xs flex items-center gap-1"
+                            title="Move this email into the Duplicates folder"
+                          >
+                            <FolderArchive className="w-3.5 h-3.5 text-amber-600" />
+                            <span className="hidden md:inline">Duplicates</span>
+                          </button>
+                        ) : (
+                          <button
+                            type="button"
+                            onClick={() => handleRestoreFromDuplicates(selectedBid.id)}
+                            className="p-1.5 px-2.5 rounded-lg border border-slate-300 bg-white hover:bg-blue-50 text-blue-800 hover:border-blue-300 text-xs font-bold transition-colors shadow-2xs flex items-center gap-1"
+                            title="Restore email to main inbox queue"
+                          >
+                            <RotateCcw className="w-3.5 h-3.5 text-blue-600" />
+                            <span>Restore to Inbox</span>
+                          </button>
+                        )}
+
+                        {/* Link / Relink Modal Trigger */}
+                        <button
+                          type="button"
+                          onClick={() => openLinkModal(selectedBid)}
+                          className="p-1.5 px-2.5 rounded-lg border border-slate-300 bg-white hover:bg-slate-100 text-slate-700 text-xs font-bold transition-colors shadow-2xs flex items-center gap-1"
+                          title="Link or relink to master project folder"
+                        >
+                          <LinkIcon className="w-3.5 h-3.5 text-blue-600" />
+                          <span className="hidden md:inline">Link</span>
+                        </button>
+
+                        {/* Full Review Modal Trigger */}
+                        <button
+                          type="button"
+                          onClick={() => openReviewModal(selectedBid)}
+                          className="p-1.5 px-2.5 rounded-lg border border-slate-300 bg-white hover:bg-slate-100 text-slate-700 text-xs font-bold transition-colors shadow-2xs flex items-center gap-1"
+                          title="Full classification & workflow editor"
+                        >
+                          <Edit3 className="w-3.5 h-3.5 text-slate-600" />
+                          <span className="hidden md:inline">Edit</span>
+                        </button>
+                      </div>
+                    </div>
+
+                    {/* Scrollable Reading Content */}
+                    <div className="flex-1 overflow-y-auto p-4 sm:p-6 space-y-5">
+                      {/* TOP AI INTELLIGENCE & TRIAGE BANNER */}
+                      <div className="bg-gradient-to-r from-slate-900 via-indigo-950 to-slate-900 text-white rounded-2xl p-5 border border-slate-700/80 shadow-md space-y-4">
+                        {/* Title & Status Badges */}
+                        <div className="flex flex-wrap items-center justify-between gap-3 pb-3 border-b border-white/10">
+                          <div className="flex items-center gap-2.5 flex-wrap">
+                            <span className="text-xs font-bold uppercase tracking-wider text-amber-300 flex items-center gap-1.5">
+                              <Sparkles className="w-4 h-4 text-amber-400" />
+                              AI Intelligence & Triage Notes
+                            </span>
+
+                            {/* Assigned Bid Number or Matched Master Bid */}
+                            {selectedBid.sticker === 'ITB' ? (
+                              <span className="font-mono bg-blue-500/20 text-blue-300 border border-blue-400/40 px-2.5 py-0.5 rounded-lg text-xs font-bold flex items-center gap-1">
+                                <Hash className="w-3.5 h-3.5 text-blue-400" />
+                                {selectedBid.bidNumber ? `Bid #: ${selectedBid.bidNumber}` : 'Assigning Bid #'}
+                              </span>
+                            ) : (
+                              <span className="font-mono bg-purple-500/20 text-purple-300 border border-purple-400/40 px-2.5 py-0.5 rounded-lg text-xs font-bold flex items-center gap-1">
+                                <LinkIcon className="w-3.5 h-3.5 text-purple-400" />
+                                {selectedBid.matchedBidNumber
+                                  ? `Attached to Master: ${selectedBid.matchedBidNumber}`
+                                  : 'Unlinked — Link to Master Bid'}
+                              </span>
+                            )}
+
+                            {/* Category Sticker Badge */}
+                            <span
+                              className={`px-2.5 py-0.5 rounded font-black text-xs uppercase tracking-wider ${
+                                selectedBid.sticker === 'ITB'
+                                  ? 'bg-blue-600 text-white'
+                                  : selectedBid.sticker === 'Addendum / RFI'
+                                  ? 'bg-purple-600 text-white'
+                                  : selectedBid.sticker === 'Won'
+                                  ? 'bg-emerald-600 text-white'
+                                  : selectedBid.sticker === 'Lost'
+                                  ? 'bg-rose-600 text-white'
+                                  : selectedBid.sticker === 'Spam'
+                                  ? 'bg-slate-700 text-white'
+                                  : 'bg-indigo-600 text-white'
+                              }`}
+                            >
+                              {selectedBid.sticker}
+                            </span>
+
+                            {/* Human Verified Indicator */}
+                            {selectedBid.isHumanLabeled && (
+                              <span className="px-2 py-0.5 rounded text-[11px] font-bold bg-emerald-500/20 text-emerald-300 border border-emerald-500/40 flex items-center gap-1">
+                                <UserCheck className="w-3 h-3 text-emerald-400" />
+                                User Verified
+                              </span>
+                            )}
+                          </div>
+
+                          {/* Estimator & Due Date Quick Indicators */}
+                          <div className="flex items-center gap-2 text-xs flex-wrap">
+                            <span className="text-slate-300">Estimator:</span>
+                            <strong className="text-white bg-white/10 px-2 py-0.5 rounded font-semibold">
+                              {selectedBid.assignedEstimator || 'Unassigned'}
+                            </strong>
+                            <span className="text-slate-400">•</span>
+                            <span className="text-slate-300">Due:</span>
+                            <strong className="text-white bg-white/10 px-2 py-0.5 rounded font-semibold">
+                              {selectedBid.bidDueDate ? formatFriendlyDate(selectedBid.bidDueDate) : 'No Date Set'}
+                            </strong>
+                          </div>
+                        </div>
+
+                        {/* ALERT 1: Multi-Contractor Job Alert */}
+                        {crossContractorMatches.length > 0 && (
+                          <div className="p-3.5 bg-indigo-500/15 rounded-xl border border-indigo-400/30 text-indigo-100 flex flex-col sm:flex-row sm:items-center justify-between gap-3 shadow-inner animate-in fade-in">
+                            <div className="flex items-start gap-2.5">
+                              <Building2 className="w-5 h-5 text-indigo-400 flex-shrink-0 mt-0.5" />
+                              <div className="text-xs space-y-0.5">
+                                <div className="font-bold text-white text-sm flex items-center gap-2">
+                                  <span>Multi-Contractor Job Alert</span>
+                                  <span className="px-2 py-0.2 rounded-full text-[10px] bg-indigo-500/30 text-indigo-200 border border-indigo-400/30">
+                                    {crossContractorMatches.length} Other GC{crossContractorMatches.length > 1 ? 's' : ''}
+                                  </span>
+                                </div>
+                                <p className="text-indigo-200">
+                                  This same project was also submitted by{' '}
+                                  <strong className="text-white">
+                                    {crossContractorMatches.map((m) => m.contractorName).join(', ')}
+                                  </strong>
+                                  .
+                                  {crossContractorMatches[0].assignedEstimator && (
+                                    <>
+                                      {' '}Currently assigned to{' '}
+                                      <strong className="text-amber-300">
+                                        {crossContractorMatches[0].assignedEstimator}
+                                      </strong>{' '}
+                                      under{' '}
+                                      <strong className="font-mono text-white">
+                                        {crossContractorMatches[0].bidNumber || 'Pending'}
+                                      </strong>
+                                      .
+                                    </>
+                                  )}
+                                  {' '}One takeoff covers all quotes — link them to avoid double work!
+                                </p>
+                              </div>
                             </div>
-                            <span className="text-slate-400">{dup.receivedAt}</span>
+                            {crossContractorMatches[0].bidNumber && (
+                              <button
+                                type="button"
+                                onClick={() =>
+                                  handleLinkToOtherContractor(
+                                    selectedBid.id,
+                                    crossContractorMatches[0].bidNumber!,
+                                    crossContractorMatches[0].assignedEstimator || undefined
+                                  )
+                                }
+                                className="px-3.5 py-1.5 rounded-lg bg-indigo-600 hover:bg-indigo-500 text-white font-bold text-xs shadow-sm flex items-center gap-1.5 self-start sm:self-auto flex-shrink-0 transition-colors"
+                              >
+                                <LinkIcon className="w-3.5 h-3.5" />
+                                <span>Link to {crossContractorMatches[0].bidNumber}</span>
+                              </button>
+                            )}
                           </div>
+                        )}
 
-                          <div className="text-slate-600 flex items-center gap-3">
-                            <span>From: {dup.senderEmail}</span>
-                            <span>Attachments: {dup.attachmentsCount}</span>
-                          </div>
-
-                          {dup.scopeSummary && (
-                            <p className="text-[11px] text-slate-600 bg-white/70 p-2 rounded border border-amber-100">
-                              {dup.scopeSummary}
-                            </p>
-                          )}
-
-                          <div>
+                        {/* ALERT 2: Due Date Extension Alert */}
+                        {dueDateExt.isExtension && dueDateExt.revisedDate && (
+                          <div className="p-3.5 bg-amber-500/15 rounded-xl border border-amber-400/30 text-amber-100 flex flex-col sm:flex-row sm:items-center justify-between gap-3 shadow-inner animate-in fade-in">
+                            <div className="flex items-start gap-2.5">
+                              <Clock className="w-5 h-5 text-amber-400 flex-shrink-0 mt-0.5" />
+                              <div className="text-xs space-y-0.5">
+                                <div className="font-bold text-white text-sm flex items-center gap-2">
+                                  <span>⏰ Bid Due Date Extension Detected</span>
+                                </div>
+                                <p className="text-amber-200">
+                                  An addendum or notice revised the bid deadline to{' '}
+                                  <strong className="text-amber-300 underline font-semibold">
+                                    {formatFriendlyDate(dueDateExt.revisedDate)}
+                                  </strong>
+                                  {selectedBid.bidDueDate && (
+                                    <> (previously set to {formatFriendlyDate(selectedBid.bidDueDate)})</>
+                                  )}
+                                  .
+                                </p>
+                              </div>
+                            </div>
                             <button
                               type="button"
-                              onClick={() => toggleEmailDropdown(dup.id)}
-                              className="inline-flex items-center gap-1 text-[11px] font-semibold text-amber-900 hover:text-amber-950 underline"
+                              onClick={() => handleAcceptRevisedDueDate(selectedBid.id, dueDateExt.revisedDate!)}
+                              className="px-3.5 py-1.5 rounded-lg bg-emerald-600 hover:bg-emerald-500 text-white font-bold text-xs shadow-sm flex items-center gap-1.5 self-start sm:self-auto flex-shrink-0 transition-colors"
                             >
-                              <FileText className="w-3 h-3 text-amber-700" />
-                              <span>{expandedEmails[dup.id] ? 'Hide Document / PDF' : 'View Email Document / PDF'}</span>
-                              <ChevronDown className={`w-3 h-3 transition-transform ${expandedEmails[dup.id] ? 'rotate-180' : ''}`} />
+                              <Check className="w-3.5 h-3.5" />
+                              <span>Accept Revised Due Date</span>
                             </button>
                           </div>
+                        )}
 
-                          {expandedEmails[dup.id] && (
-                            <div className="mt-2 animate-in fade-in">
-                              <EmailDocumentViewer
-                                id={dup.id}
-                                subject={dup.subject}
-                                senderName={dup.senderName}
-                                senderEmail={dup.senderEmail}
-                                receivedAt={dup.receivedAt}
-                                isForwarded={dup.isForwarded}
-                                forwardedBy={dup.forwardedBy}
-                                originalSenderName={dup.originalSenderName}
-                                originalSenderEmail={dup.originalSenderEmail}
-                                bodyText={dup.bodyText}
-                                bodyHtml={dup.bodyHtml}
-                                attachments={dup.attachments}
-                                maxHeight="h-[320px]"
-                                compact
-                              />
+                        {/* ALERT 3: Duplicate Alert */}
+                        {dupDetails.isDuplicate && (
+                          <div className="p-3.5 bg-rose-500/15 rounded-xl border border-rose-400/30 text-rose-100 flex flex-col sm:flex-row sm:items-center justify-between gap-3 shadow-inner animate-in fade-in">
+                            <div className="flex items-start gap-2.5">
+                              <Copy className="w-5 h-5 text-rose-400 flex-shrink-0 mt-0.5" />
+                              <div className="text-xs space-y-0.5">
+                                <div className="font-bold text-white text-sm">
+                                  <span>Duplicate / Related Email Detected</span>
+                                </div>
+                                <p className="text-rose-200">
+                                  {dupDetails.reason}
+                                  {dupDetails.duplicateOfBid && (
+                                    <>
+                                      {' '}(Primary record:{' '}
+                                      <strong className="text-white">
+                                        {dupDetails.duplicateOfBid.bidNumber || dupDetails.duplicateOfBid.subject.slice(0, 30)}
+                                      </strong>
+                                      )
+                                    </>
+                                  )}
+                                  .
+                                </p>
+                              </div>
                             </div>
-                          )}
-
-                          {/* Calendar Manager Link / Unlink Manual Controls */}
-                          <div className="flex items-center justify-between pt-2 border-t border-amber-200/60 flex-wrap gap-2">
-                            <div className="text-[11px] text-amber-800 flex items-center gap-1">
-                              <LinkIcon className="w-3 h-3 text-amber-600" />
-                              <span>
-                                Grouped under <strong>{primary.bidNumber || primary.subject.slice(0, 30)}</strong>
-                              </span>
-                            </div>
-                            <div className="flex items-center gap-2">
+                            {selectedBid.filterStatus !== 'duplicate_folder' ? (
                               <button
                                 type="button"
-                                onClick={() => openLinkModal(dup)}
-                                className="px-2.5 py-1 rounded bg-white hover:bg-amber-100 text-amber-900 border border-amber-300 text-[11px] font-semibold flex items-center gap-1 transition-colors shadow-2xs"
-                                title="Relink this email to a different project"
+                                onClick={() => handleMoveToDuplicates(selectedBid.id)}
+                                className="px-3.5 py-1.5 rounded-lg bg-rose-600 hover:bg-rose-500 text-white font-bold text-xs shadow-sm flex items-center gap-1.5 self-start sm:self-auto flex-shrink-0 transition-colors"
                               >
-                                <ArrowRightLeft className="w-3 h-3 text-amber-700" />
-                                <span>Relink / Move</span>
+                                <FolderArchive className="w-3.5 h-3.5" />
+                                <span>Move to Duplicates Folder</span>
                               </button>
+                            ) : (
                               <button
                                 type="button"
-                                onClick={() => handleUnlinkBid(dup.id)}
-                                className="px-2.5 py-1 rounded bg-white hover:bg-rose-50 text-rose-700 border border-rose-200 text-[11px] font-semibold flex items-center gap-1 transition-colors shadow-2xs"
-                                title="Unlink into standalone project"
+                                onClick={() => handleRestoreFromDuplicates(selectedBid.id)}
+                                className="px-3.5 py-1.5 rounded-lg bg-slate-700 hover:bg-slate-600 text-white font-bold text-xs shadow-sm flex items-center gap-1.5 self-start sm:self-auto flex-shrink-0 transition-colors"
                               >
-                                <Unlink className="w-3 h-3 text-rose-600" />
-                                <span>Unlink from Project</span>
+                                <RotateCcw className="w-3.5 h-3.5" />
+                                <span>Restore to Inbox</span>
                               </button>
+                            )}
+                          </div>
+                        )}
+
+                        {/* Scope Summary & Project Context Grid */}
+                        <div className="grid grid-cols-1 md:grid-cols-2 gap-3 pt-1 text-xs">
+                          <div className="bg-white/5 rounded-xl p-3 border border-white/10 space-y-1">
+                            <span className="font-bold text-indigo-300 flex items-center gap-1.5">
+                              <Sparkles className="w-3.5 h-3.5 text-indigo-400" />
+                              AI Scope Summary:
+                            </span>
+                            <p className="text-slate-200 leading-relaxed text-[11px]">
+                              {selectedBid.scopeSummary ||
+                                'General construction ITB document. Division 10 toilet partitions & accessories scope.'}
+                            </p>
+                          </div>
+
+                          <div className="bg-white/5 rounded-xl p-3 border border-white/10 space-y-1">
+                            <span className="font-bold text-blue-300 flex items-center gap-1.5">
+                              <Briefcase className="w-3.5 h-3.5 text-blue-400" />
+                              Project & Contractor Details:
+                            </span>
+                            <div className="text-slate-200 text-[11px] space-y-0.5">
+                              <div>
+                                GC / Sender:{' '}
+                                <strong className="text-white">
+                                  {selectedBid.clientCompany || selectedBid.originalSenderName || selectedBid.senderName}
+                                </strong>
+                              </div>
+                              {selectedBid.projectName && (
+                                <div>
+                                  Project Name:{' '}
+                                  <strong className="text-white">{selectedBid.projectName}</strong>
+                                </div>
+                              )}
+                              {selectedBid.projectAddress && (
+                                <div>
+                                  Address:{' '}
+                                  <strong className="text-white">{selectedBid.projectAddress}</strong>
+                                </div>
+                              )}
+                              {selectedBid.jobCode && (
+                                <div>
+                                  Job Code:{' '}
+                                  <span className="font-mono text-amber-300">{selectedBid.jobCode}</span>
+                                </div>
+                              )}
                             </div>
                           </div>
                         </div>
-                      ))}
+                      </div>
+
+                      {/* HIGH FIDELITY EMAIL DOCUMENT VIEWER */}
+                      <div className="bg-white rounded-2xl border border-slate-200 shadow-sm overflow-hidden">
+                        <EmailDocumentViewer
+                          id={selectedBid.id}
+                          subject={selectedBid.subject}
+                          senderName={selectedBid.senderName}
+                          senderEmail={selectedBid.senderEmail}
+                          receivedAt={selectedBid.receivedAt}
+                          isForwarded={selectedBid.isForwarded}
+                          forwardedBy={selectedBid.forwardedBy}
+                          originalSenderName={selectedBid.originalSenderName}
+                          originalSenderEmail={selectedBid.originalSenderEmail}
+                          bodyText={selectedBid.bodyText}
+                          bodyHtml={selectedBid.bodyHtml}
+                          attachments={selectedBid.attachments}
+                          maxHeight="h-[600px]"
+                        />
+                      </div>
                     </div>
-                  )}
-                </div>
-              );
-            })}
-          </div>
-        )}
-
-        {/* Bottom Pagination Bar */}
-        {totalGroups > 0 && (
-          <div className="p-4 bg-slate-50 border-t border-slate-200 flex flex-col sm:flex-row items-center justify-between gap-4 text-xs">
-            <div className="text-slate-500 font-medium">
-              Showing <span className="font-bold text-slate-800">{startIndex + 1}</span> to{' '}
-              <span className="font-bold text-slate-800">{endIndex}</span> of{' '}
-              <span className="font-bold text-slate-800">{totalGroups}</span> project groups
-              <span className="text-slate-400 ml-1">({filteredBids.length} total emails)</span>
-            </div>
-
-            <div className="flex items-center gap-1.5 flex-wrap justify-center">
-              {/* First Page */}
-              <button
-                type="button"
-                onClick={() => {
-                  setCurrentPage(1);
-                  const el = document.getElementById('dispatch-feed-list');
-                  if (el) el.scrollIntoView({ behavior: 'smooth', block: 'start' });
-                }}
-                disabled={safeCurrentPage <= 1}
-                className="px-2.5 py-1.5 rounded-lg border border-slate-300 bg-white text-slate-700 font-medium hover:bg-slate-100 disabled:opacity-30 disabled:hover:bg-white disabled:cursor-not-allowed transition-colors shadow-2xs"
-                title="First Page"
-              >
-                First
-              </button>
-
-              {/* Prev Page */}
-              <button
-                type="button"
-                onClick={() => {
-                  setCurrentPage((p) => Math.max(1, p - 1));
-                  const el = document.getElementById('dispatch-feed-list');
-                  if (el) el.scrollIntoView({ behavior: 'smooth', block: 'start' });
-                }}
-                disabled={safeCurrentPage <= 1}
-                className="px-2.5 py-1.5 rounded-lg border border-slate-300 bg-white text-slate-700 font-medium hover:bg-slate-100 disabled:opacity-30 disabled:hover:bg-white disabled:cursor-not-allowed transition-colors shadow-2xs flex items-center gap-1"
-              >
-                <ChevronLeft className="w-3.5 h-3.5" />
-                <span>Prev</span>
-              </button>
-
-              {/* Numbered Page Buttons */}
-              <div className="flex items-center gap-1">
-                {getPaginationPages().map((p, idx) =>
-                  p === '...' ? (
-                    <span key={`ellipsis-${idx}`} className="px-2 text-slate-400 font-bold">
-                      ...
-                    </span>
-                  ) : (
-                    <button
-                      key={`page-${p}`}
-                      type="button"
-                      onClick={() => {
-                        setCurrentPage(Number(p));
-                        const el = document.getElementById('dispatch-feed-list');
-                        if (el) el.scrollIntoView({ behavior: 'smooth', block: 'start' });
-                      }}
-                      className={`min-w-[32px] h-8 px-2 rounded-lg font-bold text-xs transition-colors shadow-2xs ${
-                        safeCurrentPage === p
-                          ? 'bg-blue-600 text-white shadow-sm ring-2 ring-blue-300'
-                          : 'bg-white border border-slate-300 text-slate-700 hover:bg-slate-100'
-                      }`}
-                    >
-                      {p}
-                    </button>
-                  )
+                  </>
+                ) : (
+                  <div className="flex-1 flex flex-col items-center justify-center p-12 text-center text-slate-400">
+                    <Mail className="w-12 h-12 text-slate-300 mb-3" />
+                    <p className="text-sm font-semibold text-slate-600">No email selected</p>
+                    <p className="text-xs text-slate-400 mt-1">
+                      Choose an email from the queue on the left to read and review.
+                    </p>
+                  </div>
                 )}
               </div>
-
-              {/* Next Page */}
-              <button
-                type="button"
-                onClick={() => {
-                  setCurrentPage((p) => Math.min(totalPages, p + 1));
-                  const el = document.getElementById('dispatch-feed-list');
-                  if (el) el.scrollIntoView({ behavior: 'smooth', block: 'start' });
-                }}
-                disabled={safeCurrentPage >= totalPages}
-                className="px-2.5 py-1.5 rounded-lg border border-slate-300 bg-white text-slate-700 font-medium hover:bg-slate-100 disabled:opacity-30 disabled:hover:bg-white disabled:cursor-not-allowed transition-colors shadow-2xs flex items-center gap-1"
-              >
-                <span>Next</span>
-                <ChevronRight className="w-3.5 h-3.5" />
-              </button>
-
-              {/* Last Page */}
-              <button
-                type="button"
-                onClick={() => {
-                  setCurrentPage(totalPages);
-                  const el = document.getElementById('dispatch-feed-list');
-                  if (el) el.scrollIntoView({ behavior: 'smooth', block: 'start' });
-                }}
-                disabled={safeCurrentPage >= totalPages}
-                className="px-2.5 py-1.5 rounded-lg border border-slate-300 bg-white text-slate-700 font-medium hover:bg-slate-100 disabled:opacity-30 disabled:hover:bg-white disabled:cursor-not-allowed transition-colors shadow-2xs"
-                title="Last Page"
-              >
-                Last
-              </button>
             </div>
-          </div>
-        )}
-      </div>
-      </>
+          ) : (
+            /* ALTERNATE GROUPED CARDS VIEW (FOR BULK OVERVIEW) */
+            <div id="dispatch-feed-list" className="bg-white rounded-xl border border-slate-200 shadow-sm overflow-hidden scroll-mt-6">
+              <div className="p-4 sm:p-5 border-b border-slate-200 flex flex-col md:flex-row md:items-center justify-between gap-4">
+                <div>
+                  <h3 className="text-base font-semibold text-slate-900">
+                    {activeFilter === 'ALL' && 'All Inbound Opportunities & Projects'}
+                    {activeFilter === 'ITB' && 'New ITBs (Invitations to Bid) — Assign to Estimators'}
+                    {activeFilter === 'Addendum / RFI' && 'Addendums & RFIs — Linked to Existing Bid Folders'}
+                    {activeFilter === 'Won' && 'Won Bids — Ready for Active Job Phase Promotion'}
+                    {activeFilter === 'Lost' && 'Lost / Cancelled Opportunities'}
+                    {activeFilter === 'Duplicates' && 'Duplicates Folder — Excluded from Active Queue'}
+                    {activeFilter === 'Spam' && 'Auto-Filtered Noise & Solicitations'}
+                  </h3>
+                  <p className="text-xs text-slate-500">
+                    Grouped by project sibling bundles and multi-GC opportunities.
+                  </p>
+                </div>
+
+                <div className="flex items-center gap-3 self-end md:self-center">
+                  <span className="text-xs font-semibold text-slate-700 font-mono">
+                    {totalGroups === 0 ? '0 of 0' : `${(safeCurrentPage - 1) * itemsPerPage + 1}–${Math.min(safeCurrentPage * itemsPerPage, totalGroups)} of ${totalGroups}`}
+                  </span>
+                  <div className="flex items-center border border-slate-300 rounded-lg overflow-hidden bg-white shadow-2xs">
+                    <button
+                      type="button"
+                      onClick={() => setCurrentPage((p) => Math.max(1, p - 1))}
+                      disabled={safeCurrentPage <= 1}
+                      title="Previous page"
+                      className="p-1.5 text-slate-600 hover:text-slate-900 hover:bg-slate-100 disabled:opacity-30 disabled:cursor-not-allowed border-r border-slate-200 transition-colors"
+                    >
+                      <ChevronLeft className="w-4 h-4" />
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => setCurrentPage((p) => Math.min(totalGroupPages, p + 1))}
+                      disabled={safeCurrentPage >= totalGroupPages}
+                      title="Next page"
+                      className="p-1.5 text-slate-600 hover:text-slate-900 hover:bg-slate-100 disabled:opacity-30 disabled:cursor-not-allowed transition-colors"
+                    >
+                      <ChevronRight className="w-4 h-4" />
+                    </button>
+                  </div>
+                </div>
+              </div>
+
+              {paginatedGroupEntries.length === 0 ? (
+                <div className="p-12 text-center text-slate-400 text-sm">
+                  {feedSearchQuery
+                    ? `No emails found matching "${feedSearchQuery}".`
+                    : `No emails found in ${activeFilter}.`}
+                </div>
+              ) : (
+                <div className="divide-y divide-slate-200">
+                  {paginatedGroupEntries.map(([groupId, groupItems]) => {
+                    const isExpanded = expandedGroups[groupId] ?? false;
+                    const primary = groupItems.find((b) => !b.isFlaggedDuplicate) || groupItems[0];
+                    const duplicates = groupItems.filter((b) => b.id !== primary.id);
+
+                    const uniqueGCs = Array.from(
+                      new Set(
+                        groupItems
+                          .map((item) => item.clientCompany || item.originalSenderName || item.senderName)
+                          .filter(Boolean)
+                      )
+                    );
+                    const isMultiGCGroup = uniqueGCs.length > 1;
+                    const dueDateRevisionItem = groupItems.find((item) => item.isDueDateRevised && item.revisedDueDate);
+
+                    return (
+                      <div key={groupId} className="p-5 hover:bg-slate-50/50 transition-colors space-y-3">
+                        {dueDateRevisionItem && (
+                          <div className="p-3 bg-amber-50 rounded-xl border border-amber-300 text-xs text-amber-950 flex flex-col sm:flex-row sm:items-center justify-between gap-3 shadow-2xs animate-in fade-in">
+                            <div className="flex items-start sm:items-center gap-2">
+                              <AlertTriangle className="w-4 h-4 text-amber-600 flex-shrink-0 mt-0.5 sm:mt-0" />
+                              <div>
+                                <span className="font-bold text-amber-900">⏰ Addendum Due Date Extension Detected:</span>{' '}
+                                <span>
+                                  An addendum revised the bid due date to{' '}
+                                  <strong className="text-amber-950 underline decoration-amber-500">
+                                    {formatFriendlyDate(dueDateRevisionItem.revisedDueDate!)}
+                                  </strong>
+                                  .
+                                </span>
+                              </div>
+                            </div>
+                            <button
+                              type="button"
+                              onClick={() =>
+                                handleAcceptRevisedDueDate(
+                                  dueDateRevisionItem.id,
+                                  dueDateRevisionItem.revisedDueDate!
+                                )
+                              }
+                              className="px-3 py-1.5 bg-emerald-600 hover:bg-emerald-700 text-white rounded-lg font-bold text-xs shadow-2xs flex items-center gap-1.5 transition-colors self-start sm:self-auto flex-shrink-0"
+                            >
+                              <Check className="w-3.5 h-3.5" />
+                              <span>Accept & Update Calendar</span>
+                            </button>
+                          </div>
+                        )}
+
+                        {isMultiGCGroup && (
+                          <div className="p-3 bg-indigo-50/90 rounded-xl border border-indigo-200 text-xs text-indigo-950 flex flex-col sm:flex-row sm:items-center justify-between gap-2 shadow-2xs">
+                            <div className="flex items-start sm:items-center gap-2">
+                              <Building2 className="w-4 h-4 text-indigo-700 flex-shrink-0 mt-0.5 sm:mt-0" />
+                              <div>
+                                <span className="font-bold text-indigo-900">Multi-GC Bidding Sibling Group:</span>{' '}
+                                <span>
+                                  Multiple general contractors (<strong>{uniqueGCs.join(', ')}</strong>) are bidding this same facility. One takeoff covers all quotes.
+                                </span>
+                              </div>
+                            </div>
+                          </div>
+                        )}
+
+                        <div className="flex items-start justify-between gap-4">
+                          <div className="flex items-start gap-3 flex-1">
+                            <button
+                              onClick={() => setExpandedGroups((prev) => ({ ...prev, [groupId]: !prev[groupId] }))}
+                              className="mt-1 text-slate-400 hover:text-slate-600 focus:outline-none"
+                            >
+                              {isExpanded ? (
+                                <ChevronDown className="w-5 h-5 text-slate-600" />
+                              ) : (
+                                <ChevronRight className="w-5 h-5" />
+                              )}
+                            </button>
+
+                            <div className="space-y-2 flex-1">
+                              <div className="flex items-center gap-2.5 flex-wrap">
+                                {renderStickerBadge(primary.sticker, primary)}
+
+                                {primary.sticker === 'ITB' && primary.bidNumber && (
+                                  <span className="px-2.5 py-0.5 rounded text-xs font-mono font-bold bg-blue-100 text-blue-900 border border-blue-200 flex items-center gap-1">
+                                    <Hash className="w-3 h-3 text-blue-600" /> {primary.bidNumber}
+                                  </span>
+                                )}
+
+                                {primary.sticker !== 'ITB' && primary.matchedBidNumber && (
+                                  <span className="px-2.5 py-0.5 rounded text-xs font-mono font-bold bg-purple-100 text-purple-900 border border-purple-200 flex items-center gap-1">
+                                    <LinkIcon className="w-3 h-3 text-purple-600" /> Attached to {primary.matchedBidNumber}
+                                  </span>
+                                )}
+
+                                {isMultiGCGroup && (
+                                  <span className="px-2.5 py-0.5 rounded text-xs font-bold bg-indigo-100 text-indigo-900 border border-indigo-200 flex items-center gap-1 shadow-2xs">
+                                    <Building2 className="w-3 h-3 text-indigo-700" /> Multi-GC ({uniqueGCs.length} Contractors)
+                                  </span>
+                                )}
+
+                                {primary.jobCode && (
+                                  <span className="px-2 py-0.5 rounded text-xs font-semibold bg-slate-100 text-slate-800">
+                                    {primary.jobCode}
+                                  </span>
+                                )}
+
+                                <span className="font-semibold text-slate-900 text-base">
+                                  {primary.subject}
+                                </span>
+
+                                {duplicates.length > 0 && (
+                                  <span className="px-2 py-0.5 rounded-full text-xs font-medium bg-amber-100 text-amber-800 flex items-center gap-1">
+                                    <Copy className="w-3 h-3" />
+                                    {duplicates.length} Related Inquiry
+                                  </span>
+                                )}
+                              </div>
+
+                              <div className="text-xs text-slate-600 flex items-center gap-3 flex-wrap">
+                                {primary.isForwarded ? (
+                                  <span className="inline-flex items-center gap-1 text-indigo-700 bg-indigo-50 px-2 py-0.5 rounded font-medium border border-indigo-100">
+                                    <UserCheck className="w-3.5 h-3.5 text-indigo-500" />
+                                    GC / Client: <strong>{primary.originalSenderName || primary.senderName}</strong> &lt;{primary.originalSenderEmail || primary.senderEmail}&gt;
+                                    <span className="text-indigo-400 font-normal">↳ (via {primary.forwardedBy || 'Coworker'})</span>
+                                  </span>
+                                ) : (
+                                  <span>Sender: <strong>{primary.senderName}</strong> &lt;{primary.senderEmail}&gt;</span>
+                                )}
+
+                                <span className="text-slate-400">•</span>
+                                <span>Received: {primary.receivedAt}</span>
+                                <span className="text-slate-400">•</span>
+                                <span className="flex items-center gap-1">
+                                  <Paperclip className="w-3.5 h-3.5" />
+                                  {primary.attachmentsCount} Attachment{primary.attachmentsCount > 1 ? 's' : ''}
+                                </span>
+                              </div>
+
+                              {primary.scopeSummary && (
+                                <div className="p-3 bg-slate-50 rounded-lg border border-slate-200 text-xs text-slate-700 space-y-1">
+                                  <div className="flex items-center gap-1.5 text-indigo-700 font-semibold">
+                                    <Sparkles className="w-3.5 h-3.5" />
+                                    AI Scope Summary:
+                                  </div>
+                                  <p className="leading-relaxed">{primary.scopeSummary}</p>
+                                </div>
+                              )}
+
+                              <div className="pt-0.5">
+                                <button
+                                  type="button"
+                                  onClick={() => toggleEmailDropdown(primary.id)}
+                                  className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-md text-xs font-semibold text-slate-700 bg-slate-100 hover:bg-slate-200 border border-slate-200 transition-colors shadow-2xs"
+                                >
+                                  <FileText className="w-3.5 h-3.5 text-blue-600" />
+                                  <span>{expandedEmails[primary.id] ? 'Hide Document / PDF' : 'View Email Document / PDF'}</span>
+                                  <ChevronDown className={`w-3.5 h-3.5 text-slate-400 transition-transform ${expandedEmails[primary.id] ? 'rotate-180' : ''}`} />
+                                </button>
+                              </div>
+
+                              {expandedEmails[primary.id] && (
+                                <div className="mt-2.5 animate-in fade-in slide-in-from-top-1">
+                                  <EmailDocumentViewer
+                                    id={primary.id}
+                                    subject={primary.subject}
+                                    senderName={primary.senderName}
+                                    senderEmail={primary.senderEmail}
+                                    receivedAt={primary.receivedAt}
+                                    isForwarded={primary.isForwarded}
+                                    forwardedBy={primary.forwardedBy}
+                                    originalSenderName={primary.originalSenderName}
+                                    originalSenderEmail={primary.originalSenderEmail}
+                                    bodyText={primary.bodyText}
+                                    bodyHtml={primary.bodyHtml}
+                                    attachments={primary.attachments}
+                                    maxHeight="h-[480px]"
+                                  />
+                                </div>
+                              )}
+                            </div>
+                          </div>
+
+                          <div className="flex items-center gap-3">
+                            {primary.sticker === 'ITB' && (
+                              <div className="flex flex-col sm:flex-row sm:items-center gap-2 bg-slate-50 p-2 rounded-xl border border-slate-200">
+                                <div className="flex items-center gap-1.5">
+                                  <span className="text-xs text-slate-500 font-semibold">Estimator:</span>
+                                  <select
+                                    value={primary.assignedEstimator || ''}
+                                    onChange={(e) => handleAssignEstimatorAndDate(primary.id, e.target.value, undefined)}
+                                    className="text-xs border border-slate-300 rounded-lg px-2.5 py-1.5 bg-white text-slate-800 font-medium focus:ring-2 focus:ring-blue-500 shadow-2xs"
+                                  >
+                                    <option value="">Assign Estimator...</option>
+                                    {ESTIMATORS.map((est) => (
+                                      <option key={est} value={est}>
+                                        {est}
+                                      </option>
+                                    ))}
+                                  </select>
+                                </div>
+
+                                <div className="flex items-center gap-1.5">
+                                  <span className="text-xs text-slate-500 font-semibold flex items-center gap-1">
+                                    <CalendarIcon className="w-3.5 h-3.5 text-blue-600" />
+                                    Due:
+                                  </span>
+                                  <input
+                                    type="date"
+                                    value={primary.bidDueDate || ''}
+                                    onChange={(e) => handleAssignEstimatorAndDate(primary.id, undefined, e.target.value)}
+                                    className="text-xs border border-slate-300 rounded-lg px-2 py-1 bg-white text-slate-800 font-medium focus:ring-2 focus:ring-blue-500 shadow-2xs"
+                                  />
+                                </div>
+                              </div>
+                            )}
+
+                            <button
+                              type="button"
+                              onClick={() => openLinkModal(primary)}
+                              title="Link or merge this inquiry into an existing project folder"
+                              className="p-2 rounded-lg border border-slate-300 bg-white hover:bg-slate-100 text-slate-700 text-xs font-semibold flex items-center gap-1 shadow-2xs transition-colors"
+                            >
+                              <LinkIcon className="w-3.5 h-3.5 text-blue-600" />
+                              <span className="hidden sm:inline">Link / Move</span>
+                            </button>
+                          </div>
+                        </div>
+
+                        {/* Expanded Duplicates View in Group */}
+                        {isExpanded && duplicates.length > 0 && (
+                          <div className="mt-4 ml-8 pl-4 border-l-2 border-amber-300 space-y-3">
+                            <p className="text-xs font-semibold text-amber-900 uppercase tracking-wider flex items-center gap-1">
+                              <Copy className="w-3.5 h-3.5 text-amber-600" />
+                              Related Inquiries / Sibling Quotes Under This Project
+                            </p>
+
+                            {duplicates.map((dup) => (
+                              <div
+                                key={dup.id}
+                                className="p-3 bg-amber-50/60 rounded-lg border border-amber-200/80 text-xs space-y-2"
+                              >
+                                <div className="flex items-center justify-between">
+                                  <div className="font-medium text-slate-800 flex items-center gap-2">
+                                    {renderStickerBadge(dup.sticker, dup)}
+                                    <span className="text-amber-700">↳</span>
+                                    {dup.subject}
+                                  </div>
+                                  <span className="text-slate-400">{dup.receivedAt}</span>
+                                </div>
+
+                                <div className="text-slate-600 flex items-center gap-3">
+                                  <span>From: {dup.senderEmail}</span>
+                                  <span>Attachments: {dup.attachmentsCount}</span>
+                                </div>
+
+                                <div className="flex items-center justify-between pt-2 border-t border-amber-200/60 flex-wrap gap-2">
+                                  <div className="text-[11px] text-amber-800 flex items-center gap-1">
+                                    <LinkIcon className="w-3 h-3 text-amber-600" />
+                                    <span>
+                                      Grouped under <strong>{primary.bidNumber || primary.subject.slice(0, 30)}</strong>
+                                    </span>
+                                  </div>
+                                  <div className="flex items-center gap-2">
+                                    <button
+                                      type="button"
+                                      onClick={() => openLinkModal(dup)}
+                                      className="px-2.5 py-1 rounded bg-white hover:bg-amber-100 text-amber-900 border border-amber-300 text-[11px] font-semibold flex items-center gap-1 transition-colors shadow-2xs"
+                                    >
+                                      <ArrowRightLeft className="w-3 h-3 text-amber-700" />
+                                      <span>Relink</span>
+                                    </button>
+                                    <button
+                                      type="button"
+                                      onClick={() => handleUnlinkBid(dup.id)}
+                                      className="px-2.5 py-1 rounded bg-white hover:bg-rose-50 text-rose-700 border border-rose-200 text-[11px] font-semibold flex items-center gap-1 transition-colors shadow-2xs"
+                                    >
+                                      <Unlink className="w-3 h-3 text-rose-600" />
+                                      <span>Unlink</span>
+                                    </button>
+                                  </div>
+                                </div>
+                              </div>
+                            ))}
+                          </div>
+                        )}
+                      </div>
+                    );
+                  })}
+                </div>
+              )}
+            </div>
+          )}
+        </>
       )}
 
       {/* HUMAN-IN-THE-LOOP REVIEW & RECLASSIFICATION MODAL */}
@@ -1606,7 +2380,6 @@ export default function DispatchDashboard() {
 
             {/* Scrollable Modal Content */}
             <div className="overflow-y-auto pr-1 py-4 space-y-5 flex-1">
-              {/* Email Details & Raw Content Accordion */}
               <div className="bg-slate-50 rounded-xl border border-slate-200 overflow-hidden text-xs">
                 <div className="p-3.5 space-y-1.5">
                   <div className="flex items-start justify-between gap-2">
@@ -1630,15 +2403,6 @@ export default function DispatchDashboard() {
                     )}
                     <span className="text-slate-400">•</span>
                     <span>Received: {reviewingBid.receivedAt}</span>
-                    {reviewingBid.attachments && reviewingBid.attachments.length > 0 && (
-                      <>
-                        <span className="text-slate-400">•</span>
-                        <span className="text-slate-700 font-medium flex items-center gap-1">
-                          <Paperclip className="w-3 h-3" />
-                          {reviewingBid.attachments.length} attachment{reviewingBid.attachments.length > 1 ? 's' : ''}
-                        </span>
-                      </>
-                    )}
                   </div>
 
                   {reviewingBid.scopeSummary && (
@@ -1649,494 +2413,101 @@ export default function DispatchDashboard() {
                       <p className="mt-0.5 text-[11px] leading-relaxed">{reviewingBid.scopeSummary}</p>
                     </div>
                   )}
-
-                  {reviewingBid.attachments && reviewingBid.attachments.length > 0 && (
-                    <div className="mt-2.5 pt-2 border-t border-slate-200 flex flex-wrap items-center gap-1.5 text-xs">
-                      <span className="text-slate-600 font-semibold flex items-center gap-1 text-[11px]">
-                        <Paperclip className="w-3 h-3 text-blue-600" />
-                        Attached Files ({reviewingBid.attachments.length}):
-                      </span>
-                      {reviewingBid.attachments.map((att, idx) => {
-                        const fileUrl =
-                          att.storageUrl ||
-                          `/api/bid-requests/${reviewingBid.id}/attachments/${encodeURIComponent(att.filename)}`;
-                        return (
-                          <a
-                            key={idx}
-                            href={fileUrl}
-                            target="_blank"
-                            rel="noopener noreferrer"
-                            className="inline-flex items-center gap-1 px-2 py-0.5 rounded bg-white hover:bg-blue-50 text-slate-700 hover:text-blue-700 border border-slate-300 hover:border-blue-300 text-[11px] font-medium transition-colors shadow-2xs group"
-                            title={`Open / preview ${att.filename}`}
-                          >
-                            <FileText className="w-3 h-3 text-blue-600" />
-                            <span className="truncate max-w-[180px]">{att.filename}</span>
-                            <ExternalLink className="w-2.5 h-2.5 text-slate-400 group-hover:text-blue-600 opacity-60" />
-                          </a>
-                        );
-                      })}
-                    </div>
-                  )}
-                </div>
-
-                {/* Email Document / PDF Accordion Dropdown */}
-                <div className="border-t border-slate-200 bg-white">
-                  <button
-                    type="button"
-                    onClick={() => setShowModalEmailBody(!showModalEmailBody)}
-                    className="w-full px-3.5 py-2.5 flex items-center justify-between text-left text-xs font-semibold text-slate-700 hover:bg-slate-50 transition-colors"
-                  >
-                    <span className="flex items-center gap-1.5 text-blue-700 font-bold">
-                      <FileText className="w-3.5 h-3.5 text-blue-600" />
-                      Email Document / PDF Preview (Original Structure)
-                    </span>
-                    <span className="flex items-center gap-1 text-[11px] text-slate-500">
-                      {showModalEmailBody ? 'Hide Document Preview' : 'Show Document Preview'}
-                      <ChevronDown className={`w-3.5 h-3.5 transition-transform ${showModalEmailBody ? 'rotate-180' : ''}`} />
-                    </span>
-                  </button>
-
-                  {showModalEmailBody && (
-                    <div className="p-3 border-t border-slate-200 animate-in fade-in">
-                      <EmailDocumentViewer
-                        id={reviewingBid.id}
-                        subject={reviewingBid.subject}
-                        senderName={reviewingBid.senderName}
-                        senderEmail={reviewingBid.senderEmail}
-                        receivedAt={reviewingBid.receivedAt}
-                        isForwarded={reviewingBid.isForwarded}
-                        forwardedBy={reviewingBid.forwardedBy}
-                        originalSenderName={reviewingBid.originalSenderName}
-                        originalSenderEmail={reviewingBid.originalSenderEmail}
-                        bodyText={reviewingBid.bodyText}
-                        bodyHtml={reviewingBid.bodyHtml}
-                        attachments={reviewingBid.attachments}
-                        maxHeight="h-[440px]"
-                      />
-                    </div>
-                  )}
                 </div>
               </div>
 
-            {/* 1. Sticker Selection */}
-            <div className="space-y-2">
-              <label className="text-xs font-bold text-slate-700 uppercase tracking-wider">
-                Select Correct Sticker:
-              </label>
-              <div className="grid grid-cols-5 gap-2">
-                {(['ITB', 'Addendum', 'Won', 'Lost', 'Spam'] as const).map((s) => {
-                  const isSelected = targetSticker === s;
-                  return (
-                    <button
-                      key={s}
-                      type="button"
-                      onClick={() => setTargetSticker(s)}
-                      className={`py-2 px-1 text-center rounded-lg text-xs font-bold border transition-all ${
-                        isSelected
-                          ? s === 'ITB'
-                            ? 'bg-blue-600 text-white border-blue-700 ring-2 ring-blue-300'
-                            : s === 'Addendum'
-                            ? 'bg-purple-600 text-white border-purple-700 ring-2 ring-purple-300'
-                            : s === 'Won'
-                            ? 'bg-emerald-600 text-white border-emerald-700 ring-2 ring-emerald-300'
-                            : s === 'Lost'
-                            ? 'bg-rose-600 text-white border-rose-700 ring-2 ring-rose-300'
-                            : 'bg-slate-700 text-white border-slate-800 ring-2 ring-slate-300'
-                          : 'bg-slate-50 text-slate-700 border-slate-200 hover:bg-slate-100'
-                      }`}
-                    >
-                      {s}
-                    </button>
-                  );
-                })}
-              </div>
-            </div>
-
-            {/* 2. DYNAMIC WORKFLOW SECTION BASED ON SELECTED STICKER */}
-            {/* If ITB: Enable Estimator Assignment OR Multi-GC Sibling Link */}
-            {targetSticker === 'ITB' && (
-              <div className="p-4 bg-blue-50/70 rounded-xl border border-blue-200 text-xs space-y-3.5">
-                <div className="flex items-center justify-between gap-2 flex-wrap">
-                  <div className="flex items-center gap-1.5 font-bold text-blue-900">
-                    <Hash className="w-4 h-4 text-blue-600" />
-                    <span>ITB Routing & Multi-GC Sibling Handling</span>
-                  </div>
-
-                  {/* Toggle between Standalone ITB vs Multi-GC Sibling */}
-                  <div className="flex items-center gap-3 bg-white px-3 py-1.5 rounded-lg border border-blue-200 shadow-2xs">
-                    <label className="flex items-center gap-1.5 cursor-pointer font-bold text-[11px] text-blue-900">
-                      <input
-                        type="radio"
-                        name="itbMode"
-                        checked={!linkToExistingItb}
-                        onChange={() => setLinkToExistingItb(false)}
-                        className="text-blue-600 focus:ring-blue-500"
-                      />
-                      <span>Standalone Project</span>
-                    </label>
-                    <label className="flex items-center gap-1.5 cursor-pointer font-bold text-[11px] text-indigo-900">
-                      <input
-                        type="radio"
-                        name="itbMode"
-                        checked={linkToExistingItb}
-                        onChange={() => setLinkToExistingItb(true)}
-                        className="text-indigo-600 focus:ring-indigo-500"
-                      />
-                      <span>Multi-GC Sibling (Same Job Site)</span>
-                    </label>
-                  </div>
-                </div>
-
-                {!linkToExistingItb ? (
-                  <>
-                    <p className="text-blue-800 text-[11px] leading-relaxed">
-                      This opportunity will be registered as a standalone bid (assigned its own <strong>BID-26-XXXX</strong> number). Confirm the bid due date to place it on the calendar and assign an estimator.
-                    </p>
-
-                    <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 pt-1">
-                      {/* Estimator Assignment */}
-                      <div className="space-y-1">
-                        <label className="text-[11px] font-bold text-blue-950 uppercase tracking-wider flex items-center gap-1">
-                          <Clock className="w-3 h-3 text-blue-600" />
-                          Assign Estimator:
-                        </label>
-                        <select
-                          value={selectedEstimatorForITB}
-                          onChange={(e) => setSelectedEstimatorForITB(e.target.value)}
-                          className="w-full text-xs border border-blue-300 rounded-lg p-2 bg-white text-slate-800 font-medium focus:ring-2 focus:ring-blue-500 shadow-2xs"
-                        >
-                          <option value="">Leave Unassigned (Needs Assignment)</option>
-                          {ESTIMATORS.map((est) => (
-                            <option key={est} value={est}>
-                              {est}
-                            </option>
-                          ))}
-                        </select>
-                      </div>
-
-                      {/* Calendar Bid Due Date */}
-                      <div className="space-y-1">
-                        <label className="text-[11px] font-bold text-blue-950 uppercase tracking-wider flex items-center gap-1">
-                          <CalendarIcon className="w-3 h-3 text-blue-600" />
-                          Assign Calendar Due Date:
-                        </label>
-                        <input
-                          type="date"
-                          value={selectedDueDateForITB}
-                          onChange={(e) => setSelectedDueDateForITB(e.target.value)}
-                          className="w-full text-xs border border-blue-300 rounded-lg p-2 bg-white text-slate-800 font-medium focus:ring-2 focus:ring-blue-500 shadow-2xs"
-                        />
-                      </div>
-                    </div>
-
-                    {/* AI Detected Due Date Suggestion Chip */}
-                    {reviewingBid.normalizedAiDueDate && (
-                      <div className="p-2.5 rounded-lg bg-indigo-50 border border-indigo-200 text-[11px] text-indigo-950 flex items-center justify-between gap-2 flex-wrap">
-                        <div className="flex items-center gap-1.5">
-                          <Sparkles className="w-4 h-4 text-indigo-600 flex-shrink-0" />
-                          <span>
-                            <strong>AI Detected Due Date in Email:</strong>{' '}
-                            <span className="font-semibold text-indigo-800">
-                              {formatFriendlyDate(reviewingBid.normalizedAiDueDate)}
-                            </span>
-                            {reviewingBid.rawAiDueDate && reviewingBid.rawAiDueDate !== reviewingBid.normalizedAiDueDate && (
-                              <span className="text-slate-500 text-[10px]"> ({reviewingBid.rawAiDueDate})</span>
-                            )}
-                          </span>
+              {/* Target Classification Selector */}
+              <div>
+                <label className="block text-xs font-bold text-slate-700 mb-2">
+                  Select Correct Category:
+                </label>
+                <div className="grid grid-cols-2 sm:grid-cols-3 gap-2">
+                  {CATEGORIES.map((cat) => {
+                    const isSelected = targetSticker === cat;
+                    return (
+                      <button
+                        key={cat}
+                        type="button"
+                        onClick={() => setTargetSticker(cat)}
+                        className={`p-3 rounded-xl border text-left transition-all ${
+                          isSelected
+                            ? 'border-blue-600 bg-blue-50/70 text-blue-900 font-bold shadow-xs ring-2 ring-blue-200'
+                            : 'border-slate-200 bg-white hover:bg-slate-50 text-slate-700'
+                        }`}
+                      >
+                        <div className="flex items-center justify-between mb-1">
+                          <span className="text-xs">{cat}</span>
+                          {isSelected && <Check className="w-4 h-4 text-blue-600" />}
                         </div>
+                      </button>
+                    );
+                  })}
+                </div>
+              </div>
 
-                        <button
-                          type="button"
-                          onClick={() => setSelectedDueDateForITB(reviewingBid.normalizedAiDueDate || '')}
-                          className="px-2.5 py-1 rounded bg-indigo-600 hover:bg-indigo-700 text-white font-bold text-[10px] shadow-2xs transition-colors"
-                        >
-                          Use Suggested Date
-                        </button>
-                      </div>
-                    )}
-                  </>
-                ) : (
-                  <div className="space-y-2.5">
-                    <p className="text-indigo-900 text-[11px] leading-relaxed">
-                      <strong>Multi-GC Sibling:</strong> Another contractor is bidding this same project. Attaching this ITB will group both contractors under the chosen BID folder so the same estimator handles the takeoff and doesn't quote it twice.
-                    </p>
-
-                    <div className="relative">
-                      <Search className="w-3.5 h-3.5 absolute left-2.5 top-2.5 text-slate-400" />
+              {/* Dynamic Controls depending on target category */}
+              {targetSticker === 'ITB' && (
+                <div className="p-4 bg-blue-50/60 rounded-xl border border-blue-200 space-y-3">
+                  <h5 className="font-bold text-blue-950 text-xs">ITB Assignment Details</h5>
+                  <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                    <div>
+                      <label className="block text-[11px] font-semibold text-slate-700 mb-1">
+                        Assign Estimator:
+                      </label>
+                      <select
+                        value={selectedEstimatorForITB}
+                        onChange={(e) => setSelectedEstimatorForITB(e.target.value)}
+                        className="w-full text-xs border border-slate-300 rounded-lg px-2.5 py-2 bg-white text-slate-800"
+                      >
+                        <option value="">Choose Estimator...</option>
+                        {ESTIMATORS.map((est) => (
+                          <option key={est} value={est}>
+                            {est}
+                          </option>
+                        ))}
+                      </select>
+                    </div>
+                    <div>
+                      <label className="block text-[11px] font-semibold text-slate-700 mb-1">
+                        Bid Due Date:
+                      </label>
                       <input
-                        type="text"
-                        placeholder="Search active project folder to attach to..."
-                        value={bidSearchQuery}
-                        onChange={(e) => setBidSearchQuery(e.target.value)}
-                        className="w-full text-xs pl-8 pr-3 py-1.5 border border-indigo-300 rounded-lg bg-white placeholder-slate-400 focus:outline-none focus:ring-2 focus:ring-indigo-500"
+                        type="date"
+                        value={selectedDueDateForITB}
+                        onChange={(e) => setSelectedDueDateForITB(e.target.value)}
+                        className="w-full text-xs border border-slate-300 rounded-lg px-2.5 py-2 bg-white text-slate-800"
                       />
                     </div>
-
-                    <div className="max-h-44 overflow-y-auto divide-y divide-indigo-100 border border-indigo-200 rounded-lg bg-white">
-                      {filteredBidsForLinking.length === 0 ? (
-                        <p className="p-3 text-slate-400 text-center text-xs">No active projects found.</p>
-                      ) : (
-                        filteredBidsForLinking.map((b) => {
-                          const isChosen = selectedBidNumberToLink === b.bidNumber;
-                          return (
-                            <div
-                              key={b.id}
-                              onClick={() => setSelectedBidNumberToLink(b.bidNumber!)}
-                              className={`p-2.5 flex items-center justify-between cursor-pointer transition-colors text-xs ${
-                                isChosen ? 'bg-indigo-100/80 text-indigo-950 font-bold' : 'hover:bg-indigo-50/50 text-slate-700'
-                              }`}
-                            >
-                              <div className="space-y-0.5">
-                                <div className="flex items-center gap-1.5">
-                                  <span className="font-mono px-1.5 py-0.5 rounded bg-indigo-200 text-indigo-900 text-[10px]">
-                                    {b.bidNumber}
-                                  </span>
-                                  <span className="truncate max-w-[280px]">{b.projectName || b.subject}</span>
-                                </div>
-                                <p className="text-[10px] text-slate-500">
-                                  Contractor: {b.clientCompany || b.senderName} • Estimator: {b.assignedEstimator || 'Unassigned'}
-                                </p>
-                              </div>
-                              {isChosen && <Check className="w-4 h-4 text-indigo-600 flex-shrink-0" />}
-                            </div>
-                          );
-                        })
-                      )}
-                    </div>
-                  </div>
-                )}
-              </div>
-            )}
-
-            {/* If Addendum: Link to Bid Folder + Due Date Revision */}
-            {targetSticker === 'Addendum' && (
-              <div className="p-4 bg-purple-50/70 rounded-xl border border-purple-200 text-xs space-y-3.5">
-                <div className="flex items-center gap-1.5 font-bold text-purple-900">
-                  <LinkIcon className="w-4 h-4 text-purple-600" />
-                  <span>Addendum Workflow: Link to Bid Folder & Due Date Revision</span>
-                </div>
-                <p className="text-purple-800 text-[11px] leading-relaxed">
-                  Addendums attach directly to an active bid folder so the estimator receives updated plans/scopes without creating separate bids.
-                </p>
-
-                {/* Due Date Extension Flag & Input */}
-                <div className="p-3 bg-white rounded-lg border border-purple-200 space-y-2">
-                  <label className="text-[11px] font-bold text-purple-950 uppercase tracking-wider flex items-center gap-1">
-                    <CalendarIcon className="w-3.5 h-3.5 text-purple-600" />
-                    Revised Bid Due Date (if modified in addendum):
-                  </label>
-                  <div className="flex items-center gap-2">
-                    <input
-                      type="date"
-                      value={addendumRevisedDueDateInput}
-                      onChange={(e) => setAddendumRevisedDueDateInput(e.target.value)}
-                      className="text-xs border border-purple-300 rounded-lg p-2 bg-white text-slate-800 font-medium focus:ring-2 focus:ring-purple-500 shadow-2xs"
-                    />
-                    {addendumRevisedDueDateInput ? (
-                      <span className="text-[11px] font-semibold text-purple-700">
-                        Will update calendar due date across project to {formatFriendlyDate(addendumRevisedDueDateInput)}
-                      </span>
-                    ) : (
-                      <span className="text-[10px] text-slate-400">Leave blank if no due date change</span>
-                    )}
                   </div>
                 </div>
+              )}
 
-                <div className="space-y-2">
-                  <label className="text-[11px] font-bold text-purple-950 uppercase tracking-wider">
-                    Select Active Bid Folder to Attach To:
-                  </label>
-                  <div className="relative">
-                    <Search className="w-3.5 h-3.5 absolute left-2.5 top-2.5 text-slate-400" />
-                    <input
-                      type="text"
-                      placeholder="Search active bids by project, GC, or number..."
-                      value={bidSearchQuery}
-                      onChange={(e) => setBidSearchQuery(e.target.value)}
-                      className="w-full text-xs pl-8 pr-3 py-1.5 border border-purple-300 rounded-lg bg-white placeholder-slate-400 focus:outline-none focus:ring-2 focus:ring-purple-500"
-                    />
-                  </div>
-
-                  <div className="max-h-44 overflow-y-auto divide-y divide-purple-100 border border-purple-200 rounded-lg bg-white">
-                    {filteredBidsForLinking.length === 0 ? (
-                      <p className="p-3 text-slate-400 text-center text-xs">No matching active bids found.</p>
-                    ) : (
-                      filteredBidsForLinking.map((b) => {
-                        const isChosen = selectedBidNumberToLink === b.bidNumber;
-                        return (
-                          <div
-                            key={b.id}
-                            onClick={() => setSelectedBidNumberToLink(b.bidNumber!)}
-                            className={`p-2.5 flex items-center justify-between cursor-pointer transition-colors text-xs ${
-                              isChosen ? 'bg-purple-100/70 text-purple-950 font-bold' : 'hover:bg-purple-50/50 text-slate-700'
-                            }`}
-                          >
-                            <div className="space-y-0.5">
-                              <div className="flex items-center gap-1.5">
-                                <span className="font-mono px-1.5 py-0.5 rounded bg-purple-200 text-purple-900 text-[10px]">
-                                  {b.bidNumber}
-                                </span>
-                                <span className="truncate max-w-[280px]">{b.projectName || b.subject}</span>
-                              </div>
-                              <p className="text-[10px] text-slate-500">
-                                Client: {b.clientCompany || b.senderName} • Estimator: {b.assignedEstimator || 'Unassigned'}
-                              </p>
-                            </div>
-                            {isChosen && <Check className="w-4 h-4 text-purple-600 flex-shrink-0" />}
-                          </div>
-                        );
-                      })
-                    )}
-                  </div>
+              {(targetSticker === 'Addendum / RFI' || targetSticker === 'Addendum' || targetSticker === 'Won' || targetSticker === 'Lost') && (
+                <div className="p-4 bg-purple-50/60 rounded-xl border border-purple-200 space-y-3">
+                  <h5 className="font-bold text-purple-950 text-xs">
+                    Link to Master Project (BID-26-XXXX)
+                  </h5>
+                  <input
+                    type="text"
+                    value={bidSearchQuery}
+                    onChange={(e) => setBidSearchQuery(e.target.value)}
+                    placeholder="Search master bids..."
+                    className="w-full text-xs border border-slate-300 rounded-lg px-2.5 py-2 bg-white"
+                  />
+                  <select
+                    value={selectedBidNumberToLink}
+                    onChange={(e) => setSelectedBidNumberToLink(e.target.value)}
+                    className="w-full text-xs border border-slate-300 rounded-lg px-2.5 py-2 bg-white text-slate-800"
+                  >
+                    <option value="">Select active project...</option>
+                    {filteredBidsForLinking.map((b) => (
+                      <option key={b.id} value={b.bidNumber!}>
+                        {b.bidNumber} — {b.projectName || b.subject.slice(0, 45)}
+                      </option>
+                    ))}
+                  </select>
                 </div>
-              </div>
-            )}
-
-            {/* If Won: Match to Bid + GC Won Prime Contract Option */}
-            {targetSticker === 'Won' && (
-              <div className="p-4 bg-emerald-50/70 rounded-xl border border-emerald-200 text-xs space-y-3.5">
-                <div className="flex items-center gap-1.5 font-bold text-emerald-900">
-                  <Trophy className="w-4 h-4 text-emerald-600" />
-                  <span>Won Workflow: Match to Bid & Prime Award Status</span>
-                </div>
-
-                {/* GC Won Prime Contract Checkbox */}
-                <div className="p-3 bg-white rounded-lg border border-emerald-200 space-y-1.5">
-                  <label className="flex items-start gap-2.5 cursor-pointer">
-                    <input
-                      type="checkbox"
-                      checked={isGcWonPrimeCheckbox}
-                      onChange={(e) => setIsGcWonPrimeCheckbox(e.target.checked)}
-                      className="mt-0.5 rounded border-emerald-400 text-emerald-600 focus:ring-emerald-500"
-                    />
-                    <div>
-                      <span className="font-bold text-emerald-950 text-xs">
-                        GC Won Prime Contract (Subcontractor Quote Pending)
-                      </span>
-                      <p className="text-[11px] text-emerald-800 leading-snug">
-                        The general contractor won the overall project prime contract and Partition Plus is currently waiting or negotiating to be awarded our subcontractor package.
-                      </p>
-                    </div>
-                  </label>
-                </div>
-
-                <div className="space-y-2">
-                  <label className="text-[11px] font-bold text-emerald-950 uppercase tracking-wider">
-                    Select Corresponding Active Bid Folder:
-                  </label>
-                  <div className="relative">
-                    <Search className="w-3.5 h-3.5 absolute left-2.5 top-2.5 text-slate-400" />
-                    <input
-                      type="text"
-                      placeholder="Search active bids by project, GC, or number..."
-                      value={bidSearchQuery}
-                      onChange={(e) => setBidSearchQuery(e.target.value)}
-                      className="w-full text-xs pl-8 pr-3 py-1.5 border border-emerald-300 rounded-lg bg-white placeholder-slate-400 focus:outline-none focus:ring-2 focus:ring-emerald-500"
-                    />
-                  </div>
-
-                  <div className="max-h-44 overflow-y-auto divide-y divide-emerald-100 border border-emerald-200 rounded-lg bg-white">
-                    {filteredBidsForLinking.length === 0 ? (
-                      <p className="p-3 text-slate-400 text-center text-xs">No matching active bids found.</p>
-                    ) : (
-                      filteredBidsForLinking.map((b) => {
-                        const isChosen = selectedBidNumberToLink === b.bidNumber;
-                        return (
-                          <div
-                            key={b.id}
-                            onClick={() => setSelectedBidNumberToLink(b.bidNumber!)}
-                            className={`p-2.5 flex items-center justify-between cursor-pointer transition-colors text-xs ${
-                              isChosen ? 'bg-emerald-100/70 text-emerald-950 font-bold' : 'hover:bg-emerald-50/50 text-slate-700'
-                            }`}
-                          >
-                            <div className="space-y-0.5">
-                              <div className="flex items-center gap-1.5">
-                                <span className="font-mono px-1.5 py-0.5 rounded bg-emerald-200 text-emerald-900 text-[10px]">
-                                  {b.bidNumber}
-                                </span>
-                                <span className="truncate max-w-[280px]">{b.projectName || b.subject}</span>
-                              </div>
-                              <p className="text-[10px] text-slate-500">
-                                Client: {b.clientCompany || b.senderName} • Assigned: {b.assignedEstimator || 'Unassigned'}
-                              </p>
-                            </div>
-                            {isChosen && <Check className="w-4 h-4 text-emerald-600 flex-shrink-0" />}
-                          </div>
-                        );
-                      })
-                    )}
-                  </div>
-                </div>
-              </div>
-            )}
-
-            {/* If Lost: Match to Bid & Archive */}
-            {targetSticker === 'Lost' && (
-              <div className="p-4 bg-rose-50/70 rounded-xl border border-rose-200 text-xs space-y-3">
-                <div className="flex items-center gap-1.5 font-bold text-rose-900">
-                  <XCircle className="w-4 h-4 text-rose-600" />
-                  <span>Lost Workflow: Match to Bid & Archive</span>
-                </div>
-                <p className="text-rose-800 text-[11px] leading-relaxed">
-                  This will close the selected bid folder as Lost and archive it from active estimating queues.
-                </p>
-
-                <div className="space-y-2">
-                  <div className="relative">
-                    <Search className="w-3.5 h-3.5 absolute left-2.5 top-2.5 text-slate-400" />
-                    <input
-                      type="text"
-                      placeholder="Search active bids by project, GC, or number..."
-                      value={bidSearchQuery}
-                      onChange={(e) => setBidSearchQuery(e.target.value)}
-                      className="w-full text-xs pl-8 pr-3 py-1.5 border border-rose-300 rounded-lg bg-white placeholder-slate-400 focus:outline-none focus:ring-2 focus:ring-rose-500"
-                    />
-                  </div>
-
-                  <div className="max-h-44 overflow-y-auto divide-y divide-rose-100 border border-rose-200 rounded-lg bg-white">
-                    {filteredBidsForLinking.length === 0 ? (
-                      <p className="p-3 text-slate-400 text-center text-xs">No matching active bids found.</p>
-                    ) : (
-                      filteredBidsForLinking.map((b) => {
-                        const isChosen = selectedBidNumberToLink === b.bidNumber;
-                        return (
-                          <div
-                            key={b.id}
-                            onClick={() => setSelectedBidNumberToLink(b.bidNumber!)}
-                            className={`p-2.5 flex items-center justify-between cursor-pointer transition-colors text-xs ${
-                              isChosen ? 'bg-rose-100/70 text-rose-950 font-bold' : 'hover:bg-rose-50/50 text-slate-700'
-                            }`}
-                          >
-                            <div className="space-y-0.5">
-                              <div className="flex items-center gap-1.5">
-                                <span className="font-mono px-1.5 py-0.5 rounded bg-rose-200 text-rose-900 text-[10px]">
-                                  {b.bidNumber}
-                                </span>
-                                <span className="truncate max-w-[280px]">{b.projectName || b.subject}</span>
-                              </div>
-                              <p className="text-[10px] text-slate-500">
-                                Client: {b.clientCompany || b.senderName} • Assigned: {b.assignedEstimator || 'Unassigned'}
-                              </p>
-                            </div>
-                            {isChosen && <Check className="w-4 h-4 text-rose-600 flex-shrink-0" />}
-                          </div>
-                        );
-                      })
-                    )}
-                  </div>
-                </div>
-              </div>
-            )}
-
-            {/* If Spam: Notice */}
-            {targetSticker === 'Spam' && (
-              <div className="p-4 bg-slate-100 rounded-xl border border-slate-300 text-xs text-slate-700 space-y-1">
-                <p className="font-bold text-slate-900">Spam / Noise Workflow:</p>
-                <p className="text-[11px] leading-relaxed">
-                  This email will be removed from your active dispatch queue and archived into the <strong>Spam / Noise</strong> tab.
-                </p>
-              </div>
-            )}
+              )}
             </div>
 
             {/* Modal Actions */}
@@ -2151,31 +2522,27 @@ export default function DispatchDashboard() {
               <button
                 type="button"
                 onClick={handleSaveReclassification}
-                disabled={
-                  isSavingReclassification ||
-                  (targetSticker !== 'ITB' && targetSticker !== 'Spam' && !selectedBidNumberToLink) ||
-                  (targetSticker === 'ITB' && linkToExistingItb && !selectedBidNumberToLink)
-                }
+                disabled={isSavingReclassification}
                 className="px-4 py-2 rounded-lg text-xs font-bold bg-blue-600 hover:bg-blue-700 text-white shadow-sm transition-colors disabled:opacity-50 flex items-center gap-1.5"
               >
-                {isSavingReclassification ? 'Updating Workflow...' : 'Save & Update Workflow'}
+                {isSavingReclassification ? 'Saving...' : 'Save Reclassification'}
               </button>
             </div>
           </div>
         </div>
       )}
 
-      {/* STANDALONE PROJECT LINK / RELINK MODAL FOR CALENDAR MANAGER */}
+      {/* STANDALONE LINK / RELINK MODAL */}
       {linkingBid && (
         <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-slate-900/60 backdrop-blur-sm animate-in fade-in">
-          <div className="bg-white rounded-2xl shadow-2xl border border-slate-200 max-w-xl w-full p-6 space-y-4 animate-in zoom-in-95">
+          <div className="bg-white rounded-2xl shadow-2xl border border-slate-200 max-w-xl w-full flex flex-col p-6 animate-in zoom-in-95 space-y-4">
             <div className="flex items-start justify-between pb-3 border-b border-slate-100">
               <div>
-                <span className="text-xs font-bold text-blue-600 uppercase tracking-wider flex items-center gap-1">
-                  <Building2 className="w-3.5 h-3.5" /> Project Folder Linker
+                <span className="text-xs font-bold text-blue-600 uppercase tracking-wider">
+                  Calendar Manager Project Linking
                 </span>
-                <h3 className="text-lg font-bold text-slate-900 mt-0.5">
-                  Link Email into Existing Project
+                <h3 className="text-base font-bold text-slate-900 mt-0.5">
+                  Link Email into Active Project Folder
                 </h3>
               </div>
               <button
@@ -2186,25 +2553,10 @@ export default function DispatchDashboard() {
               </button>
             </div>
 
-            {/* Email Being Linked */}
-            <div className="p-3 bg-slate-50 rounded-xl border border-slate-200 text-xs space-y-1">
-              <div className="font-bold text-slate-900 truncate">{linkingBid.subject}</div>
-              <div className="text-slate-600">
-                Sender: {linkingBid.senderName} ({linkingBid.senderEmail})
-                {linkingBid.clientCompany ? ` • Contractor: ${linkingBid.clientCompany}` : ''}
-              </div>
-              {linkingBid.projectName && (
-                <div className="text-slate-600">
-                  Job Site: <strong>{linkingBid.projectName}</strong>
-                </div>
-              )}
-            </div>
-
             <p className="text-xs text-slate-600 leading-relaxed">
               Select the active project folder (<strong>BID-26-XXXX</strong>) to attach this email to. If multiple contractors are bidding on the same job, linking them together ensures the same estimator prices the project and doesn't duplicate takeoffs.
             </p>
 
-            {/* Project Search Input */}
             <div className="relative">
               <Search className="w-3.5 h-3.5 absolute left-3 top-1/2 -translate-y-1/2 text-slate-400" />
               <input
@@ -2216,7 +2568,6 @@ export default function DispatchDashboard() {
               />
             </div>
 
-            {/* Project Selection List */}
             <div className="max-h-56 overflow-y-auto divide-y divide-slate-100 border border-slate-200 rounded-xl bg-white">
               {filteredBidsForRelinking.length === 0 ? (
                 <div className="p-4 text-center text-slate-400 text-xs">
@@ -2255,7 +2606,6 @@ export default function DispatchDashboard() {
               )}
             </div>
 
-            {/* Actions */}
             <div className="flex items-center justify-end gap-3 pt-3 border-t border-slate-100">
               <button
                 type="button"

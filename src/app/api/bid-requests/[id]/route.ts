@@ -14,8 +14,38 @@ interface UpdatePayload {
   estimatorStatus?: 'unassigned' | 'assigned' | 'in_progress' | 'bid_submitted' | 'won' | 'lost' | 'no_bid' | null;
   estimatorNotes?: string | null;
   duplicateResolution?: string | null;
+  filterStatus?: string | null;
+  moveToDuplicates?: boolean;
+  restoreFromDuplicates?: boolean;
   isHumanLabeled?: boolean;
   isGcWonPrime?: boolean;
+}
+
+export async function GET(
+  request: NextRequest,
+  { params }: { params: Promise<{ id: string }> }
+) {
+  try {
+    const { id } = await params;
+    const supabase = createServerSupabaseClient();
+
+    const { data, error } = await supabase
+      .from('bid_requests')
+      .select('*')
+      .eq('id', id)
+      .single();
+
+    if (error || !data) {
+      return NextResponse.json({ error: 'Bid request not found' }, { status: 404 });
+    }
+
+    return NextResponse.json({ bidRequest: data });
+  } catch (err: any) {
+    return NextResponse.json(
+      { error: err instanceof Error ? err.message : 'Failed to fetch bid request' },
+      { status: 500 }
+    );
+  }
 }
 
 export async function PATCH(
@@ -84,6 +114,19 @@ export async function PATCH(
     // 2e. Handle Human Labeling Flag & Resolution (for ML dataset verification)
     if (body.duplicateResolution !== undefined) {
       updates.duplicate_resolution = body.duplicateResolution;
+    }
+    if (body.filterStatus !== undefined) {
+      updates.filter_status = body.filterStatus;
+    }
+    if (body.moveToDuplicates) {
+      updates.filter_status = 'duplicate_folder';
+      updates.duplicate_resolution = 'duplicate';
+      updates.is_flagged_duplicate = true;
+    }
+    if (body.restoreFromDuplicates) {
+      updates.filter_status = 'inbox';
+      updates.duplicate_resolution = 'marked_distinct';
+      updates.is_flagged_duplicate = false;
     }
     if (body.isHumanLabeled) {
       updates.is_human_labeled = true;
@@ -210,8 +253,8 @@ export async function PATCH(
             updates.bid_number = `BID-${currentYear}-${seq.toString().padStart(4, '0')}`;
           }
         }
-      } else if (sticker === 'Addendum') {
-        // CASE B: Reclassified to Addendum
+      } else if (sticker === 'Addendum' || sticker === 'Addendum / RFI' || sticker === 'RFI/Forms' || sticker === 'RFI / Scope') {
+        // CASE B: Reclassified to Addendum / RFI
         updates.email_intent = 'addendum_update';
         updates.filter_status = 'inbox';
         updates.triage_status = 'ready_for_assignment';
