@@ -41,8 +41,6 @@ export default function CalendarImportModal({
   const [error, setError] = useState<string | null>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
 
-  if (!isOpen) return null;
-
   const handleFileLoad = async (file: File) => {
     setError(null);
     if (!file.name.toLowerCase().endsWith('.ics')) {
@@ -96,6 +94,8 @@ export default function CalendarImportModal({
       return true;
     });
   }, [events, dateRangePreset, cutoffYmd, customFrom, customTo]);
+
+  if (!isOpen) return null;
 
   const selectedVisibleCount = visibleEvents.filter((e) => e.selected).length;
 
