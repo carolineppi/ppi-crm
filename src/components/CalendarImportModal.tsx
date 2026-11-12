@@ -32,27 +32,30 @@ interface CalendarImportModalProps {
   onImportComplete: (summary: { createdCount: number; enrichedCount: number; skippedCount: number }) => void;
 }
 
-const APPS_SCRIPT_SNIPPET = `function exportBidCalendarWithColors() {
+const APPS_SCRIPT_SNIPPET = `function doGet() {
   // Replace with your Bid Calendar ID (from Calendar Settings -> Integrate calendar), or leave 'primary'
   var calendarId = 'primary';
-  var cal = CalendarApp.getCalendarById(calendarId);
-  var start = new Date('2020-01-01T00:00:00Z');
-  var end = new Date('2028-12-31T23:59:59Z');
-  var events = cal.getEvents(start, end);
-  var out = events.map(function(ev) {
-    return {
-      id: ev.getId(),
-      summary: ev.getTitle(),
-      description: ev.getDescription(),
-      location: ev.getLocation(),
-      colorId: ev.getColor() || '',
-      start: ev.isAllDayEvent()
-        ? { date: Utilities.formatDate(ev.getAllDayStartDate(), 'America/Chicago', 'yyyy-MM-dd') }
-        : { dateTime: ev.getStartTime().toISOString() }
-    };
-  });
-  var file = DriveApp.createFile('bid_calendar_with_colors.json', JSON.stringify(out));
-  Logger.log('Saved to Google Drive: ' + file.getUrl());
+  var token = ScriptApp.getOAuthToken();
+  var events = [];
+  var pageToken = null;
+
+  do {
+    var url = 'https://www.googleapis.com/calendar/v3/calendars/' +
+      encodeURIComponent(calendarId) +
+      '/events?maxResults=2500&singleEvents=true' +
+      (pageToken ? '&pageToken=' + encodeURIComponent(pageToken) : '');
+    var res = UrlFetchApp.fetch(url, {
+      headers: { Authorization: 'Bearer ' + token }
+    });
+    var data = JSON.parse(res.getContentText());
+    if (data.items) events = events.concat(data.items);
+    pageToken = data.nextPageToken;
+  } while (pageToken);
+
+  return ContentService
+    .createTextOutput(JSON.stringify(events))
+    .setMimeType(ContentService.MimeType.JSON)
+    .downloadAsFile('bid_calendar_with_colors.json');
 }`;
 
 export default function CalendarImportModal({
@@ -292,9 +295,9 @@ export default function CalendarImportModal({
                 {showColorScriptHelp && (
                   <div className="pt-2 border-t border-amber-200 space-y-2">
                     <ol className="list-decimal list-inside space-y-1 text-[11px] text-amber-900">
-                      <li>Go to <a href="https://script.google.com" target="_blank" rel="noopener noreferrer" className="underline font-bold">script.google.com</a> and click <strong>New Project</strong>.</li>
-                      <li>Paste the script below (replace <code>&apos;primary&apos;</code> with your Bid Calendar ID if it&apos;s a secondary/shared calendar), then click <strong>Run</strong>.</li>
-                      <li>Download <code>bid_calendar_with_colors.json</code> from your Google Drive and drop it above!</li>
+                      <li>Go to <a href="https://script.google.com" target="_blank" rel="noopener noreferrer" className="underline font-bold">script.google.com</a> → <strong>New Project</strong>, and paste the <strong>Read-Only</strong> script below (replace <code>&apos;primary&apos;</code> with your Bid Calendar ID).</li>
+                      <li>For strict <strong>read-only</strong> permissions (no edit/delete): click <strong>Project Settings (⚙️)</strong> → check <strong>Show &quot;appsscript.json&quot; manifest file in editor</strong>, then add <code>&quot;oauthScopes&quot;: [&quot;https://www.googleapis.com/auth/calendar.readonly&quot;, &quot;https://www.googleapis.com/auth/script.external_request&quot;]</code> to <code>appsscript.json</code>.</li>
+                      <li>Click <strong>Deploy → New deployment → Web app</strong> (Execute as: <strong>Me</strong>, Who has access: <strong>Only myself</strong>), open the Web app URL, and it will download <code>bid_calendar_with_colors.json</code> directly to your PC!</li>
                     </ol>
                     <div className="relative">
                       <pre className="bg-slate-900 text-slate-100 p-3 rounded-lg text-[10px] overflow-x-auto font-mono">
