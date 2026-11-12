@@ -57,27 +57,47 @@ export async function GET(request: NextRequest) {
       created_at
     `.replace(/\s+/g, ' ').trim();
 
-    // Fetch all rows in 1000-row pages so PostgREST's default 1000-row limit never silently truncates data
-    const allRows: any[] = [];
+    // Fetch page 0 with exact count, then fetch remaining pages in parallel
     const pageSize = 1000;
-    let from = 0;
+    const { data: firstPage, count, error: firstError } = await supabase
+      .from('bid_requests')
+      .select(selectQuery as any, { count: 'exact' })
+      .order('created_at', { ascending: false })
+      .range(0, pageSize - 1);
 
-    while (true) {
-      const { data, error } = await supabase
-        .from('bid_requests')
-        .select(selectQuery as any)
-        .order('created_at', { ascending: false })
-        .range(from, from + pageSize - 1);
+    if (firstError) {
+      console.error('Supabase query error in /api/bid-requests:', firstError);
+      return NextResponse.json({ error: firstError.message }, { status: 500 });
+    }
 
-      if (error) {
-        console.error('Supabase query error in /api/bid-requests:', error);
-        return NextResponse.json({ error: error.message }, { status: 500 });
+    const allRows: any[] = firstPage ? [...firstPage] : [];
+    const totalCount = count ?? allRows.length;
+
+    if (totalCount > pageSize && allRows.length === pageSize) {
+      const remainingStarts: number[] = [];
+      for (let from = pageSize; from < totalCount; from += pageSize) {
+        remainingStarts.push(from);
       }
 
-      if (!data || data.length === 0) break;
-      allRows.push(...data);
-      if (data.length < pageSize) break;
-      from += pageSize;
+      const pageResults = await Promise.all(
+        remainingStarts.map((from) =>
+          supabase
+            .from('bid_requests')
+            .select(selectQuery as any)
+            .order('created_at', { ascending: false })
+            .range(from, from + pageSize - 1)
+        )
+      );
+
+      for (const res of pageResults) {
+        if (res.error) {
+          console.error('Supabase parallel page error in /api/bid-requests:', res.error);
+          return NextResponse.json({ error: res.error.message }, { status: 500 });
+        }
+        if (res.data && res.data.length > 0) {
+          allRows.push(...res.data);
+        }
+      }
     }
 
     return NextResponse.json({ bidRequests: allRows });

@@ -252,7 +252,7 @@ export default function DispatchDashboard() {
   const fetchLiveBids = async () => {
     setIsLoading(true);
     try {
-      const res = await fetch('/api/bid-requests');
+      const res = await fetch('/api/bid-requests?summary=1');
       const data = await res.json();
       if (data.bidRequests && Array.isArray(data.bidRequests)) {
         const mapped: DisplayBidRequest[] = data.bidRequests.map((r: any) => {
@@ -343,7 +343,7 @@ export default function DispatchDashboard() {
             attachmentsCount: attachmentsList.length,
             attachments: attachmentsList,
             bodyText: r.email_body_text || r.raw_payload?.bodyText || r.raw_payload?.body || null,
-            bodyHtml: r.email_body_html || r.raw_payload?.bodyHtml || null,
+            bodyHtml: r.email_body_html || r.raw_payload?.bodyHtml || undefined,
             sticker,
             isHumanLabeled: isHuman,
             humanLabel: rawHumanLabel || null,
@@ -581,64 +581,96 @@ export default function DispatchDashboard() {
   };
 
   /**
-   * DUPLICATE DETECTION ENGINE:
+   * DUPLICATE DETECTION ENGINE (O(N) precomputed index):
    * Rule: The first/earliest received email is the ORIGINAL and is NEVER a duplicate.
    * Only emails received AFTER the first are marked as duplicate copies.
    */
+  const duplicateStatusMap = useMemo(() => {
+    const map = new Map<string, { isDuplicate: boolean; duplicateOfBid?: DisplayBidRequest; reason: string }>();
+    const tsById = new Map<string, number>();
+    const earliestBySubjSender = new Map<string, { bid: DisplayBidRequest; ts: number }>();
+    const byGroup = new Map<string, DisplayBidRequest[]>();
+    const byExactSubjSender = new Map<string, DisplayBidRequest[]>();
+
+    for (const b of bids) {
+      const ts = new Date(b.rawReceivedAt || b.receivedAt).getTime();
+      tsById.set(b.id, ts);
+
+      const normKey = `${(b.subject || '').trim().toLowerCase()}||${(b.senderEmail || '').trim().toLowerCase()}`;
+      const existingEarliest = earliestBySubjSender.get(normKey);
+      if (!existingEarliest || ts < existingEarliest.ts) {
+        earliestBySubjSender.set(normKey, { bid: b, ts });
+      }
+
+      if (b.duplicateGroupId) {
+        const grp = byGroup.get(b.duplicateGroupId);
+        if (grp) grp.push(b);
+        else byGroup.set(b.duplicateGroupId, [b]);
+      }
+
+      const exactKey = `${b.subject}||${b.senderEmail}`;
+      const exactList = byExactSubjSender.get(exactKey);
+      if (exactList) exactList.push(b);
+      else byExactSubjSender.set(exactKey, [b]);
+    }
+
+    const updateStickers = new Set(['Addendum / RFI', 'Addendum', 'RFI/Forms', 'RFI / Scope', 'Won', 'Contractor Awarded', 'Lost']);
+
+    for (const bid of bids) {
+      const bidTime = tsById.get(bid.id) ?? 0;
+
+      // 1. If explicitly in duplicate folder
+      if (bid.filterStatus === 'duplicate_folder' || bid.duplicateResolution === 'duplicate') {
+        const grp = bid.duplicateGroupId ? byGroup.get(bid.duplicateGroupId) || [] : [];
+        let original = grp.find((b) => b.id !== bid.id && (tsById.get(b.id) ?? 0) <= bidTime);
+        if (!original) {
+          const exactList = byExactSubjSender.get(`${bid.subject}||${bid.senderEmail}`) || [];
+          original = exactList.find((b) => b.id !== bid.id && (tsById.get(b.id) ?? 0) <= bidTime);
+        }
+        map.set(bid.id, { isDuplicate: true, duplicateOfBid: original, reason: 'Moved to Duplicates Folder' });
+        continue;
+      }
+
+      // 2. Check if this email was received AFTER an earlier identical email (same subject & sender)
+      const normKey = `${(bid.subject || '').trim().toLowerCase()}||${(bid.senderEmail || '').trim().toLowerCase()}`;
+      const earliest = earliestBySubjSender.get(normKey);
+      if (earliest && earliest.bid.id !== bid.id && earliest.ts < bidTime) {
+        map.set(bid.id, {
+          isDuplicate: true,
+          duplicateOfBid: earliest.bid,
+          reason: `Duplicate copy received after original email (${earliest.bid.receivedAt})`,
+        });
+        continue;
+      }
+
+      // 3. If flagged as duplicate in database: verify if there is an earlier primary in the group
+      // Note: Addendums, Awards, and Lost updates share duplicateGroupId with their parent ITB and are NOT duplicates.
+      if (bid.isFlaggedDuplicate && !updateStickers.has(bid.sticker)) {
+        const grp = bid.duplicateGroupId ? byGroup.get(bid.duplicateGroupId) || [] : [];
+        const primary =
+          grp.find((b) => b.id !== bid.id && (tsById.get(b.id) ?? 0) < bidTime) ||
+          grp.find((b) => b.id !== bid.id && !b.isFlaggedDuplicate);
+
+        if (primary) {
+          map.set(bid.id, {
+            isDuplicate: true,
+            duplicateOfBid: primary,
+            reason: `Duplicate copy in project bundle (Original: ${primary.bidNumber || primary.receivedAt})`,
+          });
+          continue;
+        }
+      }
+
+      map.set(bid.id, { isDuplicate: false, reason: '' });
+    }
+
+    return map;
+  }, [bids]);
+
   const checkDuplicateStatus = useCallback((bid: DisplayBidRequest): { isDuplicate: boolean; duplicateOfBid?: DisplayBidRequest; reason: string } => {
     if (!bid) return { isDuplicate: false, reason: '' };
-
-    const bidTime = new Date(bid.rawReceivedAt || bid.receivedAt).getTime();
-
-    // 1. If explicitly in duplicate folder
-    if (bid.filterStatus === 'duplicate_folder' || bid.duplicateResolution === 'duplicate') {
-      const original = bids.find(
-        (b) =>
-          b.id !== bid.id &&
-          (b.duplicateGroupId === bid.duplicateGroupId || (b.subject === bid.subject && b.senderEmail === bid.senderEmail)) &&
-          new Date(b.rawReceivedAt || b.receivedAt).getTime() <= bidTime
-      );
-      return { isDuplicate: true, duplicateOfBid: original, reason: 'Moved to Duplicates Folder' };
-    }
-
-    // 2. Check if this email was received AFTER an earlier identical email (same subject & sender)
-    const earlierIdentical = bids.find(
-      (b) =>
-        b.id !== bid.id &&
-        b.subject.trim().toLowerCase() === bid.subject.trim().toLowerCase() &&
-        b.senderEmail.trim().toLowerCase() === bid.senderEmail.trim().toLowerCase() &&
-        new Date(b.rawReceivedAt || b.receivedAt).getTime() < bidTime
-    );
-    if (earlierIdentical) {
-      return {
-        isDuplicate: true,
-        duplicateOfBid: earlierIdentical,
-        reason: `Duplicate copy received after original email (${earlierIdentical.receivedAt})`,
-      };
-    }
-
-    // 3. If flagged as duplicate in database: verify if there is an earlier primary in the group
-    // Note: Addendums, Awards, and Lost updates share duplicateGroupId with their parent ITB and are NOT duplicates.
-    const isUpdateEmail = ['Addendum / RFI', 'Addendum', 'RFI/Forms', 'RFI / Scope', 'Won', 'Contractor Awarded', 'Lost'].includes(bid.sticker);
-    if (bid.isFlaggedDuplicate && !isUpdateEmail) {
-      const primary = bids.find(
-        (b) =>
-          b.duplicateGroupId === bid.duplicateGroupId &&
-          b.id !== bid.id &&
-          new Date(b.rawReceivedAt || b.receivedAt).getTime() < bidTime
-      ) || bids.find((b) => b.duplicateGroupId === bid.duplicateGroupId && b.id !== bid.id && !b.isFlaggedDuplicate);
-
-      if (primary) {
-        return {
-          isDuplicate: true,
-          duplicateOfBid: primary,
-          reason: `Duplicate copy in project bundle (Original: ${primary.bidNumber || primary.receivedAt})`,
-        };
-      }
-    }
-
-    return { isDuplicate: false, reason: '' };
-  }, [bids]);
+    return duplicateStatusMap.get(bid.id) || { isDuplicate: false, reason: '' };
+  }, [duplicateStatusMap]);
 
   // Main Queue Filter:
   // Duplicates are strictly isolated into the "Duplicates" folder!
@@ -1301,40 +1333,87 @@ export default function DispatchDashboard() {
     );
   });
 
-  // Accurate Counts for Category Tabs (excluding Duplicates from active folders)
-  const isDuplicateItem = (b: DisplayBidRequest) => checkDuplicateStatus(b).isDuplicate;
-  const countAllQueue = bids.filter((b) => b.sticker !== 'Spam' && b.filterStatus !== 'auto_filtered' && !isDuplicateItem(b)).length;
-  const countITB = bids.filter((b) => b.sticker === 'ITB' && !isDuplicateItem(b)).length;
-  const countAddendumRFI = bids.filter((b) => (b.sticker === 'Addendum / RFI' || b.sticker === 'Addendum' || b.sticker === 'RFI/Forms' || b.sticker === 'RFI / Scope') && !isDuplicateItem(b)).length;
-  const countReminder = bids.filter((b) => b.sticker === 'Date Reminder' && !isDuplicateItem(b)).length;
-  const countWon = bids.filter((b) => (b.sticker === 'Won' || b.sticker === 'Contractor Awarded') && !isDuplicateItem(b)).length;
-  const countLost = bids.filter((b) => b.sticker === 'Lost' && !isDuplicateItem(b)).length;
-  const countDuplicates = bids.filter((b) => isDuplicateItem(b)).length;
-  const countSpam = bids.filter((b) => b.sticker === 'Spam' || b.filterStatus === 'auto_filtered').length;
-  const countHumanVerified = bids.filter((b) => b.isHumanLabeled).length;
-  const countUnverified = bids.filter((b) => !b.isHumanLabeled).length;
+  // Accurate Counts for Category Tabs (single-pass O(N) memoized)
+  const {
+    countAllQueue,
+    countITB,
+    countAddendumRFI,
+    countReminder,
+    countWon,
+    countLost,
+    countDuplicates,
+    countSpam,
+    countHumanVerified,
+    countUnverified,
+    countDispatchedInFilter,
+    countNeedsActionInFilter,
+  } = useMemo(() => {
+    let allQueue = 0;
+    let itb = 0;
+    let addendumRfi = 0;
+    let reminder = 0;
+    let won = 0;
+    let lost = 0;
+    let duplicates = 0;
+    let spam = 0;
+    let humanVerified = 0;
+    let unverified = 0;
+    let dispatchedInFilter = 0;
+    let needsActionInFilter = 0;
 
-  // Counts for Sub-Triage Queue View
-  const countDispatchedInFilter = bids.filter((b) => {
-    if (isDuplicateItem(b)) return false;
-    if (b.sticker === 'Spam' || b.filterStatus === 'auto_filtered') return false;
-    if (activeFilter === 'Addendum / RFI' && (b.sticker !== 'Addendum / RFI' && b.sticker !== 'Addendum' && b.sticker !== 'RFI/Forms' && b.sticker !== 'RFI / Scope')) return false;
-    if (activeFilter === 'ITB' && b.sticker !== 'ITB') return false;
-    return b.isAutoDispatched;
-  }).length;
+    for (const b of bids) {
+      const isDup = duplicateStatusMap.get(b.id)?.isDuplicate ?? false;
+      const isSpam = b.sticker === 'Spam' || b.filterStatus === 'auto_filtered';
+      const isAddendum =
+        b.sticker === 'Addendum / RFI' ||
+        b.sticker === 'Addendum' ||
+        b.sticker === 'RFI/Forms' ||
+        b.sticker === 'RFI / Scope';
 
-  const countNeedsActionInFilter = bids.filter((b) => {
-    if (isDuplicateItem(b)) return false;
-    if (b.sticker === 'Spam' || b.filterStatus === 'auto_filtered') return false;
-    if (activeFilter === 'Addendum / RFI' && (b.sticker !== 'Addendum / RFI' && b.sticker !== 'Addendum' && b.sticker !== 'RFI/Forms' && b.sticker !== 'RFI / Scope')) return false;
-    if (activeFilter === 'ITB' && b.sticker !== 'ITB') return false;
+      if (b.isHumanLabeled) humanVerified++;
+      else unverified++;
 
-    if (b.sticker === 'ITB') return !b.assignedEstimator;
-    if (b.sticker === 'Addendum / RFI' || b.sticker === 'Addendum' || b.sticker === 'RFI/Forms' || b.sticker === 'RFI / Scope') {
-      return !b.isAutoDispatched;
+      if (isSpam) spam++;
+      if (isDup) {
+        duplicates++;
+        continue;
+      }
+
+      if (!isSpam) {
+        allQueue++;
+        const matchesSubFilter =
+          (activeFilter !== 'Addendum / RFI' || isAddendum) &&
+          (activeFilter !== 'ITB' || b.sticker === 'ITB');
+
+        if (matchesSubFilter) {
+          if (b.isAutoDispatched) dispatchedInFilter++;
+          if (b.sticker === 'ITB' && !b.assignedEstimator) needsActionInFilter++;
+          else if (isAddendum && !b.isAutoDispatched) needsActionInFilter++;
+        }
+      }
+
+      if (b.sticker === 'ITB') itb++;
+      else if (isAddendum) addendumRfi++;
+      else if (b.sticker === 'Date Reminder') reminder++;
+      else if (b.sticker === 'Won' || b.sticker === 'Contractor Awarded') won++;
+      else if (b.sticker === 'Lost') lost++;
     }
-    return false;
-  }).length;
+
+    return {
+      countAllQueue: allQueue,
+      countITB: itb,
+      countAddendumRFI: addendumRfi,
+      countReminder: reminder,
+      countWon: won,
+      countLost: lost,
+      countDuplicates: duplicates,
+      countSpam: spam,
+      countHumanVerified: humanVerified,
+      countUnverified: unverified,
+      countDispatchedInFilter: dispatchedInFilter,
+      countNeedsActionInFilter: needsActionInFilter,
+    };
+  }, [bids, duplicateStatusMap, activeFilter]);
 
   // Selected email AI alerts
   const crossContractorMatches = useMemo(() => {
