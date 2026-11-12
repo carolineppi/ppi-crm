@@ -23,6 +23,11 @@ interface UpdatePayload {
   isHumanLabeled?: boolean;
   isGcWonPrime?: boolean;
   googleDriveFolderUrl?: string | null;
+  projectName?: string | null;
+  clientCompany?: string | null;
+  projectAddressCity?: string | null;
+  projectAddressState?: string | null;
+  bidDueTime?: string | null;
 }
 
 export async function GET(
@@ -101,10 +106,32 @@ export async function PATCH(
     if (body.bidDueDate !== undefined) {
       if (!body.bidDueDate) {
         updates.bid_due_date = null;
+      } else if (/^\d{4}-\d{2}-\d{2}$/.test(body.bidDueDate.trim())) {
+        updates.bid_due_date = `${body.bidDueDate.trim()}T17:00:00.000Z`;
       } else {
         const parsed = new Date(body.bidDueDate);
         updates.bid_due_date = !isNaN(parsed.getTime()) ? parsed.toISOString() : null;
       }
+    }
+
+    // 2b-2. Handle Inline Bid Metadata & Due Time Edits
+    if (body.projectName !== undefined) {
+      updates.project_name = body.projectName ? body.projectName.trim() : null;
+    }
+    if (body.clientCompany !== undefined) {
+      updates.client_company = body.clientCompany ? body.clientCompany.trim() : null;
+    }
+    if (body.projectAddressCity !== undefined) {
+      updates.project_address_city = body.projectAddressCity ? body.projectAddressCity.trim() : null;
+    }
+    if (body.projectAddressState !== undefined) {
+      updates.project_address_state = body.projectAddressState ? body.projectAddressState.trim() : null;
+    }
+    if (body.bidDueTime !== undefined) {
+      updates.raw_payload = {
+        ...(updates.raw_payload || currentRecord.raw_payload),
+        bid_due_time: body.bidDueTime ? body.bidDueTime.trim() : null,
+      };
     }
 
     // 2c. Handle Estimator Workflow Status Update

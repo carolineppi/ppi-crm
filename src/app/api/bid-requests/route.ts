@@ -26,6 +26,7 @@ export async function GET(request: NextRequest) {
       assigned_estimator_id,
       assigned_estimator_name:raw_payload->>assigned_estimator_name,
       bid_due_date,
+      bid_due_time:raw_payload->>bid_due_time,
       attachments,
       ${isSummary ? '' : 'email_body_text,'}
       email_intent,

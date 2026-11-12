@@ -38,6 +38,7 @@ export interface CalendarBidItem {
   sticker: string;
   assignedEstimator: string | null;
   bidDueDate?: string | null; // YYYY-MM-DD
+  bidDueTime?: string | null;
   rawAiDueDate?: string | null;
   normalizedAiDueDate?: string | null;
   scopeSummary?: string | null;
@@ -104,6 +105,40 @@ export default function CalendarScheduleView({
   const [showWeekends, setShowWeekends] = useState<boolean>(true);
   const [showUnscheduledDrawer, setShowUnscheduledDrawer] = useState<boolean>(false);
   const [isAssigningInline, setIsAssigningInline] = useState<Record<string, boolean>>({});
+  const [draggedBidId, setDraggedBidId] = useState<string | null>(null);
+  const [dragOverYmd, setDragOverYmd] = useState<string | null>(null);
+
+  const parseDueTimeMinutes = (timeStr?: string | null): number => {
+    if (!timeStr) return 9999;
+    const match = timeStr.trim().match(/^(\d{1,2})(?::(\d{2}))?\s*(AM|PM)?$/i);
+    if (!match) return 9999;
+    let hours = parseInt(match[1], 10);
+    const mins = parseInt(match[2] || '0', 10);
+    const meridiem = match[3]?.toUpperCase();
+    if (meridiem === 'PM' && hours < 12) hours += 12;
+    if (meridiem === 'AM' && hours === 12) hours = 0;
+    return hours * 60 + mins;
+  };
+
+  const handleDropOnDay = async (e: React.DragEvent, targetYmd: string) => {
+    e.preventDefault();
+    setDragOverYmd(null);
+    const bidId = e.dataTransfer.getData('text/plain') || draggedBidId;
+    setDraggedBidId(null);
+    if (!bidId) return;
+
+    const bid = itbBids.find((b) => b.id === bidId);
+    if (!bid) return;
+    const currentYmd = bid.bidDueDate || bid.normalizedAiDueDate;
+    if (currentYmd === targetYmd) return;
+
+    setIsAssigningInline((prev) => ({ ...prev, [bid.id]: true }));
+    try {
+      await onAssignBid(bid.id, bid.assignedEstimator || '', targetYmd);
+    } finally {
+      setIsAssigningInline((prev) => ({ ...prev, [bid.id]: false }));
+    }
+  };
 
   // Navigation handlers
   const prevWeek = () => {
@@ -464,26 +499,44 @@ export default function CalendarScheduleView({
           >
             {weekDays.map((day) => {
               const allDayBids = bidsByDate[day.ymd] || [];
-              const dayBids = allDayBids.filter((b) => {
-                if (filterEstimator === 'ALL') return true;
-                if (filterEstimator === 'Unassigned') {
-                  return (!b.assignedEstimator || b.assignedEstimator === '') && b.estimatorStatus !== 'no_bid';
-                }
-                if (filterEstimator === 'Not Bidding') {
-                  return (
-                    b.assignedEstimator === 'Not Bidding' ||
-                    b.assignedEstimator === 'No Bid' ||
-                    b.estimatorStatus === 'no_bid'
-                  );
-                }
-                return b.assignedEstimator === filterEstimator;
-              });
+              const dayBids = allDayBids
+                .filter((b) => {
+                  if (filterEstimator === 'ALL') return true;
+                  if (filterEstimator === 'Unassigned') {
+                    return (!b.assignedEstimator || b.assignedEstimator === '') && b.estimatorStatus !== 'no_bid';
+                  }
+                  if (filterEstimator === 'Not Bidding') {
+                    return (
+                      b.assignedEstimator === 'Not Bidding' ||
+                      b.assignedEstimator === 'No Bid' ||
+                      b.estimatorStatus === 'no_bid'
+                    );
+                  }
+                  return b.assignedEstimator === filterEstimator;
+                })
+                .sort((a, b) => parseDueTimeMinutes(a.bidDueTime) - parseDueTimeMinutes(b.bidDueTime));
+
+              const isDragTarget = dragOverYmd === day.ymd;
 
               return (
                 <div
                   key={day.ymd}
-                  className={`flex flex-col min-h-[580px] max-h-[calc(100vh-280px)] ${
-                    day.isToday ? 'bg-blue-50/20' : day.isWeekend ? 'bg-slate-50/40' : 'bg-white'
+                  onDragOver={(e) => {
+                    e.preventDefault();
+                    if (dragOverYmd !== day.ymd) setDragOverYmd(day.ymd);
+                  }}
+                  onDragLeave={() => {
+                    if (dragOverYmd === day.ymd) setDragOverYmd(null);
+                  }}
+                  onDrop={(e) => handleDropOnDay(e, day.ymd)}
+                  className={`flex flex-col min-h-[580px] max-h-[calc(100vh-280px)] transition-colors ${
+                    isDragTarget
+                      ? 'bg-blue-50/90 ring-2 ring-inset ring-blue-400'
+                      : day.isToday
+                      ? 'bg-blue-50/20'
+                      : day.isWeekend
+                      ? 'bg-slate-50/40'
+                      : 'bg-white'
                   }`}
                 >
                   {/* Column Header: Day Name, Date & Count */}
@@ -546,11 +599,23 @@ export default function CalendarScheduleView({
                         return (
                           <div
                             key={bid.id}
+                            draggable
+                            onDragStart={(e) => {
+                              setDraggedBidId(bid.id);
+                              e.dataTransfer.setData('text/plain', bid.id);
+                              e.dataTransfer.effectAllowed = 'move';
+                            }}
+                            onDragEnd={() => {
+                              setDraggedBidId(null);
+                              setDragOverYmd(null);
+                            }}
                             style={{
                               borderLeftColor: estColor.primaryColor,
                               backgroundColor: isNotBidding ? 'rgba(241, 245, 249, 0.95)' : undefined,
                             }}
-                            className={`p-3 rounded-xl border ${
+                            className={`p-3 rounded-xl border cursor-grab active:cursor-grabbing ${
+                              draggedBidId === bid.id ? 'opacity-50 ring-2 ring-blue-400' : ''
+                            } ${
                               isNotBidding
                                 ? 'bg-slate-100/90 text-slate-600'
                                 : 'bg-white hover:bg-slate-50/90'
@@ -641,6 +706,40 @@ export default function CalendarScheduleView({
                               </div>
                             )}
 
+                            {/* Due Time & Handoff Readiness Indicators */}
+                            <div className="flex flex-wrap items-center gap-1 pt-0.5">
+                              {bid.bidDueTime && (
+                                <span className="text-[10px] font-bold px-1.5 py-0.5 rounded bg-indigo-50 text-indigo-800 border border-indigo-200 flex items-center gap-1">
+                                  <Clock className="w-2.5 h-2.5 text-indigo-600" />
+                                  <span>{bid.bidDueTime}</span>
+                                </span>
+                              )}
+                              {!isNotBidding && (
+                                <>
+                                  <span
+                                    className={`text-[9px] font-bold px-1.5 py-0.5 rounded border ${
+                                      bid.attachmentsCount && bid.attachmentsCount > 0
+                                        ? 'bg-emerald-50 text-emerald-700 border-emerald-200'
+                                        : 'bg-slate-50 text-slate-400 border-slate-200'
+                                    }`}
+                                    title={bid.attachmentsCount ? `${bid.attachmentsCount} document(s) attached` : 'No documents attached yet'}
+                                  >
+                                    {bid.attachmentsCount ? '✓ Docs' : '○ Docs'}
+                                  </span>
+                                  <span
+                                    className={`text-[9px] font-bold px-1.5 py-0.5 rounded border ${
+                                      bid.googleDriveFolderUrl
+                                        ? 'bg-emerald-50 text-emerald-700 border-emerald-200'
+                                        : 'bg-slate-50 text-slate-400 border-slate-200'
+                                    }`}
+                                    title={bid.googleDriveFolderUrl ? 'Google Drive folder linked' : 'Google Drive folder not linked yet'}
+                                  >
+                                    {bid.googleDriveFolderUrl ? '✓ Drive' : '○ Drive'}
+                                  </span>
+                                </>
+                              )}
+                            </div>
+
                             {/* Estimator Assignment & Inline Selector */}
                             <div className="pt-2 border-t border-slate-100 flex items-center justify-between gap-1 text-[10px]">
                               <div className="flex-1 min-w-0">
@@ -721,7 +820,17 @@ export default function CalendarScheduleView({
                 return (
                   <div
                     key={bid.id}
-                    className="p-3.5 bg-white rounded-xl border border-amber-200/80 shadow-2xs space-y-2.5 flex flex-col justify-between"
+                    draggable
+                    onDragStart={(e) => {
+                      setDraggedBidId(bid.id);
+                      e.dataTransfer.setData('text/plain', bid.id);
+                      e.dataTransfer.effectAllowed = 'move';
+                    }}
+                    onDragEnd={() => {
+                      setDraggedBidId(null);
+                      setDragOverYmd(null);
+                    }}
+                    className="p-3.5 bg-white rounded-xl border border-amber-200/80 shadow-2xs space-y-2.5 flex flex-col justify-between cursor-grab active:cursor-grabbing"
                   >
                     <div>
                       <div className="flex items-center justify-between text-[11px] mb-1">

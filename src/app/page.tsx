@@ -82,6 +82,7 @@ interface DisplayBidRequest {
   priority: 'low' | 'normal' | 'high' | 'urgent';
   assignedEstimator: string | null;
   bidDueDate?: string | null;
+  bidDueTime?: string | null;
   rawAiDueDate?: string | null;
   normalizedAiDueDate?: string | null;
   isDueDateRevised?: boolean;
@@ -225,6 +226,17 @@ export default function DispatchDashboard() {
     original: DisplayBidRequest;
   } | null>(null);
 
+  // Auto-Refresh & Inline Bid Details Editing State
+  const [autoRefreshEnabled, setAutoRefreshEnabled] = useState(true);
+  const [isEditingBidDetails, setIsEditingBidDetails] = useState(false);
+  const [editProjectName, setEditProjectName] = useState('');
+  const [editClientCompany, setEditClientCompany] = useState('');
+  const [editProjectCity, setEditProjectCity] = useState('');
+  const [editProjectState, setEditProjectState] = useState('');
+  const [editBidDueDate, setEditBidDueDate] = useState('');
+  const [editBidDueTime, setEditBidDueTime] = useState('');
+  const [isSavingBidDetails, setIsSavingBidDetails] = useState(false);
+
   const toggleEmailDropdown = (id: string) => {
     setExpandedEmails((prev) => ({
       ...prev,
@@ -321,6 +333,7 @@ export default function DispatchDashboard() {
             priority: r.priority || 'normal',
             assignedEstimator: assignedName,
             bidDueDate,
+            bidDueTime: r.bid_due_time || r.raw_payload?.bid_due_time || null,
             rawAiDueDate,
             normalizedAiDueDate,
             isDueDateRevised,
@@ -375,6 +388,60 @@ export default function DispatchDashboard() {
       }
     }
   }, []);
+
+  // Auto-refresh live inbox every 60 seconds when enabled
+  useEffect(() => {
+    if (!autoRefreshEnabled) return;
+    const timer = setInterval(() => {
+      fetchLiveBids();
+    }, 60000);
+    return () => clearInterval(timer);
+  }, [autoRefreshEnabled]);
+
+  useEffect(() => {
+    setIsEditingBidDetails(false);
+  }, [selectedEmailId]);
+
+  const openEditBidDetails = (bid: DisplayBidRequest) => {
+    setEditProjectName(bid.projectName || '');
+    setEditClientCompany(bid.clientCompany || '');
+    const addrParts = (bid.projectAddress || '').split(',').map((s) => s.trim());
+    setEditProjectCity(addrParts.length >= 2 ? addrParts[addrParts.length - 2] : addrParts[0] || '');
+    setEditProjectState(addrParts.length >= 2 ? addrParts[addrParts.length - 1] : '');
+    setEditBidDueDate(bid.bidDueDate || bid.normalizedAiDueDate || '');
+    setEditBidDueTime(bid.bidDueTime || '');
+    setIsEditingBidDetails(true);
+  };
+
+  const handleSaveBidDetails = async (bidId: string) => {
+    setIsSavingBidDetails(true);
+    try {
+      const res = await fetch(`/api/bid-requests/${bidId}`, {
+        method: 'PATCH',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          projectName: editProjectName.trim() || null,
+          clientCompany: editClientCompany.trim() || null,
+          projectAddressCity: editProjectCity.trim() || null,
+          projectAddressState: editProjectState.trim() || null,
+          bidDueDate: editBidDueDate || null,
+          bidDueTime: editBidDueTime.trim() || null,
+        }),
+      });
+      if (res.ok) {
+        showToast('✔ Bid details updated!');
+        setIsEditingBidDetails(false);
+        await fetchLiveBids();
+      } else {
+        const err = await res.json();
+        showToast(`Failed to save details: ${err.error || 'Server error'}`);
+      }
+    } catch (e: any) {
+      showToast(`Error: ${e.message}`);
+    } finally {
+      setIsSavingBidDetails(false);
+    }
+  };
 
   // Distinct list of active ITBs with numbers
   const activeITBsWithNumbers = useMemo(() => {
@@ -1856,39 +1923,191 @@ export default function DispatchDashboard() {
                 </p>
               </div>
 
-              <div className="bg-white/5 rounded-xl p-3 border border-white/10 space-y-1">
-                <span className="font-bold text-blue-300 flex items-center gap-1.5">
-                  <Briefcase className="w-3.5 h-3.5 text-blue-400" />
-                  Project & Contractor Details:
-                </span>
-                <div className="text-slate-200 text-[11px] space-y-0.5">
-                  <div>
-                    GC / Sender:{' '}
-                    <strong className="text-white">
-                      {selectedBid.clientCompany || selectedBid.originalSenderName || selectedBid.senderName}
-                    </strong>
-                  </div>
-                  {selectedBid.projectName && (
-                    <div>
-                      Project Name:{' '}
-                      <strong className="text-white">{selectedBid.projectName}</strong>
-                    </div>
-                  )}
-                  {selectedBid.projectAddress && (
-                    <div>
-                      Address:{' '}
-                      <strong className="text-white">{selectedBid.projectAddress}</strong>
-                    </div>
-                  )}
-                  {selectedBid.jobCode && (
-                    <div>
-                      Job Code:{' '}
-                      <span className="font-mono text-amber-300">{selectedBid.jobCode}</span>
+              <div className="bg-white/5 rounded-xl p-3 border border-white/10 space-y-2">
+                <div className="flex items-center justify-between gap-2">
+                  <span className="font-bold text-blue-300 flex items-center gap-1.5">
+                    <Briefcase className="w-3.5 h-3.5 text-blue-400" />
+                    Project & Contractor Details:
+                  </span>
+                  {!isEditingBidDetails ? (
+                    <button
+                      type="button"
+                      onClick={() => openEditBidDetails(selectedBid)}
+                      className="text-[10px] font-bold px-2 py-0.5 rounded bg-white/10 hover:bg-white/20 text-blue-200 border border-white/15 transition-colors"
+                    >
+                      ✏️ Edit Details
+                    </button>
+                  ) : (
+                    <div className="flex items-center gap-1.5">
+                      <button
+                        type="button"
+                        onClick={() => setIsEditingBidDetails(false)}
+                        className="text-[10px] font-bold px-2 py-0.5 rounded bg-white/10 hover:bg-white/20 text-slate-300"
+                      >
+                        Cancel
+                      </button>
+                      <button
+                        type="button"
+                        disabled={isSavingBidDetails}
+                        onClick={() => handleSaveBidDetails(selectedBid.id)}
+                        className="text-[10px] font-bold px-2.5 py-0.5 rounded bg-emerald-500 hover:bg-emerald-400 text-slate-950 disabled:opacity-50"
+                      >
+                        {isSavingBidDetails ? 'Saving...' : 'Save'}
+                      </button>
                     </div>
                   )}
                 </div>
+
+                {isEditingBidDetails ? (
+                  <div className="grid grid-cols-1 sm:grid-cols-2 gap-2 pt-1 text-[11px]">
+                    <div className="sm:col-span-2">
+                      <label className="text-[10px] text-slate-400 block mb-0.5">Project Name</label>
+                      <input
+                        type="text"
+                        value={editProjectName}
+                        onChange={(e) => setEditProjectName(e.target.value)}
+                        placeholder="Project Name..."
+                        className="w-full px-2 py-1 rounded bg-slate-900 border border-slate-700 text-white text-[11px]"
+                      />
+                    </div>
+                    <div className="sm:col-span-2">
+                      <label className="text-[10px] text-slate-400 block mb-0.5">Contractor / GC</label>
+                      <input
+                        type="text"
+                        value={editClientCompany}
+                        onChange={(e) => setEditClientCompany(e.target.value)}
+                        placeholder="General Contractor..."
+                        className="w-full px-2 py-1 rounded bg-slate-900 border border-slate-700 text-white text-[11px]"
+                      />
+                    </div>
+                    <div>
+                      <label className="text-[10px] text-slate-400 block mb-0.5">City</label>
+                      <input
+                        type="text"
+                        value={editProjectCity}
+                        onChange={(e) => setEditProjectCity(e.target.value)}
+                        placeholder="City"
+                        className="w-full px-2 py-1 rounded bg-slate-900 border border-slate-700 text-white text-[11px]"
+                      />
+                    </div>
+                    <div>
+                      <label className="text-[10px] text-slate-400 block mb-0.5">State</label>
+                      <input
+                        type="text"
+                        value={editProjectState}
+                        onChange={(e) => setEditProjectState(e.target.value)}
+                        placeholder="State"
+                        className="w-full px-2 py-1 rounded bg-slate-900 border border-slate-700 text-white text-[11px]"
+                      />
+                    </div>
+                    <div>
+                      <label className="text-[10px] text-slate-400 block mb-0.5">Due Date</label>
+                      <input
+                        type="date"
+                        value={editBidDueDate}
+                        onChange={(e) => setEditBidDueDate(e.target.value)}
+                        className="w-full px-2 py-1 rounded bg-slate-900 border border-slate-700 text-white text-[11px]"
+                      />
+                    </div>
+                    <div>
+                      <label className="text-[10px] text-slate-400 block mb-0.5">Bid Time (e.g. 2:00 PM)</label>
+                      <input
+                        type="text"
+                        value={editBidDueTime}
+                        onChange={(e) => setEditBidDueTime(e.target.value)}
+                        placeholder="2:00 PM"
+                        className="w-full px-2 py-1 rounded bg-slate-900 border border-slate-700 text-white text-[11px]"
+                      />
+                    </div>
+                  </div>
+                ) : (
+                  <div className="text-slate-200 text-[11px] space-y-0.5">
+                    <div>
+                      GC / Sender:{' '}
+                      <strong className="text-white">
+                        {selectedBid.clientCompany || selectedBid.originalSenderName || selectedBid.senderName}
+                      </strong>
+                    </div>
+                    {selectedBid.projectName && (
+                      <div>
+                        Project Name:{' '}
+                        <strong className="text-white">{selectedBid.projectName}</strong>
+                      </div>
+                    )}
+                    {selectedBid.projectAddress && (
+                      <div>
+                        Address:{' '}
+                        <strong className="text-white">{selectedBid.projectAddress}</strong>
+                      </div>
+                    )}
+                    {(selectedBid.bidDueDate || selectedBid.bidDueTime) && (
+                      <div>
+                        Bid Deadline:{' '}
+                        <strong className="text-amber-300">
+                          {selectedBid.bidDueDate ? formatFriendlyDate(selectedBid.bidDueDate) : 'Unscheduled'}
+                          {selectedBid.bidDueTime ? ` @ ${selectedBid.bidDueTime}` : ''}
+                        </strong>
+                      </div>
+                    )}
+                    {selectedBid.jobCode && (
+                      <div>
+                        Job Code:{' '}
+                        <span className="font-mono text-amber-300">{selectedBid.jobCode}</span>
+                      </div>
+                    )}
+                  </div>
+                )}
               </div>
             </div>
+
+            {/* Handoff Readiness Checklist Strip (for ITBs) */}
+            {selectedBid.sticker === 'ITB' && (
+              <div className="flex flex-wrap items-center gap-2 pt-2 border-t border-white/10 text-[11px]">
+                <span className="text-slate-400 font-bold uppercase tracking-wider text-[10px]">
+                  Handoff Readiness:
+                </span>
+                <span
+                  className={`px-2 py-0.5 rounded-full font-bold border ${
+                    selectedBid.assignedEstimator
+                      ? 'bg-emerald-500/20 text-emerald-200 border-emerald-400/30'
+                      : 'bg-rose-500/15 text-rose-200 border-rose-400/30'
+                  }`}
+                >
+                  {selectedBid.assignedEstimator ? `✓ Estimator: ${selectedBid.assignedEstimator}` : '○ Needs Estimator'}
+                </span>
+                <span
+                  className={`px-2 py-0.5 rounded-full font-bold border ${
+                    selectedBid.bidDueDate || selectedBid.normalizedAiDueDate
+                      ? 'bg-emerald-500/20 text-emerald-200 border-emerald-400/30'
+                      : 'bg-amber-500/15 text-amber-200 border-amber-400/30'
+                  }`}
+                >
+                  {selectedBid.bidDueDate || selectedBid.normalizedAiDueDate
+                    ? `✓ Due ${formatFriendlyDate(selectedBid.bidDueDate || selectedBid.normalizedAiDueDate)}${selectedBid.bidDueTime ? ` ${selectedBid.bidDueTime}` : ''}`
+                    : '○ Needs Due Date'}
+                </span>
+                <span
+                  className={`px-2 py-0.5 rounded-full font-bold border ${
+                    selectedBid.attachmentsCount > 0
+                      ? 'bg-emerald-500/20 text-emerald-200 border-emerald-400/30'
+                      : 'bg-white/5 text-slate-300 border-white/15'
+                  }`}
+                >
+                  {selectedBid.attachmentsCount > 0
+                    ? `✓ ${selectedBid.attachmentsCount} Doc${selectedBid.attachmentsCount === 1 ? '' : 's'} Attached`
+                    : '○ No Docs Attached'}
+                </span>
+                <span
+                  className={`px-2 py-0.5 rounded-full font-bold border ${
+                    selectedBid.googleDriveFolderUrl
+                      ? 'bg-emerald-500/20 text-emerald-200 border-emerald-400/30'
+                      : 'bg-white/5 text-slate-300 border-white/15'
+                  }`}
+                >
+                  {selectedBid.googleDriveFolderUrl ? '✓ Drive Linked' : '○ Drive Not Linked'}
+                </span>
+              </div>
+            )}
           </div>
 
           {/* BID DOCUMENTS & GOOGLE DRIVE MANAGER */}
@@ -1967,6 +2186,24 @@ export default function DispatchDashboard() {
             >
               <RefreshCw className={`w-3.5 h-3.5 ${isLoading ? 'animate-spin' : ''}`} />
               Refresh
+            </button>
+
+            <button
+              type="button"
+              onClick={() => setAutoRefreshEnabled((prev) => !prev)}
+              title="Toggle automatic 60-second inbox refresh"
+              className={`px-2.5 py-2 rounded-lg text-xs font-semibold transition-all flex items-center gap-1.5 border ${
+                autoRefreshEnabled
+                  ? 'bg-emerald-500/20 text-emerald-200 border-emerald-400/30 hover:bg-emerald-500/30'
+                  : 'bg-white/5 text-slate-300 border-white/10 hover:bg-white/10'
+              }`}
+            >
+              <span
+                className={`w-2 h-2 rounded-full ${
+                  autoRefreshEnabled ? 'bg-emerald-400 animate-pulse' : 'bg-slate-500'
+                }`}
+              />
+              <span>Auto 60s</span>
             </button>
 
             <Link
