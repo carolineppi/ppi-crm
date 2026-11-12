@@ -11,11 +11,13 @@ import {
   Sparkles,
   CheckCircle,
   AlertCircle,
-  FileText,
-  Hash,
+  Building2,
   Filter,
   ArrowRight,
-  ExternalLink,
+  Paperclip,
+  Check,
+  CalendarDays,
+  Layers,
 } from 'lucide-react';
 import {
   formatFriendlyDate,
@@ -31,7 +33,7 @@ export interface CalendarBidItem {
   senderName: string;
   senderEmail: string;
   receivedAt: string;
-  sticker: 'ITB' | 'Addendum' | 'Won' | 'Lost' | 'Spam' | 'General';
+  sticker: string;
   assignedEstimator: string | null;
   bidDueDate?: string | null; // YYYY-MM-DD
   rawAiDueDate?: string | null;
@@ -39,6 +41,7 @@ export interface CalendarBidItem {
   scopeSummary?: string | null;
   projectName?: string | null;
   clientCompany?: string | null;
+  projectAddress?: string | null;
   attachmentsCount?: number;
   [key: string]: any;
 }
@@ -50,58 +53,134 @@ interface CalendarScheduleViewProps {
   onAssignBid: (bidId: string, estimator: string, dueDate: string | null) => Promise<void>;
 }
 
+/**
+ * Returns Monday of the week for any given date
+ */
+function getMondayOfWeek(d: Date): Date {
+  const date = new Date(d);
+  const day = date.getDay(); // 0 is Sunday, 1 is Monday...
+  const diff = date.getDate() - day + (day === 0 ? -6 : 1);
+  const monday = new Date(date);
+  monday.setDate(diff);
+  monday.setHours(0, 0, 0, 0);
+  return monday;
+}
+
 export default function CalendarScheduleView({
   bids,
   estimators,
   onSelectBid,
   onAssignBid,
 }: CalendarScheduleViewProps) {
-  // Determine starting month: pick the month with active bids, or current month (November 2026)
-  const [currentDate, setCurrentDate] = useState(() => {
-    // If bids have dates, default to November 2026 or current active month
-    const validBid = bids.find((b) => b.bidDueDate);
-    if (validBid && validBid.bidDueDate) {
-      const [y, m] = validBid.bidDueDate.split('-').map(Number);
-      return new Date(y, m - 1, 1);
+  // 1. STRICT FILTER: Only ITBs in the calendar view
+  const itbBids = useMemo(() => {
+    return bids.filter((b) => {
+      const isITB = b.sticker === 'ITB' || b.email_intent === 'invitation_to_bid';
+      if (!isITB) return false;
+      if (b.sticker === 'Spam' || b.filterStatus === 'auto_filtered') return false;
+      return true;
+    });
+  }, [bids]);
+
+  // Determine starting reference date: pick current week or week with active ITB dates
+  const [currentDate, setCurrentDate] = useState<Date>(() => {
+    // Current simulated date is in November 2026
+    const now = new Date();
+    // Check if bids have dates in November 2026
+    const hasActiveBids = itbBids.some((b) => b.bidDueDate);
+    if (hasActiveBids) {
+      const sample = itbBids.find((b) => b.bidDueDate && b.bidDueDate.startsWith('2026-11'));
+      if (sample && sample.bidDueDate) {
+        const [y, m, d] = sample.bidDueDate.split('-').map(Number);
+        return new Date(y, m - 1, d);
+      }
     }
-    return new Date();
+    return now;
   });
 
   const [filterEstimator, setFilterEstimator] = useState<string>('ALL');
-  const [showUnscheduledDrawer, setShowUnscheduledDrawer] = useState(false);
+  const [showWeekends, setShowWeekends] = useState<boolean>(true);
+  const [showUnscheduledDrawer, setShowUnscheduledDrawer] = useState<boolean>(false);
+  const [isAssigningInline, setIsAssigningInline] = useState<Record<string, boolean>>({});
 
-  const year = currentDate.getFullYear();
-  const month = currentDate.getMonth();
-
-  const monthName = currentDate.toLocaleString('default', { month: 'long', year: 'numeric' });
-
-  const prevMonth = () => {
-    setCurrentDate(new Date(year, month - 1, 1));
+  // Navigation handlers
+  const prevWeek = () => {
+    const next = new Date(currentDate);
+    next.setDate(next.getDate() - 7);
+    setCurrentDate(next);
   };
 
-  const nextMonth = () => {
-    setCurrentDate(new Date(year, month + 1, 1));
+  const nextWeek = () => {
+    const next = new Date(currentDate);
+    next.setDate(next.getDate() + 7);
+    setCurrentDate(next);
   };
 
   const jumpToToday = () => {
     setCurrentDate(new Date());
   };
 
-  // 1. Group bids by YYYY-MM-DD
-  const { bidsByDate, unscheduledBids, monthEstimatorCounts } = useMemo(() => {
+  // 2. Generate the 5-day or 7-day Week Columns
+  const mondayOfWeek = useMemo(() => getMondayOfWeek(currentDate), [currentDate]);
+
+  const todayYmd = useMemo(() => {
+    const t = new Date();
+    return `${t.getFullYear()}-${String(t.getMonth() + 1).padStart(2, '0')}-${String(t.getDate()).padStart(2, '0')}`;
+  }, []);
+
+  const weekDays = useMemo(() => {
+    const days = [];
+    const count = showWeekends ? 7 : 5;
+
+    for (let i = 0; i < count; i++) {
+      const d = new Date(mondayOfWeek);
+      d.setDate(mondayOfWeek.getDate() + i);
+      const ymd = `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
+      days.push({
+        date: d,
+        ymd,
+        dayOfWeek: d.toLocaleDateString('en-US', { weekday: 'short' }),
+        dayFullName: d.toLocaleDateString('en-US', { weekday: 'long' }),
+        formattedDate: d.toLocaleDateString('en-US', { month: 'short', day: 'numeric' }),
+        dateNumber: d.getDate(),
+        isToday: ymd === todayYmd,
+        isWeekend: d.getDay() === 0 || d.getDay() === 6,
+      });
+    }
+
+    return days;
+  }, [mondayOfWeek, showWeekends, todayYmd]);
+
+  // Week range label (e.g. "Nov 9 – Nov 15, 2026")
+  const weekRangeLabel = useMemo(() => {
+    const start = weekDays[0].date;
+    const end = weekDays[weekDays.length - 1].date;
+
+    const startMonth = start.toLocaleDateString('en-US', { month: 'short' });
+    const endMonth = end.toLocaleDateString('en-US', { month: 'short' });
+    const year = end.getFullYear();
+
+    if (startMonth === endMonth) {
+      return `${startMonth} ${start.getDate()} – ${end.getDate()}, ${year}`;
+    }
+    return `${startMonth} ${start.getDate()} – ${endMonth} ${end.getDate()}, ${year}`;
+  }, [weekDays]);
+
+  // 3. Group ITBs by YYYY-MM-DD & Compute Week Estimator Workload
+  const { bidsByDate, unscheduledBids, weekEstimatorCounts, totalScheduledThisWeek } = useMemo(() => {
     const byDate: Record<string, CalendarBidItem[]> = {};
     const unscheduled: CalendarBidItem[] = [];
     const estimatorCounts: Record<string, number> = {
-      'Unassigned': 0,
+      Unassigned: 0,
     };
     estimators.forEach((est) => {
       estimatorCounts[est] = 0;
     });
 
-    bids.forEach((bid) => {
-      // We primarily track ITBs and active bids
-      if (bid.sticker === 'Spam') return;
+    const weekYmdSet = new Set(weekDays.map((w) => w.ymd));
+    let scheduledThisWeek = 0;
 
+    itbBids.forEach((bid) => {
       const effectiveDate = bid.bidDueDate || bid.normalizedAiDueDate;
 
       if (!effectiveDate) {
@@ -112,82 +191,44 @@ export default function CalendarScheduleView({
       byDate[effectiveDate] = byDate[effectiveDate] || [];
       byDate[effectiveDate].push(bid);
 
-      // If bid falls in currently viewed month, count it for workload summary
-      const [bYear, bMonth] = effectiveDate.split('-').map(Number);
-      if (bYear === year && bMonth === month + 1) {
+      // If bid falls within currently viewed week, increment workload stats
+      if (weekYmdSet.has(effectiveDate)) {
+        scheduledThisWeek++;
         const est = bid.assignedEstimator || 'Unassigned';
         estimatorCounts[est] = (estimatorCounts[est] || 0) + 1;
       }
     });
 
-    return { bidsByDate: byDate, unscheduledBids: unscheduled, monthEstimatorCounts: estimatorCounts };
-  }, [bids, estimators, year, month]);
+    return {
+      bidsByDate: byDate,
+      unscheduledBids: unscheduled,
+      weekEstimatorCounts: estimatorCounts,
+      totalScheduledThisWeek: scheduledThisWeek,
+    };
+  }, [itbBids, estimators, weekDays]);
 
-  // 2. Generate Calendar Matrix (Weeks x 7 Days)
-  const calendarDays = useMemo(() => {
-    const firstDayIndex = new Date(year, month, 1).getDay(); // 0 = Sun, 1 = Mon...
-    const daysInCurrentMonth = new Date(year, month + 1, 0).getDate();
-    const daysInPrevMonth = new Date(year, month, 0).getDate();
-
-    const days = [];
-
-    // Previous month padding days
-    for (let i = firstDayIndex - 1; i >= 0; i--) {
-      const dayNum = daysInPrevMonth - i;
-      const prevDate = new Date(year, month - 1, dayNum);
-      const ymd = `${prevDate.getFullYear()}-${String(prevDate.getMonth() + 1).padStart(2, '0')}-${String(dayNum).padStart(2, '0')}`;
-      days.push({
-        dateNumber: dayNum,
-        ymd,
-        isCurrentMonth: false,
-        isToday: false,
-      });
+  // Inline Quick Estimator Reassignment
+  const handleInlineAssign = async (e: React.ChangeEvent<HTMLSelectElement>, bid: CalendarBidItem) => {
+    const newEstimator = e.target.value;
+    setIsAssigningInline((prev) => ({ ...prev, [bid.id]: true }));
+    try {
+      await onAssignBid(bid.id, newEstimator, bid.bidDueDate || bid.normalizedAiDueDate || null);
+    } finally {
+      setIsAssigningInline((prev) => ({ ...prev, [bid.id]: false }));
     }
-
-    // Current month days
-    const today = new Date();
-    const todayYmd = `${today.getFullYear()}-${String(today.getMonth() + 1).padStart(2, '0')}-${String(today.getDate()).padStart(2, '0')}`;
-
-    for (let dayNum = 1; dayNum <= daysInCurrentMonth; dayNum++) {
-      const ymd = `${year}-${String(month + 1).padStart(2, '0')}-${String(dayNum).padStart(2, '0')}`;
-      days.push({
-        dateNumber: dayNum,
-        ymd,
-        isCurrentMonth: true,
-        isToday: ymd === todayYmd,
-      });
-    }
-
-    // Next month padding days to complete full 7-day rows (up to 35 or 42)
-    const remaining = (7 - (days.length % 7)) % 7;
-    for (let dayNum = 1; dayNum <= remaining; dayNum++) {
-      const nextDate = new Date(year, month + 1, dayNum);
-      const ymd = `${nextDate.getFullYear()}-${String(nextDate.getMonth() + 1).padStart(2, '0')}-${String(dayNum).padStart(2, '0')}`;
-      days.push({
-        dateNumber: dayNum,
-        ymd,
-        isCurrentMonth: false,
-        isToday: false,
-      });
-    }
-
-    return days;
-  }, [year, month]);
-
-  // Total scheduled bids this month
-  const totalScheduledInMonth = Object.values(monthEstimatorCounts).reduce((a, b) => a + b, 0);
+  };
 
   return (
     <div className="space-y-4">
-      {/* Top Header & Calendar Toolbar */}
-      <div className="bg-white p-4 rounded-2xl border border-slate-200 shadow-sm flex flex-col md:flex-row md:items-center justify-between gap-4">
-        {/* Left: Month Navigation */}
+      {/* Top Header & Week Toolbar */}
+      <div className="bg-white p-4 rounded-2xl border border-slate-200 shadow-xs flex flex-col lg:flex-row lg:items-center justify-between gap-4">
+        {/* Left: Week Navigation Controls */}
         <div className="flex items-center gap-3">
-          <div className="flex items-center bg-slate-100 p-1 rounded-xl border border-slate-200">
+          <div className="flex items-center bg-slate-100 p-1 rounded-xl border border-slate-200 shadow-2xs">
             <button
-              onClick={prevMonth}
+              onClick={prevWeek}
               className="p-1.5 hover:bg-white rounded-lg text-slate-700 transition-colors shadow-2xs"
-              title="Previous Month"
+              title="Previous Week"
             >
               <ChevronLeft className="w-5 h-5" />
             </button>
@@ -195,84 +236,77 @@ export default function CalendarScheduleView({
               onClick={jumpToToday}
               className="px-3 py-1 text-xs font-bold text-slate-700 hover:bg-white rounded-lg transition-colors shadow-2xs"
             >
-              Today
+              This Week
             </button>
             <button
-              onClick={nextMonth}
+              onClick={nextWeek}
               className="p-1.5 hover:bg-white rounded-lg text-slate-700 transition-colors shadow-2xs"
-              title="Next Month"
+              title="Next Week"
             >
               <ChevronRight className="w-5 h-5" />
             </button>
           </div>
 
           <div>
-            <h2 className="text-xl font-bold text-slate-900 tracking-tight flex items-center gap-2">
-              <CalendarIcon className="w-5 h-5 text-blue-600" />
-              {monthName}
+            <h2 className="text-lg sm:text-xl font-bold text-slate-900 tracking-tight flex items-center gap-2">
+              <CalendarDays className="w-5 h-5 text-blue-600" />
+              <span>{weekRangeLabel}</span>
             </h2>
-            <span className="text-xs text-slate-500 font-medium">
-              {totalScheduledInMonth} Bid{totalScheduledInMonth === 1 ? '' : 's'} Due This Month
-            </span>
+            <div className="flex items-center gap-2 text-xs text-slate-500 font-medium">
+              <span className="font-semibold text-slate-700">
+                {totalScheduledThisWeek} Bid{totalScheduledThisWeek === 1 ? '' : 's'} Due This Week
+              </span>
+              <span>•</span>
+              <span>Only ITBs</span>
+            </div>
           </div>
         </div>
 
-        {/* Right: Estimator Filter Pills & Unscheduled Trigger */}
-        <div className="flex items-center gap-2 flex-wrap">
-          <div className="flex items-center gap-1.5 bg-slate-100 p-1 rounded-xl border border-slate-200 text-xs">
-            <span className="text-slate-400 font-bold px-2 uppercase text-[10px] tracking-wider">
-              Estimator:
-            </span>
-
+        {/* Center / Right: View Toggle, Estimator Filter & Unscheduled Drawer Trigger */}
+        <div className="flex items-center gap-2.5 flex-wrap">
+          {/* 5-Day vs 7-Day Toggle */}
+          <div className="flex items-center bg-slate-100 p-1 rounded-xl border border-slate-200 text-xs font-bold">
             <button
-              onClick={() => setFilterEstimator('ALL')}
-              className={`px-2.5 py-1 rounded-lg font-bold transition-all ${
-                filterEstimator === 'ALL'
-                  ? 'bg-slate-900 text-white shadow-xs'
+              type="button"
+              onClick={() => setShowWeekends(false)}
+              className={`px-2.5 py-1 rounded-lg transition-all ${
+                !showWeekends
+                  ? 'bg-white text-slate-900 shadow-2xs'
                   : 'text-slate-600 hover:text-slate-900'
               }`}
             >
-              All ({totalScheduledInMonth})
+              5-Day (Mon–Fri)
             </button>
-
-            {estimators.map((est) => {
-              const count = monthEstimatorCounts[est] || 0;
-              const color = getEstimatorColor(est);
-              const isSelected = filterEstimator === est;
-              return (
-                <button
-                  key={est}
-                  onClick={() => setFilterEstimator(est)}
-                  className={`px-2.5 py-1 rounded-lg font-semibold flex items-center gap-1.5 transition-all ${
-                    isSelected
-                      ? `${color.pillBg} ${color.pillText} border ${color.pillBorder} shadow-xs font-bold ring-2 ring-blue-300`
-                      : 'text-slate-600 hover:bg-white'
-                  }`}
-                >
-                  <span className={`w-2 h-2 rounded-full ${color.dotBg}`} />
-                  <span>{est.split(' ')[0]}</span>
-                  <span className="text-[10px] opacity-75 font-mono">({count})</span>
-                </button>
-              );
-            })}
-
             <button
-              onClick={() => setFilterEstimator('Unassigned')}
-              className={`px-2.5 py-1 rounded-lg font-semibold flex items-center gap-1.5 transition-all ${
-                filterEstimator === 'Unassigned'
-                  ? 'bg-rose-100 text-rose-900 border border-rose-300 shadow-xs font-bold ring-2 ring-rose-300'
-                  : 'text-slate-600 hover:bg-white'
+              type="button"
+              onClick={() => setShowWeekends(true)}
+              className={`px-2.5 py-1 rounded-lg transition-all ${
+                showWeekends
+                  ? 'bg-white text-slate-900 shadow-2xs'
+                  : 'text-slate-600 hover:text-slate-900'
               }`}
             >
-              <span className="w-2 h-2 rounded-full bg-rose-500" />
-              <span>Unassigned</span>
-              <span className="text-[10px] opacity-75 font-mono">
-                ({monthEstimatorCounts['Unassigned'] || 0})
-              </span>
+              7-Day (Full Week)
             </button>
           </div>
 
-          {/* Unscheduled Inbound Drawer Trigger */}
+          {/* Quick Date Picker */}
+          <div className="relative">
+            <input
+              type="date"
+              value={currentDate.toISOString().slice(0, 10)}
+              onChange={(e) => {
+                if (e.target.value) {
+                  const [y, m, d] = e.target.value.split('-').map(Number);
+                  setCurrentDate(new Date(y, m - 1, d));
+                }
+              }}
+              className="text-xs px-2.5 py-1.5 bg-slate-50 border border-slate-200 rounded-xl font-semibold text-slate-700 focus:outline-none focus:ring-2 focus:ring-blue-500 cursor-pointer"
+              title="Jump to specific date"
+            />
+          </div>
+
+          {/* Unscheduled Drawer Trigger */}
           <button
             onClick={() => setShowUnscheduledDrawer(!showUnscheduledDrawer)}
             className={`px-3 py-1.5 rounded-xl text-xs font-bold flex items-center gap-1.5 transition-all border ${
@@ -287,159 +321,250 @@ export default function CalendarScheduleView({
         </div>
       </div>
 
-      {/* Estimator Workload Balance Bar */}
-      <div className="bg-white p-3.5 rounded-xl border border-slate-200 shadow-sm grid grid-cols-2 sm:grid-cols-5 gap-3">
+      {/* Estimator Workload Balance Bar for This Week */}
+      <div className="bg-white p-3.5 rounded-2xl border border-slate-200 shadow-xs grid grid-cols-2 sm:grid-cols-3 md:grid-cols-6 gap-2.5 text-xs">
+        {/* ALL Filter Tab */}
+        <div
+          onClick={() => setFilterEstimator('ALL')}
+          className={`p-2 rounded-xl border transition-all cursor-pointer flex flex-col justify-between ${
+            filterEstimator === 'ALL'
+              ? 'bg-slate-900 text-white border-slate-900 shadow-xs'
+              : 'bg-slate-50/70 border-slate-200 hover:bg-slate-100/70 text-slate-700'
+          }`}
+        >
+          <div className="flex items-center justify-between">
+            <span className="font-bold flex items-center gap-1.5">
+              <Users className="w-3.5 h-3.5" />
+              <span>All Estimators</span>
+            </span>
+            <span
+              className={`font-mono font-black text-xs px-1.5 py-0.2 rounded ${
+                filterEstimator === 'ALL' ? 'bg-white/20 text-white' : 'bg-white text-slate-900 border border-slate-200'
+              }`}
+            >
+              {totalScheduledThisWeek}
+            </span>
+          </div>
+          <p className={`text-[10px] mt-1 ${filterEstimator === 'ALL' ? 'text-slate-300' : 'text-slate-500'}`}>
+            Full team schedule
+          </p>
+        </div>
+
+        {/* Each Named Estimator */}
         {estimators.map((est) => {
-          const count = monthEstimatorCounts[est] || 0;
+          const count = weekEstimatorCounts[est] || 0;
           const color = getEstimatorColor(est);
+          const isSelected = filterEstimator === est;
           return (
             <div
               key={est}
               onClick={() => setFilterEstimator(est)}
-              className={`p-2.5 rounded-lg border transition-all cursor-pointer ${
-                filterEstimator === est
-                  ? `${color.pillBg} border-${color.pillBorder} ring-2 ring-blue-300 shadow-xs`
+              className={`p-2 rounded-xl border transition-all cursor-pointer flex flex-col justify-between ${
+                isSelected
+                  ? `${color.pillBg} border-blue-400 ring-2 ring-blue-300 shadow-xs font-bold`
                   : 'bg-slate-50/70 border-slate-200 hover:bg-slate-100/70'
               }`}
             >
               <div className="flex items-center justify-between">
-                <span className="text-xs font-bold text-slate-800 flex items-center gap-1.5">
-                  <span className={`w-2.5 h-2.5 rounded-full ${color.dotBg}`} />
-                  {est}
+                <span className="font-bold text-slate-800 flex items-center gap-1.5 truncate">
+                  <span className={`w-2 h-2 rounded-full flex-shrink-0 ${color.dotBg}`} />
+                  <span className="truncate">{est.split(' ')[0]}</span>
                 </span>
-                <span className="text-xs font-black text-slate-900 font-mono bg-white px-2 py-0.5 rounded border border-slate-200 shadow-2xs">
+                <span className="font-mono font-black text-xs bg-white px-1.5 py-0.2 rounded border border-slate-200 text-slate-900 shadow-2xs">
                   {count}
                 </span>
               </div>
-              <p className="text-[10px] text-slate-500 mt-1">
-                {count === 0 ? 'No bids scheduled' : `${count} bid${count === 1 ? '' : 's'} assigned this month`}
+              <p className="text-[10px] text-slate-500 mt-1 truncate">
+                {count === 0 ? 'No bids this week' : `${count} bid${count === 1 ? '' : 's'} due`}
               </p>
             </div>
           );
         })}
 
+        {/* Unassigned / Needs Estimator */}
         <div
           onClick={() => setFilterEstimator('Unassigned')}
-          className={`p-2.5 rounded-lg border transition-all cursor-pointer ${
+          className={`p-2 rounded-xl border transition-all cursor-pointer flex flex-col justify-between ${
             filterEstimator === 'Unassigned'
               ? 'bg-rose-50 border-rose-300 ring-2 ring-rose-300 shadow-xs'
               : 'bg-slate-50/70 border-slate-200 hover:bg-slate-100/70'
           }`}
         >
           <div className="flex items-center justify-between">
-            <span className="text-xs font-bold text-slate-800 flex items-center gap-1.5">
-              <span className="w-2.5 h-2.5 rounded-full bg-rose-500" />
-              Needs Estimator
+            <span className="font-bold text-slate-800 flex items-center gap-1.5 truncate">
+              <span className="w-2 h-2 rounded-full bg-rose-500 flex-shrink-0" />
+              <span>Needs Estimator</span>
             </span>
-            <span className="text-xs font-black text-rose-700 font-mono bg-white px-2 py-0.5 rounded border border-slate-200 shadow-2xs">
-              {monthEstimatorCounts['Unassigned'] || 0}
+            <span className="font-mono font-black text-xs bg-white px-1.5 py-0.2 rounded border border-slate-200 text-rose-700 shadow-2xs">
+              {weekEstimatorCounts['Unassigned'] || 0}
             </span>
           </div>
-          <p className="text-[10px] text-slate-500 mt-1">
-            Scheduled dates with no estimator
+          <p className="text-[10px] text-slate-500 mt-1 truncate">
+            Scheduled, unassigned
           </p>
         </div>
       </div>
 
-      {/* Main 7-Column Calendar Grid */}
+      {/* Main Week Columns View */}
       <div className="bg-white rounded-2xl border border-slate-200 shadow-sm overflow-hidden">
-        {/* Day-of-week Column Headers */}
-        <div className="grid grid-cols-7 border-b border-slate-200 bg-slate-50/80 text-center text-xs font-bold text-slate-600">
-          {['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'].map((d) => (
-            <div key={d} className="py-2.5 border-r border-slate-200 last:border-r-0 uppercase tracking-wider text-[11px]">
-              {d}
-            </div>
-          ))}
-        </div>
+        {/* Horizontal scroll wrapper for small screens */}
+        <div className="overflow-x-auto">
+          <div
+            className={`grid divide-x divide-slate-200 min-w-[840px] ${
+              showWeekends ? 'grid-cols-7' : 'grid-cols-5'
+            }`}
+          >
+            {weekDays.map((day) => {
+              const allDayBids = bidsByDate[day.ymd] || [];
+              const dayBids = allDayBids.filter((b) => {
+                if (filterEstimator === 'ALL') return true;
+                if (filterEstimator === 'Unassigned') return !b.assignedEstimator;
+                return b.assignedEstimator === filterEstimator;
+              });
 
-        {/* Calendar Day Cells */}
-        <div className="grid grid-cols-7 divide-y divide-slate-200 border-b border-slate-200">
-          {calendarDays.map((day, idx) => {
-            const allDayBids = bidsByDate[day.ymd] || [];
-            const dayBids = allDayBids.filter((b) => {
-              if (filterEstimator === 'ALL') return true;
-              if (filterEstimator === 'Unassigned') return !b.assignedEstimator;
-              return b.assignedEstimator === filterEstimator;
-            });
-
-            return (
-              <div
-                key={idx}
-                className={`min-h-[130px] p-2 border-r border-slate-200 last:border-r-0 flex flex-col transition-colors ${
-                  day.isCurrentMonth ? 'bg-white' : 'bg-slate-50/40 text-slate-400'
-                } ${day.isToday ? 'bg-blue-50/30' : ''}`}
-              >
-                {/* Cell Header: Date Number & Count Badge */}
-                <div className="flex items-center justify-between mb-1.5">
-                  <span
-                    className={`inline-flex items-center justify-center text-xs font-bold rounded-full w-6 h-6 ${
+              return (
+                <div
+                  key={day.ymd}
+                  className={`flex flex-col min-h-[580px] max-h-[calc(100vh-280px)] ${
+                    day.isToday ? 'bg-blue-50/20' : day.isWeekend ? 'bg-slate-50/40' : 'bg-white'
+                  }`}
+                >
+                  {/* Column Header: Day Name, Date & Count */}
+                  <div
+                    className={`p-3 border-b border-slate-200 sticky top-0 z-10 backdrop-blur-md ${
                       day.isToday
-                        ? 'bg-blue-600 text-white shadow-xs font-black'
-                        : day.isCurrentMonth
-                        ? 'text-slate-800'
-                        : 'text-slate-400'
+                        ? 'bg-blue-100/70 border-b-blue-300'
+                        : day.isWeekend
+                        ? 'bg-slate-100/80 text-slate-500'
+                        : 'bg-slate-50/90 text-slate-700'
                     }`}
                   >
-                    {day.dateNumber}
-                  </span>
-
-                  {dayBids.length > 0 && (
-                    <span className="text-[10px] font-bold px-1.5 py-0.5 rounded-full bg-slate-100 text-slate-700 font-mono">
-                      {dayBids.length}
-                    </span>
-                  )}
-                </div>
-
-                {/* List of Bid Cards on this Day */}
-                <div className="space-y-1.5 flex-1 overflow-y-auto max-h-[140px] pr-0.5">
-                  {dayBids.map((bid) => {
-                    const estColor = getEstimatorColor(bid.assignedEstimator);
-                    const isITB = bid.sticker === 'ITB';
-
-                    return (
-                      <div
-                        key={bid.id}
-                        onClick={() => onSelectBid(bid)}
-                        className={`p-1.5 rounded-lg border text-left text-xs bg-white hover:bg-slate-50/80 cursor-pointer shadow-2xs transition-all hover:shadow-xs border-l-4 ${estColor.cardBorder} border-t-slate-200 border-r-slate-200 border-b-slate-200 group`}
-                        title={`Click to review: ${bid.subject}`}
-                      >
-                        {/* Bid Number & Sticker */}
-                        <div className="flex items-center justify-between gap-1 mb-0.5">
-                          <span className="font-mono text-[10px] font-bold text-slate-900 group-hover:text-blue-600 transition-colors">
-                            {bid.bidNumber || (isITB ? 'ITB (Pending #)' : bid.sticker)}
+                    <div className="flex items-center justify-between">
+                      <div className="flex items-center gap-1.5">
+                        <span className={`text-xs font-bold uppercase tracking-wider ${day.isToday ? 'text-blue-900 font-black' : 'text-slate-700'}`}>
+                          {day.dayOfWeek}
+                        </span>
+                        {day.isToday && (
+                          <span className="px-1.5 py-0.2 rounded text-[9px] font-black uppercase bg-blue-600 text-white tracking-wider shadow-2xs">
+                            Today
                           </span>
-                          {bid.sticker !== 'ITB' && (
-                            <span className="text-[9px] px-1 rounded uppercase font-bold bg-purple-100 text-purple-800">
-                              {bid.sticker}
-                            </span>
-                          )}
-                        </div>
-
-                        {/* Subject Snippet */}
-                        <p className="text-[11px] font-medium text-slate-700 line-clamp-2 leading-tight">
-                          {bid.projectName || bid.subject}
-                        </p>
-
-                        {/* Estimator Pill */}
-                        <div className="mt-1 flex items-center justify-between text-[10px]">
-                          <span
-                            className={`inline-flex items-center gap-1 px-1.5 py-0.5 rounded font-semibold ${estColor.pillBg} ${estColor.pillText}`}
-                          >
-                            <span className={`w-1.5 h-1.5 rounded-full ${estColor.dotBg}`} />
-                            {bid.assignedEstimator ? bid.assignedEstimator.split(' ')[0] : 'Unassigned'}
-                          </span>
-                        </div>
+                        )}
                       </div>
-                    );
-                  })}
+
+                      {/* Day Bid Count Badge */}
+                      <span
+                        className={`text-[11px] font-mono font-bold px-1.5 py-0.2 rounded-full ${
+                          dayBids.length > 0
+                            ? day.isToday
+                              ? 'bg-blue-600 text-white shadow-2xs'
+                              : 'bg-slate-200/90 text-slate-800'
+                            : 'text-slate-400'
+                        }`}
+                      >
+                        {dayBids.length}
+                      </span>
+                    </div>
+
+                    <div className="text-sm font-black text-slate-900 mt-0.5">
+                      {day.formattedDate}
+                    </div>
+                  </div>
+
+                  {/* Scrollable Job List for this Day */}
+                  <div className="flex-1 overflow-y-auto p-2.5 space-y-2.5">
+                    {dayBids.length === 0 ? (
+                      <div className="h-40 flex flex-col items-center justify-center text-center p-3 text-slate-300">
+                        <CalendarIcon className="w-6 h-6 mb-1 opacity-40" />
+                        <span className="text-[11px] font-medium text-slate-400">No bids due</span>
+                      </div>
+                    ) : (
+                      dayBids.map((bid) => {
+                        const estColor = getEstimatorColor(bid.assignedEstimator);
+                        const isAssigningThis = isAssigningInline[bid.id];
+
+                        return (
+                          <div
+                            key={bid.id}
+                            className={`p-3 rounded-xl border bg-white hover:bg-slate-50/90 shadow-2xs hover:shadow-xs transition-all border-l-4 ${estColor.cardBorder} border-t-slate-200 border-r-slate-200 border-b-slate-200 flex flex-col justify-between gap-2 group relative`}
+                          >
+                            {/* Card Top Row: Bid Number & Review Button */}
+                            <div className="flex items-center justify-between gap-1 text-[11px]">
+                              <span
+                                onClick={() => onSelectBid(bid)}
+                                className="font-mono font-bold text-blue-900 bg-blue-50/80 px-1.5 py-0.5 rounded border border-blue-200/80 hover:bg-blue-100 transition-colors cursor-pointer"
+                                title="Click to view bid details"
+                              >
+                                {bid.bidNumber || 'Pending Bid #'}
+                              </span>
+
+                              {Boolean(bid.attachmentsCount && bid.attachmentsCount > 0) && (
+                                <span className="text-[10px] text-slate-400 flex items-center gap-0.5 font-mono">
+                                  <Paperclip className="w-3 h-3 text-slate-400" />
+                                  <span>{bid.attachmentsCount}</span>
+                                </span>
+                              )}
+                            </div>
+
+                            {/* Project Name (Primary Clickable Title) */}
+                            <h4
+                              onClick={() => onSelectBid(bid)}
+                              className="text-xs font-bold text-slate-900 group-hover:text-blue-700 transition-colors line-clamp-2 leading-snug cursor-pointer"
+                              title={bid.projectName || bid.subject}
+                            >
+                              {bid.projectName || bid.subject}
+                            </h4>
+
+                            {/* Contractor / Client Company */}
+                            <div className="text-[11px] text-slate-600 flex items-center gap-1.5 truncate">
+                              <Building2 className="w-3 h-3 text-slate-400 flex-shrink-0" />
+                              <span className="font-semibold truncate">
+                                {bid.clientCompany || bid.senderName}
+                              </span>
+                            </div>
+
+                            {/* Project Address (if available) */}
+                            {bid.projectAddress && (
+                              <div className="text-[10px] text-slate-400 truncate">
+                                📍 {bid.projectAddress}
+                              </div>
+                            )}
+
+                            {/* Estimator Assignment & Inline Selector */}
+                            <div className="pt-2 border-t border-slate-100 flex items-center justify-between gap-1 text-[10px]">
+                              <div className="flex-1 min-w-0">
+                                <select
+                                  value={bid.assignedEstimator || ''}
+                                  onChange={(e) => handleInlineAssign(e, bid)}
+                                  disabled={isAssigningThis}
+                                  className={`w-full text-[11px] font-bold py-1 px-1.5 rounded-lg border focus:outline-none focus:ring-1 focus:ring-blue-500 cursor-pointer ${
+                                    bid.assignedEstimator
+                                      ? `${estColor.pillBg} ${estColor.pillText} ${estColor.pillBorder}`
+                                      : 'bg-rose-50 text-rose-800 border-rose-300'
+                                  }`}
+                                  title="Quick assign estimator"
+                                >
+                                  <option value="">⚠️ Assign Estimator...</option>
+                                  {estimators.map((est) => (
+                                    <option key={est} value={est}>
+                                      {est}
+                                    </option>
+                                  ))}
+                                </select>
+                              </div>
+                            </div>
+                          </div>
+                        );
+                      })
+                    )}
+                  </div>
                 </div>
-              </div>
-            );
-          })}
+              );
+            })}
+          </div>
         </div>
       </div>
 
-      {/* Unscheduled Bids Drawer / Tray */}
+      {/* Unscheduled Bids Drawer / Tray (Only ITBs) */}
       {showUnscheduledDrawer && (
         <div className="bg-amber-50/70 p-5 rounded-2xl border border-amber-200 space-y-4 animate-in fade-in slide-in-from-bottom-2">
           <div className="flex items-center justify-between">
@@ -447,17 +572,17 @@ export default function CalendarScheduleView({
               <Clock className="w-5 h-5 text-amber-700" />
               <div>
                 <h3 className="text-sm font-bold text-amber-950">
-                  Unscheduled Inbound Opportunities ({unscheduledBids.length})
+                  Unscheduled Opportunities ({unscheduledBids.length})
                 </h3>
                 <p className="text-xs text-amber-800">
-                  These bids need a confirmed calendar due date and estimator assignment.
+                  These ITBs do not yet have a confirmed due date on the calendar.
                 </p>
               </div>
             </div>
 
             <button
               onClick={() => setShowUnscheduledDrawer(false)}
-              className="text-xs font-semibold text-amber-800 hover:text-amber-950 px-2.5 py-1 rounded bg-amber-100"
+              className="text-xs font-semibold text-amber-800 hover:text-amber-950 px-2.5 py-1 rounded-lg bg-amber-100 hover:bg-amber-200 transition-colors"
             >
               Hide Unscheduled
             </button>
@@ -474,34 +599,34 @@ export default function CalendarScheduleView({
                 return (
                   <div
                     key={bid.id}
-                    className="p-3 bg-white rounded-xl border border-amber-200/80 shadow-2xs space-y-2 flex flex-col justify-between"
+                    className="p-3.5 bg-white rounded-xl border border-amber-200/80 shadow-2xs space-y-2.5 flex flex-col justify-between"
                   >
                     <div>
                       <div className="flex items-center justify-between text-[11px] mb-1">
                         <span className="font-mono font-bold text-blue-900 bg-blue-50 px-2 py-0.5 rounded border border-blue-200">
-                          {bid.bidNumber || bid.sticker}
+                          {bid.bidNumber || 'Pending Bid #'}
                         </span>
-                        <span className="text-slate-400">{bid.receivedAt}</span>
+                        <span className="text-slate-400 font-mono">{bid.receivedAt}</span>
                       </div>
 
                       <h4 className="text-xs font-bold text-slate-900 line-clamp-1">
-                        {bid.subject}
+                        {bid.projectName || bid.subject}
                       </h4>
                       <p className="text-[11px] text-slate-500 line-clamp-1">
-                        Client: {bid.senderName}
+                        Contractor: {bid.clientCompany || bid.senderName}
                       </p>
 
                       {hasAiSuggestion && (
-                        <div className="mt-2 p-1.5 rounded bg-indigo-50/80 border border-indigo-100 text-[11px] text-indigo-900 flex items-center justify-between">
+                        <div className="mt-2 p-2 rounded-lg bg-indigo-50/80 border border-indigo-100 text-[11px] text-indigo-900 flex items-center justify-between">
                           <span className="flex items-center gap-1 font-semibold">
-                            <Sparkles className="w-3 h-3 text-indigo-600" />
+                            <Sparkles className="w-3.5 h-3.5 text-indigo-600" />
                             AI Suggested: {formatFriendlyDate(bid.normalizedAiDueDate)}
                           </span>
                           <button
                             onClick={() =>
                               onAssignBid(bid.id, bid.assignedEstimator || '', bid.normalizedAiDueDate || null)
                             }
-                            className="px-2 py-0.5 rounded bg-indigo-600 text-white font-bold text-[10px] hover:bg-indigo-700 shadow-2xs"
+                            className="px-2 py-0.5 rounded bg-indigo-600 text-white font-bold text-[10px] hover:bg-indigo-700 shadow-2xs transition-colors"
                           >
                             Accept
                           </button>
@@ -510,15 +635,15 @@ export default function CalendarScheduleView({
                     </div>
 
                     <div className="pt-2 border-t border-slate-100 flex items-center justify-between">
-                      <span className="text-[10px] text-slate-500">
-                        {bid.assignedEstimator ? `Assigned: ${bid.assignedEstimator}` : 'Unassigned'}
+                      <span className="text-[11px] text-slate-600 font-medium">
+                        {bid.assignedEstimator ? `Assigned: ${bid.assignedEstimator.split(' ')[0]}` : '⚠️ Unassigned'}
                       </span>
                       <button
                         onClick={() => onSelectBid(bid)}
                         className="text-xs font-bold text-blue-600 hover:text-blue-800 flex items-center gap-1"
                       >
-                        <span>Schedule</span>
-                        <ArrowRight className="w-3 h-3" />
+                        <span>Schedule Date</span>
+                        <ArrowRight className="w-3.5 h-3.5" />
                       </button>
                     </div>
                   </div>
