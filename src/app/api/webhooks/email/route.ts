@@ -6,13 +6,8 @@ import {
   computeAttachmentHash,
   extractJobCode,
 } from '@/lib/email-parser/deduplication';
-import {
-  analyzeEmailWithAI,
-  ActiveBidSummary,
-  AIEmailAnalysis,
-} from '@/lib/email-parser/ai-classifier';
+import { classifyEmailWithML } from '@/lib/ml/classifier';
 import { deconstructEmailThread } from '@/lib/email-parser/thread-cleaner';
-import { evaluatePrecedenceRules } from '@/lib/email-parser/precedence-rules';
 import { normalizeDateToYyyyMmDd } from '@/lib/date-utils';
 import { findBestBidMatchForAddendum } from '@/lib/matching/match-addendums';
 import type { EmailAttachmentPayload } from '@/types/bid-request';
@@ -143,72 +138,44 @@ export async function POST(request: NextRequest) {
       }
     }
 
-    const isFastBackfill = Boolean(
-      payload.isBackfill || request.nextUrl.searchParams.get('fast') === '1'
+    // 1. Thread deconstruction & Machine Learning Classification
+    const deconstructed = deconstructEmailThread(
+      payload.subject,
+      bodyText,
+      directSenderEmail,
+      directSenderName
     );
 
-    let ai: AIEmailAnalysis;
+    // Predict using rule-weighted ML algorithm (TF-IDF + Domain Rules)
+    const ml = classifyEmailWithML({
+      subject: payload.subject,
+      bodyText,
+      attachments: attachmentFilenames,
+    });
 
-    if (isFastBackfill) {
-      // Fast deterministic evaluation without external LLM latency or rate limits
-      const deconstructed = deconstructEmailThread(payload.subject, bodyText, directSenderEmail, directSenderName);
-      const precedence = evaluatePrecedenceRules({
-        cleanSubject: deconstructed.cleanSubject,
-        topMessage: deconstructed.topMessage,
-        forwardedBody: deconstructed.forwardedBody,
-        attachmentFilenames,
-        senderEmail: directSenderEmail,
-      });
-
-      ai = {
-        sticker: precedence.matched ? precedence.sticker : 'ITB',
-        confidence: precedence.matched ? precedence.confidence : 0.88,
-        reasoning: precedence.matched ? precedence.ruleReason : 'Fast deterministic backfill evaluation',
-        isForwarded: deconstructed.isForwarded,
-        forwardedBy: deconstructed.forwardedBy,
-        originalSenderEmail: deconstructed.originalSenderEmail,
-        originalSenderName: deconstructed.originalSenderName,
-        originalSubject: deconstructed.originalSubject,
-        projectName: payload.projectName || null,
-        projectAddress: null,
-        jobCode: extractJobCode(payload.subject) || extractJobCode(bodyText),
-        clientCompany: payload.clientCompany || null,
-        bidDueDate: payload.bidDueDate || null,
-        scopeSummary: deconstructed.cleanSubject,
-        matchedBidNumber: null,
-        matchConfidence: 0,
-        matchReason: null,
-        isDueDateRevised: false,
-        revisedDueDate: null,
-        dueDateRevisionNotes: null,
-        isGcWonPrime: false,
-      };
-    } else {
-      // Query active ITBs to supply context to AI for Addendum / Won / Lost matching
-      const { data: activeBidsData } = await supabase
-        .from('bid_requests')
-        .select('bid_number, project_name, client_company, project_address_city, project_address_state, job_code')
-        .not('bid_number', 'is', null)
-        .limit(60);
-
-      const activeBids: ActiveBidSummary[] = (activeBidsData || []).map((b) => ({
-        bidNumber: b.bid_number,
-        projectName: b.project_name,
-        clientCompany: b.client_company,
-        projectAddress: [b.project_address_city, b.project_address_state].filter(Boolean).join(', '),
-        jobCode: b.job_code,
-      }));
-
-      // 1. Run Gemini AI Classifier with Active Bids matching context
-      ai = await analyzeEmailWithAI({
-        subject: payload.subject,
-        bodyText,
-        senderEmail: directSenderEmail,
-        senderName: directSenderName,
-        attachmentFilenames,
-        activeBids,
-      });
-    }
+    const ai = {
+      sticker: ml.sticker,
+      confidence: ml.confidence / 100,
+      reasoning: `Categorized by ML algorithm: ${ml.predictedClass} (${ml.confidence}% confidence)`,
+      isForwarded: deconstructed.isForwarded,
+      forwardedBy: deconstructed.forwardedBy,
+      originalSenderEmail: deconstructed.originalSenderEmail,
+      originalSenderName: deconstructed.originalSenderName,
+      originalSubject: deconstructed.originalSubject,
+      projectName: payload.projectName || null,
+      projectAddress: null,
+      jobCode: extractJobCode(payload.subject) || extractJobCode(bodyText),
+      clientCompany: payload.clientCompany || null,
+      bidDueDate: payload.bidDueDate || null,
+      scopeSummary: deconstructed.cleanSubject,
+      matchedBidNumber: null as string | null,
+      matchConfidence: 0,
+      matchReason: null as string | null,
+      isDueDateRevised: false,
+      revisedDueDate: null,
+      dueDateRevisionNotes: null,
+      isGcWonPrime: ml.predictedClass === 'Contractor Awarded',
+    };
 
     // 2. Identify the true client (if forwarded by coworker, use original GC)
     const effectiveSenderEmail = ai.isForwarded && ai.originalSenderEmail
@@ -258,7 +225,7 @@ export async function POST(request: NextRequest) {
             .eq('id', matchedBidRecord.id);
         }
       }
-    } else if (ai.sticker === 'Addendum') {
+    } else if (ai.sticker === 'Addendum / RFI') {
       // Algorithmic multi-tier match against all active ITBs
       const { data: allActiveBids } = await supabase
         .from('bid_requests')
@@ -336,7 +303,7 @@ export async function POST(request: NextRequest) {
     } else if (ai.sticker === 'Lost') {
       estimatorStatus = 'lost';
       triageStatus = 'archived';
-    } else if (ai.sticker === 'Addendum') {
+    } else if (ai.sticker === 'Addendum / RFI') {
       if (isAutoDispatched) {
         triageStatus = 'assigned';
         estimatorStatus = 'assigned';
@@ -349,7 +316,10 @@ export async function POST(request: NextRequest) {
     const intentMap: Record<string, string> = {
       ITB: 'invitation_to_bid',
       Addendum: 'addendum_update',
+      'Addendum / RFI': 'addendum_update',
+      'Date Reminder': 'date_reminder',
       Won: 'bid_won',
+      'Contractor Awarded': 'bid_won',
       Lost: 'bid_lost',
       Spam: 'spam_noise',
       General: 'general_inquiry',
@@ -366,6 +336,11 @@ export async function POST(request: NextRequest) {
       email_received_at: payload.receivedAt || new Date().toISOString(),
       raw_payload: {
         ...rawBody,
+        ml_prediction: {
+          predictedClass: ml.predictedClass,
+          confidence: ml.confidence,
+          probabilities: ml.probabilities,
+        },
         ...(assignedEstimatorName ? {
           assigned_estimator_name: assignedEstimatorName,
           auto_dispatched: isAutoDispatched,
@@ -388,7 +363,7 @@ export async function POST(request: NextRequest) {
 
       // Grouping
       duplicate_group_id: finalGroupId,
-      is_flagged_duplicate: ai.sticker === 'Addendum' || duplicateEvaluation.isDuplicate,
+      is_flagged_duplicate: ai.sticker === 'Addendum / RFI' || duplicateEvaluation.isDuplicate,
       duplicate_of_id: matchedBidId || duplicateEvaluation.duplicateOfId,
       duplicate_confidence: duplicateEvaluation.confidence,
       duplicate_reasons: duplicateEvaluation.reasons,
@@ -403,9 +378,11 @@ export async function POST(request: NextRequest) {
       assigned_estimator_id: assignedEstimatorId,
 
       // Intent & AI Extraction
-      email_intent: intentMap[ai.sticker] || 'invitation_to_bid',
-      intent_confidence: ai.confidence,
-      intent_explanation: ai.reasoning,
+      email_intent: ml.intent || intentMap[ai.sticker] || 'invitation_to_bid',
+      intent_confidence: ml.confidence / 100,
+      intent_explanation: `Classified by ML algorithm (${ml.predictedClass} ${ml.confidence}%)`,
+      is_human_labeled: false,
+      human_label: null,
       filter_status: filterStatus,
 
       // Forwarding & AI Metadata

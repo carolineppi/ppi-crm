@@ -268,7 +268,8 @@ export default function DispatchDashboard() {
             }
           } else {
             if (r.email_intent === 'addendum_update') sticker = 'Addendum / RFI';
-            else if (r.email_intent === 'bid_won') sticker = 'Won';
+            else if (r.email_intent === 'bid_won' || r.email_intent === 'contractor_awarded') sticker = 'Won';
+            else if (r.email_intent === 'date_reminder') sticker = 'Date Reminder';
             else if (r.email_intent === 'bid_lost') sticker = 'Lost';
             else if (r.email_intent === 'spam_noise') sticker = 'Spam';
             else sticker = 'ITB';
