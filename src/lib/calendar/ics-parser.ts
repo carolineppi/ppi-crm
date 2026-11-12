@@ -334,3 +334,75 @@ export function parseIcsCalendar(rawIcsText: string): ParsedCalendarEvent[] {
   events.sort((a, b) => b.dueDate.localeCompare(a.dueDate));
   return events;
 }
+
+/**
+ * Parses Google Calendar JSON exports (either Google Calendar API `items` or Apps Script export array)
+ * which preserve `colorId` (1-11) for accurate Estimator matching.
+ */
+export function parseGoogleCalendarJson(rawJsonText: string): ParsedCalendarEvent[] {
+  const parsed = JSON.parse(rawJsonText);
+  const items: any[] = Array.isArray(parsed)
+    ? parsed
+    : Array.isArray(parsed?.items)
+    ? parsed.items
+    : [];
+
+  const events: ParsedCalendarEvent[] = [];
+
+  for (const item of items) {
+    const summary = String(item.summary || item.title || '').trim();
+    if (!summary) continue;
+
+    let dueDate: string | null = null;
+    let dueTime: string | null = item.dueTime || null;
+
+    if (item.start?.date) {
+      dueDate = String(item.start.date).slice(0, 10);
+    } else if (item.start?.dateTime) {
+      const dt = new Date(item.start.dateTime);
+      if (!isNaN(dt.getTime())) {
+        const parts = new Intl.DateTimeFormat('en-US', {
+          timeZone: 'America/Chicago',
+          year: 'numeric',
+          month: '2-digit',
+          day: '2-digit',
+          hour: 'numeric',
+          minute: '2-digit',
+          hour12: true,
+        }).formatToParts(dt);
+        const get = (type: string) => parts.find((p) => p.type === type)?.value || '';
+        dueDate = `${get('year')}-${get('month')}-${get('day')}`;
+        dueTime = `${get('hour')}:${get('minute')} ${get('dayPeriod').toUpperCase()}`;
+      }
+    } else if (typeof item.start === 'string') {
+      dueDate = item.start.slice(0, 10);
+    } else if (typeof item.dueDate === 'string') {
+      dueDate = item.dueDate.slice(0, 10);
+    }
+
+    if (!dueDate) continue;
+
+    const description = String(item.description || '').trim();
+    const location = item.location ? String(item.location).trim() : null;
+    const rawColor = item.colorId != null ? String(item.colorId) : (item.color ? String(item.color) : null);
+
+    const { projectName, clientCompany } = extractProjectAndContractor(summary, description);
+    const detectedEstimator = detectEstimatorFromEvent(summary, description, '', rawColor);
+
+    events.push({
+      uid: String(item.id || item.uid || `${dueDate}_${summary.slice(0, 30)}`),
+      summary,
+      projectName,
+      clientCompany,
+      location,
+      description: description || null,
+      dueDate,
+      dueTime,
+      detectedEstimator,
+      rawColor,
+    });
+  }
+
+  events.sort((a, b) => b.dueDate.localeCompare(a.dueDate));
+  return events;
+}
