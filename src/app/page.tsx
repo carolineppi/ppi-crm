@@ -113,6 +113,7 @@ interface DisplayBidRequest {
   matchConfidence?: number | null;
   matchReason?: string | null;
   matchStatus?: string | null;
+  isAutoDispatched?: boolean;
 }
 
 interface CrossContractorMatch {
@@ -166,6 +167,8 @@ function formatReceivedDate(isoString: string | null | undefined): string {
 export default function DispatchDashboard() {
   const [bids, setBids] = useState<DisplayBidRequest[]>([]);
   const [activeFilter, setActiveFilter] = useState<string>('ALL');
+  const [triageSubFilter, setTriageSubFilter] = useState<'all' | 'needs_action' | 'auto_dispatched'>('all');
+  const [isAutoMatching, setIsAutoMatching] = useState(false);
   const [verificationFilter, setVerificationFilter] = useState<'all' | 'human_only' | 'unverified_only'>('all');
   const [viewMode, setViewMode] = useState<'feed' | 'calendar'>('feed');
   const [layoutMode, setLayoutMode] = useState<'fullscreen' | 'split' | 'list'>('fullscreen');
@@ -182,10 +185,10 @@ export default function DispatchDashboard() {
   const [itemsPerPage, setItemsPerPage] = useState(50);
   const [feedSearchQuery, setFeedSearchQuery] = useState('');
 
-  // Reset to page 1 whenever active filter, verification filter, or search changes
+  // Reset to page 1 whenever active filter, triage sub-filter, verification filter, or search changes
   useEffect(() => {
     setCurrentPage(1);
-  }, [activeFilter, verificationFilter, feedSearchQuery]);
+  }, [activeFilter, triageSubFilter, verificationFilter, feedSearchQuery]);
 
   // Review & Reclassification Modal State
   const [reviewingBid, setReviewingBid] = useState<DisplayBidRequest | null>(null);
@@ -333,6 +336,12 @@ export default function DispatchDashboard() {
             matchConfidence: r.match_confidence,
             matchReason: r.match_reason,
             matchStatus: r.match_status,
+            isAutoDispatched: Boolean(
+              r.raw_payload?.auto_dispatched ||
+              ((r.match_status === 'auto_matched' || r.match_status === 'confirmed') &&
+                assignedName &&
+                (r.matched_bid_number || r.matched_bid_id))
+            ),
           };
         });
         setBids(mapped);
@@ -586,6 +595,14 @@ export default function DispatchDashboard() {
         return false;
       }
 
+      // 3b. Triage Sub-Filter (Needs Action vs Dispatched to Estimators)
+      if (triageSubFilter === 'needs_action') {
+        if (b.sticker === 'ITB' && b.assignedEstimator) return false;
+        if ((b.sticker === 'Addendum / RFI' || b.sticker === 'Addendum' || b.sticker === 'RFI/Forms' || b.sticker === 'RFI / Scope') && b.isAutoDispatched) return false;
+      } else if (triageSubFilter === 'auto_dispatched') {
+        if (!b.isAutoDispatched) return false;
+      }
+
       // 4. Search query filter
       if (feedSearchQuery.trim()) {
         const q = feedSearchQuery.toLowerCase();
@@ -605,7 +622,7 @@ export default function DispatchDashboard() {
 
       return true;
     });
-  }, [bids, activeFilter, verificationFilter, feedSearchQuery, checkDuplicateStatus]);
+  }, [bids, activeFilter, triageSubFilter, verificationFilter, feedSearchQuery, checkDuplicateStatus]);
 
   // Keep selected email active or default to the first email in the filtered queue (in split mode)
   useEffect(() => {
@@ -755,12 +772,35 @@ export default function DispatchDashboard() {
       });
       if (res.ok) {
         showToast('✔ Assignment & Due Date updated in calendar');
+        await fetchLiveBids();
       } else {
         showToast('Error saving update to database');
         await fetchLiveBids();
       }
     } catch {
       showToast('Network error updating assignment');
+    }
+  };
+
+  // 1b. Run Algorithmic Addendum & RFI Matching Engine
+  const handleRunAutoMatch = async () => {
+    setIsAutoMatching(true);
+    try {
+      const res = await fetch('/api/bid-requests/match-addendums', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+      });
+      const data = await res.json();
+      if (data.success) {
+        showToast(`⚡ ${data.message}`);
+        await fetchLiveBids();
+      } else {
+        showToast(data.error || 'Auto-match run failed');
+      }
+    } catch {
+      showToast('Network error running auto-matcher');
+    } finally {
+      setIsAutoMatching(false);
     }
   };
 
@@ -1145,6 +1185,28 @@ export default function DispatchDashboard() {
   const countSpam = bids.filter((b) => b.sticker === 'Spam' || b.filterStatus === 'auto_filtered').length;
   const countHumanVerified = bids.filter((b) => b.isHumanLabeled).length;
   const countUnverified = bids.filter((b) => !b.isHumanLabeled).length;
+
+  // Counts for Sub-Triage Queue View
+  const countDispatchedInFilter = bids.filter((b) => {
+    if (isDuplicateItem(b)) return false;
+    if (b.sticker === 'Spam' || b.filterStatus === 'auto_filtered') return false;
+    if (activeFilter === 'Addendum / RFI' && (b.sticker !== 'Addendum / RFI' && b.sticker !== 'Addendum' && b.sticker !== 'RFI/Forms' && b.sticker !== 'RFI / Scope')) return false;
+    if (activeFilter === 'ITB' && b.sticker !== 'ITB') return false;
+    return b.isAutoDispatched;
+  }).length;
+
+  const countNeedsActionInFilter = bids.filter((b) => {
+    if (isDuplicateItem(b)) return false;
+    if (b.sticker === 'Spam' || b.filterStatus === 'auto_filtered') return false;
+    if (activeFilter === 'Addendum / RFI' && (b.sticker !== 'Addendum / RFI' && b.sticker !== 'Addendum' && b.sticker !== 'RFI/Forms' && b.sticker !== 'RFI / Scope')) return false;
+    if (activeFilter === 'ITB' && b.sticker !== 'ITB') return false;
+
+    if (b.sticker === 'ITB') return !b.assignedEstimator;
+    if (b.sticker === 'Addendum / RFI' || b.sticker === 'Addendum' || b.sticker === 'RFI/Forms' || b.sticker === 'RFI / Scope') {
+      return !b.isAutoDispatched;
+    }
+    return false;
+  }).length;
 
   // Selected email AI alerts
   const crossContractorMatches = useMemo(() => {
@@ -1658,6 +1720,56 @@ export default function DispatchDashboard() {
               </div>
             )}
 
+            {/* ALERT 4: Auto-Dispatched Addendum / RFI to Estimator */}
+            {selectedBid.isAutoDispatched ? (
+              <div className="p-3.5 bg-emerald-500/15 rounded-xl border border-emerald-400/30 text-emerald-100 flex flex-col sm:flex-row sm:items-center justify-between gap-3 shadow-inner animate-in fade-in">
+                <div className="flex items-start gap-2.5">
+                  <CheckCircle2 className="w-5 h-5 text-emerald-400 flex-shrink-0 mt-0.5" />
+                  <div className="text-xs space-y-0.5">
+                    <div className="font-bold text-white text-sm flex items-center gap-2">
+                      <span>🚀 Auto-Dispatched to Estimator: {selectedBid.assignedEstimator}</span>
+                      <span className="px-2 py-0.2 rounded-full text-[10px] bg-emerald-500/30 text-emerald-200 border border-emerald-400/30 font-mono">
+                        {selectedBid.matchedBidNumber}
+                      </span>
+                    </div>
+                    <p className="text-emerald-200">
+                      This Addendum was automatically matched to master project{' '}
+                      <strong className="text-white font-mono underline">{selectedBid.matchedBidNumber}</strong>
+                      {selectedBid.matchReason ? ` (${selectedBid.matchReason})` : ''} and delivered directly to {selectedBid.assignedEstimator}&apos;s portal. No manual triage required.
+                    </p>
+                  </div>
+                </div>
+                <div className="flex items-center gap-2 flex-shrink-0">
+                  <button
+                    type="button"
+                    onClick={() => openLinkModal(selectedBid)}
+                    className="px-3 py-1.5 rounded-lg bg-emerald-700/60 hover:bg-emerald-600 text-white font-bold text-xs border border-emerald-500/40 transition-colors"
+                  >
+                    Re-link / Adjust
+                  </button>
+                </div>
+              </div>
+            ) : (
+              (selectedBid.sticker === 'Addendum / RFI' || selectedBid.sticker === 'Addendum') && hasValidMasterLink && !selectedBid.assignedEstimator && (
+                <div className="p-3.5 bg-purple-500/15 rounded-xl border border-purple-400/30 text-purple-100 flex flex-col sm:flex-row sm:items-center justify-between gap-3 shadow-inner animate-in fade-in">
+                  <div className="flex items-start gap-2.5">
+                    <Sparkles className="w-5 h-5 text-purple-400 flex-shrink-0 mt-0.5" />
+                    <div className="text-xs space-y-0.5">
+                      <div className="font-bold text-white text-sm flex items-center gap-2">
+                        <span>Matched to Master Bid {selectedBid.matchedBidNumber}</span>
+                        <span className="px-2 py-0.2 rounded-full text-[10px] bg-purple-500/30 text-purple-200 border border-purple-400/30 font-mono">
+                          Awaiting Estimator Assignment
+                        </span>
+                      </div>
+                      <p className="text-purple-200">
+                        This Addendum is linked to <strong className="text-white font-mono">{selectedBid.matchedBidNumber}</strong>. Once the master ITB is assigned an estimator by the Calendar Manager, this Addendum will automatically route to them.
+                      </p>
+                    </div>
+                  </div>
+                </div>
+              )
+            )}
+
             {/* Scope Summary & Project Context Grid */}
             <div className="grid grid-cols-1 md:grid-cols-2 gap-3 pt-1 text-xs">
               <div className="bg-white/5 rounded-xl p-3 border border-white/10 space-y-1">
@@ -2099,6 +2211,73 @@ export default function DispatchDashboard() {
             </div>
           </div>
 
+          {/* SUB-FILTER & AUTO-MATCH ACTION BAR */}
+          {(activeFilter === 'ALL' || activeFilter === 'Addendum / RFI' || activeFilter === 'ITB') && (
+            <div className="bg-white p-2.5 px-3 rounded-2xl border border-slate-200 shadow-xs flex flex-wrap items-center justify-between gap-3 text-xs">
+              <div className="flex items-center gap-1.5 flex-wrap">
+                <span className="text-[11px] font-bold text-slate-500 uppercase tracking-wider mr-1">
+                  Queue View:
+                </span>
+                <button
+                  type="button"
+                  onClick={() => setTriageSubFilter('all')}
+                  className={`px-2.5 py-1 rounded-lg font-semibold transition-all ${
+                    triageSubFilter === 'all'
+                      ? 'bg-slate-900 text-white shadow-xs'
+                      : 'bg-slate-100 text-slate-600 hover:bg-slate-200'
+                  }`}
+                >
+                  All Items
+                </button>
+                <button
+                  type="button"
+                  onClick={() => setTriageSubFilter('needs_action')}
+                  className={`px-2.5 py-1 rounded-lg font-semibold transition-all flex items-center gap-1.5 ${
+                    triageSubFilter === 'needs_action'
+                      ? 'bg-amber-600 text-white shadow-xs'
+                      : 'bg-amber-50 text-amber-800 hover:bg-amber-100'
+                  }`}
+                  title="Show only items needing Calendar Manager action (unassigned ITBs, unlinked Addendums)"
+                >
+                  <AlertCircle className="w-3.5 h-3.5 text-amber-500" />
+                  <span>Needs Triage</span>
+                  <span className="px-1.5 py-0.2 rounded-full text-[10px] bg-black/15 font-bold">
+                    {countNeedsActionInFilter}
+                  </span>
+                </button>
+                <button
+                  type="button"
+                  onClick={() => setTriageSubFilter('auto_dispatched')}
+                  className={`px-2.5 py-1 rounded-lg font-semibold transition-all flex items-center gap-1.5 ${
+                    triageSubFilter === 'auto_dispatched'
+                      ? 'bg-purple-600 text-white shadow-xs'
+                      : 'bg-purple-50 text-purple-800 hover:bg-purple-100'
+                  }`}
+                  title="Addendums & RFIs automatically linked and dispatched directly to estimators"
+                >
+                  <span>🚀 Dispatched to Estimators</span>
+                  <span className="px-1.5 py-0.2 rounded-full text-[10px] bg-black/15 font-bold">
+                    {countDispatchedInFilter}
+                  </span>
+                </button>
+              </div>
+
+              {/* Action: Run Auto-Match */}
+              <div className="flex items-center gap-2">
+                <button
+                  type="button"
+                  onClick={handleRunAutoMatch}
+                  disabled={isAutoMatching}
+                  className="px-3.5 py-1.5 rounded-lg bg-gradient-to-r from-blue-600 to-indigo-600 hover:from-blue-700 hover:to-indigo-700 text-white font-bold shadow-xs transition-all flex items-center gap-1.5 disabled:opacity-50"
+                  title="Run algorithmic multi-tier matcher across all Addendums & RFIs to link them to master ITBs"
+                >
+                  <Sparkles className={`w-3.5 h-3.5 ${isAutoMatching ? 'animate-spin' : ''}`} />
+                  <span>{isAutoMatching ? 'Matching Addendums...' : '⚡ Auto-Match Addendums'}</span>
+                </button>
+              </div>
+            </div>
+          )}
+
           {/* VIEW MODE 1: FULL SCREEN VIEWER (GMAIL STANDARD) */}
           {layoutMode === 'fullscreen' ? (
             selectedBid ? (
@@ -2186,12 +2365,32 @@ export default function DispatchDashboard() {
                                 {bid.bidNumber}
                               </span>
                             )}
+                            {bid.matchedBidNumber && (
+                              <span
+                                title={bid.matchReason || `Matched to ${bid.matchedBidNumber}`}
+                                className={`font-mono text-[10px] font-bold px-1.5 py-0.5 rounded flex-shrink-0 flex items-center gap-1 ${
+                                  bid.isAutoDispatched
+                                    ? 'text-purple-900 bg-purple-100 border border-purple-300'
+                                    : 'text-indigo-900 bg-indigo-100 border border-indigo-200'
+                                }`}
+                              >
+                                <span>{bid.isAutoDispatched ? '🚀' : '🔗'} {bid.matchedBidNumber}</span>
+                              </span>
+                            )}
                             <span className="font-medium text-slate-800 truncate group-hover:text-blue-900">
                               {bid.subject}
                             </span>
 
                             {/* Alert Badges */}
                             <div className="hidden lg:flex items-center gap-1.5 ml-2 flex-shrink-0">
+                              {bid.isAutoDispatched && (
+                                <span
+                                  title={`Dispatched to ${bid.assignedEstimator}`}
+                                  className="px-1.5 py-0.5 rounded text-[10px] font-bold bg-purple-100 text-purple-900 border border-purple-300 flex items-center gap-0.5"
+                                >
+                                  <span>🚀 Dispatched</span>
+                                </span>
+                              )}
                               {hasMultiGC && (
                                 <span
                                   title="Multiple GCs bidding this same project"
@@ -2336,6 +2535,19 @@ export default function DispatchDashboard() {
                             {bid.bidNumber && (
                               <span className="font-mono text-[10px] font-bold text-blue-700 bg-blue-100/70 px-1.5 py-0.5 rounded">
                                 {bid.bidNumber}
+                              </span>
+                            )}
+
+                            {bid.matchedBidNumber && (
+                              <span
+                                title={bid.matchReason || `Matched to ${bid.matchedBidNumber}`}
+                                className={`font-mono text-[10px] font-bold px-1.5 py-0.5 rounded flex items-center gap-1 ${
+                                  bid.isAutoDispatched
+                                    ? 'text-purple-900 bg-purple-100 border border-purple-300'
+                                    : 'text-indigo-900 bg-indigo-100 border border-indigo-200'
+                                }`}
+                              >
+                                <span>{bid.isAutoDispatched ? '🚀' : '🔗'} {bid.matchedBidNumber}</span>
                               </span>
                             )}
 

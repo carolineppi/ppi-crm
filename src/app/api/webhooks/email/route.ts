@@ -14,6 +14,7 @@ import {
 import { deconstructEmailThread } from '@/lib/email-parser/thread-cleaner';
 import { evaluatePrecedenceRules } from '@/lib/email-parser/precedence-rules';
 import { normalizeDateToYyyyMmDd } from '@/lib/date-utils';
+import { findBestBidMatchForAddendum } from '@/lib/matching/match-addendums';
 import type { EmailAttachmentPayload } from '@/types/bid-request';
 
 const attachmentSchema = z.object({
@@ -220,20 +221,29 @@ export async function POST(request: NextRequest) {
     const effectiveProjectName = ai.projectName || payload.projectName || null;
     const effectiveClientCompany = ai.clientCompany || payload.clientCompany || null;
 
-    // 3. Match against existing bid record if AI found a match
+    // 3. Match against existing bid record if AI found a match or run algorithmic matcher
     let matchedBidId: string | null = null;
+    let matchedBidNumber: string | null = ai.matchedBidNumber || null;
+    let matchConfidence: number = ai.matchConfidence || 0;
+    let matchReason: string | null = ai.matchReason || null;
     let targetGroupId: string | null = null;
+    let assignedEstimatorId: string | null = null;
+    let assignedEstimatorName: string | null = null;
+    let isAutoDispatched = false;
 
-    if (ai.matchedBidNumber) {
+    if (matchedBidNumber) {
       const { data: matchedBidRecord } = await supabase
         .from('bid_requests')
-        .select('id, duplicate_group_id, estimator_status, assigned_estimator_id')
-        .eq('bid_number', ai.matchedBidNumber)
+        .select('id, duplicate_group_id, estimator_status, assigned_estimator_id, raw_payload')
+        .eq('bid_number', matchedBidNumber)
         .maybeSingle();
 
       if (matchedBidRecord) {
         matchedBidId = matchedBidRecord.id;
         targetGroupId = matchedBidRecord.duplicate_group_id;
+        assignedEstimatorId = matchedBidRecord.assigned_estimator_id || null;
+        assignedEstimatorName = matchedBidRecord.raw_payload?.assigned_estimator_name || null;
+        isAutoDispatched = Boolean(assignedEstimatorName || assignedEstimatorId);
 
         // If Won or Lost, update the parent bid's estimator_status
         if (ai.sticker === 'Won') {
@@ -246,6 +256,50 @@ export async function POST(request: NextRequest) {
             .from('bid_requests')
             .update({ estimator_status: 'lost' })
             .eq('id', matchedBidRecord.id);
+        }
+      }
+    } else if (ai.sticker === 'Addendum') {
+      // Algorithmic multi-tier match against all active ITBs
+      const { data: allActiveBids } = await supabase
+        .from('bid_requests')
+        .select(
+          'id, bid_number, email_subject, project_name, job_code, client_company, duplicate_group_id, assigned_estimator_id, raw_payload'
+        )
+        .not('bid_number', 'is', null);
+
+      if (allActiveBids && allActiveBids.length > 0) {
+        const candidateBids = allActiveBids.map((b: any) => ({
+          id: b.id,
+          bid_number: b.bid_number,
+          email_subject: b.email_subject,
+          project_name: b.project_name,
+          job_code: b.job_code,
+          client_company: b.client_company,
+          duplicate_group_id: b.duplicate_group_id,
+          assigned_estimator_id: b.assigned_estimator_id,
+          assigned_estimator_name: b.raw_payload?.assigned_estimator_name || null,
+        }));
+
+        const match = findBestBidMatchForAddendum(
+          {
+            id: 'inbound',
+            email_subject: payload.subject,
+            project_name: effectiveProjectName,
+            job_code: effectiveJobCode,
+            client_company: effectiveClientCompany,
+          },
+          candidateBids
+        );
+
+        if (match) {
+          matchedBidNumber = match.matchedBidNumber;
+          matchedBidId = match.matchedBidId;
+          matchConfidence = match.score;
+          matchReason = match.reasons.join(', ');
+          targetGroupId = match.targetGroupId || null;
+          assignedEstimatorId = match.assignedEstimatorId || null;
+          assignedEstimatorName = match.assignedEstimatorName || null;
+          isAutoDispatched = match.isAutoDispatched;
         }
       }
     }
@@ -283,8 +337,12 @@ export async function POST(request: NextRequest) {
       estimatorStatus = 'lost';
       triageStatus = 'archived';
     } else if (ai.sticker === 'Addendum') {
-      // Addendums are already attached to existing bid folder, no new estimator assignment needed
-      triageStatus = matchedBidId ? 'ready_for_assignment' : 'pending_triage';
+      if (isAutoDispatched) {
+        triageStatus = 'assigned';
+        estimatorStatus = 'assigned';
+      } else {
+        triageStatus = matchedBidId ? 'ready_for_assignment' : 'pending_triage';
+      }
     }
 
     // 6. Map sticker to enum intent
@@ -306,7 +364,15 @@ export async function POST(request: NextRequest) {
       email_body_text: bodyText,
       email_body_html: bodyHtml,
       email_received_at: payload.receivedAt || new Date().toISOString(),
-      raw_payload: rawBody,
+      raw_payload: {
+        ...rawBody,
+        ...(assignedEstimatorName ? {
+          assigned_estimator_name: assignedEstimatorName,
+          auto_dispatched: isAutoDispatched,
+          auto_dispatched_at: isAutoDispatched ? new Date().toISOString() : null,
+          auto_matched_reason: matchReason,
+        } : {})
+      },
 
       project_name: effectiveProjectName,
       client_company: effectiveClientCompany,
@@ -330,10 +396,11 @@ export async function POST(request: NextRequest) {
 
       // Bid Number & Matching
       matched_bid_id: matchedBidId,
-      matched_bid_number: ai.matchedBidNumber,
-      match_confidence: ai.matchConfidence,
-      match_reason: ai.matchReason,
-      match_status: matchedBidId ? 'confirmed' : 'pending',
+      matched_bid_number: matchedBidNumber,
+      match_confidence: matchConfidence,
+      match_reason: matchReason,
+      match_status: matchedBidId ? (isAutoDispatched ? 'auto_matched' : 'confirmed') : 'pending',
+      assigned_estimator_id: assignedEstimatorId,
 
       // Intent & AI Extraction
       email_intent: intentMap[ai.sticker] || 'invitation_to_bid',

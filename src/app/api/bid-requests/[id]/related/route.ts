@@ -68,6 +68,7 @@ export async function GET(
       orConditions.push(`id.eq.${duplicateOfId}`);
     }
     orConditions.push(`duplicate_of_id.eq.${id}`);
+    orConditions.push(`matched_bid_id.eq.${id}`);
     if (bidNumber) {
       orConditions.push(`matched_bid_number.eq.${bidNumber}`);
     }

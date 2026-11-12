@@ -9,6 +9,7 @@ interface UpdatePayload {
   acceptRevisedDueDate?: boolean;
   revisedDueDate?: string | null;
   assignedEstimator?: string | null;
+  assignedEstimatorId?: string | null;
   bidDueDate?: string | null;
   triageStatus?: string | null;
   estimatorStatus?: 'unassigned' | 'assigned' | 'in_progress' | 'bid_submitted' | 'won' | 'lost' | 'no_bid' | null;
@@ -77,8 +78,10 @@ export async function PATCH(
 
     // 2. Handle Estimator Assignment Update
     if (body.assignedEstimator !== undefined) {
-      updates.assigned_estimator_id = body.assignedEstimator ? '00000000-0000-0000-0000-000000000000' : null;
-      // Storing assigned estimator name in raw_payload or metadata if foreign key profiles aren't seeded yet
+      if (body.assignedEstimatorId) {
+        updates.assigned_estimator_id = body.assignedEstimatorId;
+      }
+      // Storing assigned estimator name in raw_payload
       updates.raw_payload = {
         ...currentRecord.raw_payload,
         assigned_estimator_name: body.assignedEstimator,
@@ -266,14 +269,11 @@ export async function PATCH(
         updates.email_intent = 'addendum_update';
         updates.filter_status = 'inbox';
         updates.triage_status = 'ready_for_assignment';
-        // Addendums are linked to parent bid, so we don't assign estimators directly
-        updates.assigned_estimator_id = null;
-        updates.estimator_status = 'unassigned';
 
         if (body.matchedBidNumber) {
           const { data: parentBid } = await supabase
             .from('bid_requests')
-            .select('id, duplicate_group_id, bid_number')
+            .select('id, duplicate_group_id, bid_number, assigned_estimator_id, raw_payload')
             .eq('bid_number', body.matchedBidNumber)
             .maybeSingle();
 
@@ -284,7 +284,22 @@ export async function PATCH(
             updates.duplicate_of_id = parentBid.id;
             updates.is_flagged_duplicate = true;
             updates.match_status = 'confirmed';
-            updates.match_reason = 'Manually linked to bid by Calendar Manager';
+            updates.match_reason = 'Linked to bid by Calendar Manager';
+
+            // Inherit estimator assignment if parent bid is already assigned
+            if (parentBid.assigned_estimator_id || parentBid.raw_payload?.assigned_estimator_name) {
+              if (parentBid.assigned_estimator_id) {
+                updates.assigned_estimator_id = parentBid.assigned_estimator_id;
+              }
+              updates.estimator_status = 'assigned';
+              updates.triage_status = 'assigned';
+              updates.raw_payload = {
+                ...(updates.raw_payload || currentRecord.raw_payload),
+                assigned_estimator_name: parentBid.raw_payload?.assigned_estimator_name,
+                auto_dispatched: true,
+                auto_dispatched_at: new Date().toISOString(),
+              };
+            }
           }
         }
       } else if (sticker === 'Won') {
@@ -379,6 +394,47 @@ export async function PATCH(
         { error: 'Failed to update bid request', details: updateError.message },
         { status: 500 }
       );
+    }
+
+    // 5. Cascade Estimator Assignment to all linked Addendums & project records
+    if (body.assignedEstimator !== undefined && (currentRecord.bid_number || currentRecord.duplicate_group_id)) {
+      try {
+        const orConditions: string[] = [];
+        if (currentRecord.bid_number) {
+          orConditions.push(`matched_bid_number.eq.${currentRecord.bid_number}`);
+          orConditions.push(`matched_bid_id.eq.${id}`);
+        }
+        if (currentRecord.duplicate_group_id) {
+          orConditions.push(`duplicate_group_id.eq.${currentRecord.duplicate_group_id}`);
+        }
+
+        const { data: linkedChildren } = await supabase
+          .from('bid_requests')
+          .select('id, raw_payload')
+          .neq('id', id)
+          .or(orConditions.join(','));
+
+        if (linkedChildren && linkedChildren.length > 0) {
+          for (const child of linkedChildren) {
+            await supabase
+              .from('bid_requests')
+              .update({
+                assigned_estimator_id: updates.assigned_estimator_id,
+                estimator_status: updates.estimator_status,
+                triage_status: body.assignedEstimator ? 'assigned' : 'ready_for_assignment',
+                raw_payload: {
+                  ...(child.raw_payload || {}),
+                  assigned_estimator_name: body.assignedEstimator || null,
+                  auto_dispatched: Boolean(body.assignedEstimator),
+                  auto_dispatched_at: body.assignedEstimator ? new Date().toISOString() : null,
+                },
+              })
+              .eq('id', child.id);
+          }
+        }
+      } catch (cascadeErr) {
+        console.error('Error cascading estimator assignment to linked records:', cascadeErr);
+      }
     }
 
     return NextResponse.json({ success: true, bidRequest: updated });
