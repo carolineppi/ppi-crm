@@ -162,88 +162,173 @@ export function getDueDateStatus(dateStr: string | null | undefined): {
   };
 }
 
+export const ESTIMATORS = [
+  'Lisa Williams',
+  'Harrison Schumaker',
+  'Nick Mudd',
+  'Joe Bunn',
+  'Stacey Scott',
+  'Rob Brinlee',
+  'Jennifer MacPherson',
+] as const;
+
+export type EstimatorName = (typeof ESTIMATORS)[number] | 'Not Bidding';
+
+export interface EstimatorColorConfig {
+  pillBg: string;
+  pillText: string;
+  pillBorder: string;
+  dotBg: string;
+  cardBorder: string;
+  primaryColor: string;
+  bgTint: string;
+  borderColor: string;
+  textColor: string;
+}
+
 /**
  * Estimator display badge color map.
  * Exact company color branding:
- * - Lisa Williams: Golden Yellow
- * - Harrison Schumaker: Periwinkle
- * - Nick Mudd: Purple
- * - Joe Bunn: Green
- * - Stacey Scott: Pink
- * - Rob Brinlee: Blue
+ * - Lisa Williams: Golden Yellow (rgb(250, 209, 101))
+ * - Harrison Schumaker: Periwinkle (rgb(154, 156, 255))
+ * - Nick Mudd: Purple (rgb(168, 85, 247))
+ * - Joe Bunn: Green (rgb(34, 197, 94))
+ * - Stacey Scott: Pink (rgb(246, 145, 178))
+ * - Rob Brinlee: Blue (rgb(59, 130, 246))
+ * - Jennifer MacPherson: Orange (rgb(249, 115, 22))
+ * - Not Bidding: Slate Grey (rgb(148, 163, 184))
  */
-export const ESTIMATOR_COLORS: Record<
-  string,
-  {
-    pillBg: string;
-    pillText: string;
-    pillBorder: string;
-    dotBg: string;
-    cardBorder: string;
-  }
-> = {
+export const ESTIMATOR_COLORS: Record<string, EstimatorColorConfig> = {
   'Lisa Williams': {
-    pillBg: 'bg-amber-100/90',
+    primaryColor: 'rgb(250, 209, 101)',
+    bgTint: 'rgba(250, 209, 101, 0.32)',
+    borderColor: 'rgb(245, 196, 70)',
+    textColor: '#451a03',
+    pillBg: 'bg-amber-100',
     pillText: 'text-amber-950 font-bold',
     pillBorder: 'border-amber-400',
-    dotBg: 'bg-amber-500',
-    cardBorder: 'border-l-amber-500',
+    dotBg: 'bg-amber-400',
+    cardBorder: 'border-l-amber-400',
   },
   'Harrison Schumaker': {
-    pillBg: 'bg-indigo-100/80',
+    primaryColor: 'rgb(154, 156, 255)',
+    bgTint: 'rgba(154, 156, 255, 0.28)',
+    borderColor: 'rgb(130, 133, 255)',
+    textColor: '#1e1b4b',
+    pillBg: 'bg-indigo-100',
     pillText: 'text-indigo-950 font-bold',
     pillBorder: 'border-indigo-300',
     dotBg: 'bg-indigo-400',
     cardBorder: 'border-l-indigo-400',
   },
   'Nick Mudd': {
-    pillBg: 'bg-purple-100/80',
+    primaryColor: 'rgb(168, 85, 247)',
+    bgTint: 'rgba(168, 85, 247, 0.22)',
+    borderColor: 'rgb(168, 85, 247)',
+    textColor: '#3b0764',
+    pillBg: 'bg-purple-100',
     pillText: 'text-purple-950 font-bold',
     pillBorder: 'border-purple-300',
-    dotBg: 'bg-purple-600',
-    cardBorder: 'border-l-purple-600',
+    dotBg: 'bg-purple-500',
+    cardBorder: 'border-l-purple-500',
   },
   'Joe Bunn': {
-    pillBg: 'bg-emerald-100/80',
+    primaryColor: 'rgb(34, 197, 94)',
+    bgTint: 'rgba(34, 197, 94, 0.22)',
+    borderColor: 'rgb(34, 197, 94)',
+    textColor: '#052e16',
+    pillBg: 'bg-emerald-100',
     pillText: 'text-emerald-950 font-bold',
     pillBorder: 'border-emerald-300',
-    dotBg: 'bg-emerald-600',
-    cardBorder: 'border-l-emerald-600',
+    dotBg: 'bg-emerald-500',
+    cardBorder: 'border-l-emerald-500',
   },
   'Stacey Scott': {
-    pillBg: 'bg-pink-100/80',
+    primaryColor: 'rgb(246, 145, 178)',
+    bgTint: 'rgba(246, 145, 178, 0.28)',
+    borderColor: 'rgb(240, 115, 155)',
+    textColor: '#500724',
+    pillBg: 'bg-pink-100',
     pillText: 'text-pink-950 font-bold',
     pillBorder: 'border-pink-300',
-    dotBg: 'bg-pink-500',
-    cardBorder: 'border-l-pink-500',
+    dotBg: 'bg-pink-400',
+    cardBorder: 'border-l-pink-400',
   },
   'Rob Brinlee': {
-    pillBg: 'bg-blue-100/80',
+    primaryColor: 'rgb(59, 130, 246)',
+    bgTint: 'rgba(59, 130, 246, 0.22)',
+    borderColor: 'rgb(59, 130, 246)',
+    textColor: '#172554',
+    pillBg: 'bg-blue-100',
     pillText: 'text-blue-950 font-bold',
     pillBorder: 'border-blue-300',
-    dotBg: 'bg-blue-600',
-    cardBorder: 'border-l-blue-600',
+    dotBg: 'bg-blue-500',
+    cardBorder: 'border-l-blue-500',
+  },
+  'Jennifer MacPherson': {
+    primaryColor: 'rgb(249, 115, 22)',
+    bgTint: 'rgba(249, 115, 22, 0.25)',
+    borderColor: 'rgb(249, 115, 22)',
+    textColor: '#431407',
+    pillBg: 'bg-orange-100',
+    pillText: 'text-orange-950 font-bold',
+    pillBorder: 'border-orange-400',
+    dotBg: 'bg-orange-500',
+    cardBorder: 'border-l-orange-500',
+  },
+  'Not Bidding': {
+    primaryColor: 'rgb(148, 163, 184)',
+    bgTint: 'rgb(241, 245, 249)',
+    borderColor: 'rgb(148, 163, 184)',
+    textColor: '#334155',
+    pillBg: 'bg-slate-200',
+    pillText: 'text-slate-700 font-bold',
+    pillBorder: 'border-slate-300',
+    dotBg: 'bg-slate-400',
+    cardBorder: 'border-l-slate-400',
+  },
+  'No Bid': {
+    primaryColor: 'rgb(148, 163, 184)',
+    bgTint: 'rgb(241, 245, 249)',
+    borderColor: 'rgb(148, 163, 184)',
+    textColor: '#334155',
+    pillBg: 'bg-slate-200',
+    pillText: 'text-slate-700 font-bold',
+    pillBorder: 'border-slate-300',
+    dotBg: 'bg-slate-400',
+    cardBorder: 'border-l-slate-400',
   },
 };
 
 export function getEstimatorColor(estimatorName?: string | null) {
-  if (estimatorName && ESTIMATOR_COLORS[estimatorName]) {
-    const c = ESTIMATOR_COLORS[estimatorName];
-    return {
-      ...c,
-      toString() {
-        return `${c.pillBg} ${c.pillText} ${c.pillBorder}`;
-      },
-    };
-  }
-  return {
+  const normName = estimatorName ? estimatorName.trim() : '';
+  const c = ESTIMATOR_COLORS[normName] || {
+    primaryColor: 'rgb(148, 163, 184)',
+    bgTint: 'rgb(248, 250, 252)',
+    borderColor: 'rgb(203, 213, 225)',
+    textColor: '#475569',
     pillBg: 'bg-slate-100',
-    pillText: 'text-slate-700',
+    pillText: 'text-slate-700 font-semibold',
     pillBorder: 'border-slate-300',
     dotBg: 'bg-slate-400',
     cardBorder: 'border-l-slate-400',
+  };
+
+  return {
+    ...c,
+    pillStyle: {
+      backgroundColor: c.bgTint,
+      borderColor: c.borderColor,
+      color: c.textColor,
+    },
+    dotStyle: {
+      backgroundColor: c.primaryColor,
+    },
+    cardBorderStyle: {
+      borderLeftColor: c.primaryColor,
+    },
     toString() {
-      return 'bg-slate-100 text-slate-700 border-slate-300';
+      return `${c.pillBg} ${c.pillText} ${c.pillBorder}`;
     },
   };
 }

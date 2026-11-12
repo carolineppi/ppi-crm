@@ -131,6 +131,7 @@ const ESTIMATORS = [
   'Joe Bunn',
   'Stacey Scott',
   'Rob Brinlee',
+  'Jennifer MacPherson',
 ];
 
 const CATEGORIES = [
@@ -755,6 +756,7 @@ export default function DispatchDashboard() {
     estimator?: string | null,
     dueDate?: string | null
   ) => {
+    const isNotBidding = estimator === 'Not Bidding' || estimator === 'No Bid';
     setBids((prev) =>
       prev.map((b) =>
         b.id === bidId
@@ -762,7 +764,8 @@ export default function DispatchDashboard() {
               ...b,
               ...(estimator !== undefined ? { assignedEstimator: estimator || null } : {}),
               ...(dueDate !== undefined ? { bidDueDate: dueDate || null } : {}),
-              triageStatus: estimator ? 'assigned' : 'ready_for_assignment',
+              triageStatus: isNotBidding ? 'ready_for_assignment' : (estimator ? 'assigned' : 'ready_for_assignment'),
+              estimatorStatus: isNotBidding ? 'no_bid' : (estimator ? 'assigned' : 'unassigned'),
             }
           : b
       )
@@ -779,7 +782,13 @@ export default function DispatchDashboard() {
         body: JSON.stringify(payload),
       });
       if (res.ok) {
-        showToast('✔ Assignment & Due Date updated in calendar');
+        showToast(
+          isNotBidding
+            ? '🚫 Job marked as Not Bidding (Grey)'
+            : estimator
+            ? `✔ Assigned to ${estimator}`
+            : '✔ Assignment updated'
+        );
         await fetchLiveBids();
       } else {
         showToast('Error saving update to database');
@@ -1404,6 +1413,7 @@ export default function DispatchDashboard() {
                     {est}
                   </option>
                 ))}
+                <option value="Not Bidding">🚫 Not Bidding</option>
               </select>
             </div>
 
@@ -1561,9 +1571,22 @@ export default function DispatchDashboard() {
                 </strong>
                 <span className="text-slate-400">•</span>
                 <span className="text-slate-300">Estimator:</span>
-                <strong className="text-white bg-white/10 px-2 py-0.5 rounded font-semibold">
-                  {selectedBid.assignedEstimator || 'Unassigned'}
-                </strong>
+                {selectedBid.assignedEstimator ? (() => {
+                  const estColor = getEstimatorColor(selectedBid.assignedEstimator);
+                  return (
+                    <span
+                      style={estColor.pillStyle}
+                      className="px-2 py-0.5 rounded font-bold text-xs inline-flex items-center gap-1.5 border"
+                    >
+                      <span className="w-2 h-2 rounded-full" style={estColor.dotStyle} />
+                      <span>{selectedBid.assignedEstimator}</span>
+                    </span>
+                  );
+                })() : (
+                  <strong className="text-white bg-white/10 px-2 py-0.5 rounded font-semibold">
+                    Unassigned
+                  </strong>
+                )}
                 <span className="text-slate-400">•</span>
                 <span className="text-slate-300">Due:</span>
                 <strong className="text-white bg-white/10 px-2 py-0.5 rounded font-semibold">
@@ -2433,15 +2456,18 @@ export default function DispatchDashboard() {
 
                           {/* Right: Estimator, Attachments & Received Date */}
                           <div className="flex items-center gap-4 flex-shrink-0 text-slate-500">
-                            {bid.assignedEstimator && (
-                              <span
-                                className={`px-2 py-0.5 rounded text-[11px] font-bold border hidden sm:inline ${getEstimatorColor(
-                                  bid.assignedEstimator
-                                )}`}
-                              >
-                                {bid.assignedEstimator.split(' ')[0]}
-                              </span>
-                            )}
+                            {bid.assignedEstimator && (() => {
+                              const estColor = getEstimatorColor(bid.assignedEstimator);
+                              return (
+                                <span
+                                  style={estColor.pillStyle}
+                                  className="px-2 py-0.5 rounded text-[11px] font-bold border hidden sm:inline-flex items-center gap-1"
+                                >
+                                  <span className="w-1.5 h-1.5 rounded-full" style={estColor.dotStyle} />
+                                  <span>{bid.assignedEstimator.split(' ')[0]}</span>
+                                </span>
+                              );
+                            })()}
 
                             {bid.attachmentsCount > 0 && (
                               <span className="text-[11px] text-slate-500 flex items-center gap-0.5">
@@ -2580,11 +2606,18 @@ export default function DispatchDashboard() {
                               </span>
                             )}
 
-                            {bid.assignedEstimator && (
-                              <span className={`px-1.5 py-0.5 rounded text-[10px] font-bold border ${getEstimatorColor(bid.assignedEstimator)}`}>
-                                {bid.assignedEstimator.split(' ')[0]}
-                              </span>
-                            )}
+                            {bid.assignedEstimator && (() => {
+                              const estColor = getEstimatorColor(bid.assignedEstimator);
+                              return (
+                                <span
+                                  style={estColor.pillStyle}
+                                  className="px-1.5 py-0.5 rounded text-[10px] font-bold border inline-flex items-center gap-1"
+                                >
+                                  <span className="w-1.5 h-1.5 rounded-full" style={estColor.dotStyle} />
+                                  <span>{bid.assignedEstimator.split(' ')[0]}</span>
+                                </span>
+                              );
+                            })()}
 
                             {bid.attachmentsCount > 0 && (
                               <span className="text-[10px] text-slate-500 flex items-center gap-0.5 ml-auto">
@@ -2844,6 +2877,7 @@ export default function DispatchDashboard() {
                                         {est}
                                       </option>
                                     ))}
+                                    <option value="Not Bidding">🚫 Not Bidding</option>
                                   </select>
                                 </div>
 
@@ -3102,6 +3136,7 @@ export default function DispatchDashboard() {
                             {est}
                           </option>
                         ))}
+                        <option value="Not Bidding">🚫 Not Bidding</option>
                       </select>
                     </div>
                     <div>

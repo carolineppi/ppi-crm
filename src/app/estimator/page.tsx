@@ -40,6 +40,7 @@ const ESTIMATORS = [
   'Joe Bunn',
   'Stacey Scott',
   'Rob Brinlee',
+  'Jennifer MacPherson',
 ];
 
 interface JobItem {
@@ -343,15 +344,25 @@ export default function EstimatorWorkspacePage() {
               <button
                 key={est}
                 onClick={() => handleSelectEstimator(est)}
+                style={
+                  isSelected
+                    ? {
+                        backgroundColor: color.bgTint,
+                        borderColor: color.borderColor,
+                        color: color.textColor,
+                      }
+                    : undefined
+                }
                 className={`px-3 py-1.5 rounded-xl text-xs font-bold flex items-center gap-2 transition-all ${
                   isSelected
-                    ? `${color.pillBg} ${color.pillText} border-2 ${color.pillBorder} shadow-xs ring-2 ring-blue-300/40`
+                    ? `border-2 shadow-xs ring-2 ring-blue-300/40`
                     : 'bg-slate-50 text-slate-600 hover:bg-slate-100 border border-slate-200'
                 }`}
               >
                 <span
+                  style={isSelected ? { backgroundColor: color.primaryColor } : undefined}
                   className={`w-5 h-5 rounded-full flex items-center justify-center text-[10px] font-extrabold text-white ${
-                    isSelected ? color.dotBg : 'bg-slate-400'
+                    isSelected ? '' : 'bg-slate-400'
                   }`}
                 >
                   {initials}

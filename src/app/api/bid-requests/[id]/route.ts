@@ -86,8 +86,14 @@ export async function PATCH(
         ...currentRecord.raw_payload,
         assigned_estimator_name: body.assignedEstimator,
       };
-      updates.estimator_status = body.assignedEstimator ? 'assigned' : 'unassigned';
-      updates.triage_status = body.assignedEstimator ? 'assigned' : 'ready_for_assignment';
+
+      if (body.assignedEstimator === 'Not Bidding' || body.assignedEstimator === 'No Bid') {
+        updates.estimator_status = 'no_bid';
+        updates.assigned_estimator_id = null;
+      } else {
+        updates.estimator_status = body.assignedEstimator ? 'assigned' : 'unassigned';
+        updates.triage_status = body.assignedEstimator ? 'assigned' : 'ready_for_assignment';
+      }
     }
 
     // 2b. Handle Calendar Bid Due Date Update

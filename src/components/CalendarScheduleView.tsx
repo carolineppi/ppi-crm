@@ -172,6 +172,7 @@ export default function CalendarScheduleView({
     const unscheduled: CalendarBidItem[] = [];
     const estimatorCounts: Record<string, number> = {
       Unassigned: 0,
+      'Not Bidding': 0,
     };
     estimators.forEach((est) => {
       estimatorCounts[est] = 0;
@@ -194,7 +195,8 @@ export default function CalendarScheduleView({
       // If bid falls within currently viewed week, increment workload stats
       if (weekYmdSet.has(effectiveDate)) {
         scheduledThisWeek++;
-        const est = bid.assignedEstimator || 'Unassigned';
+        const isNotBid = bid.assignedEstimator === 'Not Bidding' || bid.estimatorStatus === 'no_bid';
+        const est = isNotBid ? 'Not Bidding' : (bid.assignedEstimator || 'Unassigned');
         estimatorCounts[est] = (estimatorCounts[est] || 0) + 1;
       }
     });
@@ -322,7 +324,7 @@ export default function CalendarScheduleView({
       </div>
 
       {/* Estimator Workload Balance Bar for This Week */}
-      <div className="bg-white p-3 rounded-2xl border border-slate-200 shadow-xs grid grid-cols-2 sm:grid-cols-4 lg:grid-cols-8 gap-2 text-xs">
+      <div className="bg-white p-3 rounded-2xl border border-slate-200 shadow-xs grid grid-cols-2 sm:grid-cols-5 lg:grid-cols-10 gap-2 text-xs">
         {/* ALL Filter Tab */}
         <div
           onClick={() => setFilterEstimator('ALL')}
@@ -335,7 +337,7 @@ export default function CalendarScheduleView({
           <div className="flex items-center justify-between">
             <span className="font-bold flex items-center gap-1.5">
               <Users className="w-3.5 h-3.5" />
-              <span>All Estimators</span>
+              <span>All</span>
             </span>
             <span
               className={`font-mono font-black text-xs px-1.5 py-0.2 rounded ${
@@ -346,7 +348,7 @@ export default function CalendarScheduleView({
             </span>
           </div>
           <p className={`text-[10px] mt-1 ${filterEstimator === 'ALL' ? 'text-slate-300' : 'text-slate-500'}`}>
-            Full team schedule
+            Full schedule
           </p>
         </div>
 
@@ -359,15 +361,27 @@ export default function CalendarScheduleView({
             <div
               key={est}
               onClick={() => setFilterEstimator(est)}
+              style={
+                isSelected
+                  ? {
+                      borderColor: color.primaryColor,
+                      backgroundColor: color.bgTint,
+                      boxShadow: `0 0 0 2px ${color.primaryColor}`,
+                    }
+                  : {}
+              }
               className={`p-2 rounded-xl border transition-all cursor-pointer flex flex-col justify-between ${
                 isSelected
-                  ? `${color.pillBg} border-blue-400 ring-2 ring-blue-300 shadow-xs font-bold`
+                  ? 'shadow-xs font-bold'
                   : 'bg-slate-50/70 border-slate-200 hover:bg-slate-100/70'
               }`}
             >
               <div className="flex items-center justify-between">
                 <span className="font-bold text-slate-800 flex items-center gap-1.5 truncate">
-                  <span className={`w-2 h-2 rounded-full flex-shrink-0 ${color.dotBg}`} />
+                  <span
+                    className="w-2.5 h-2.5 rounded-full flex-shrink-0"
+                    style={{ backgroundColor: color.primaryColor }}
+                  />
                   <span className="truncate">{est.split(' ')[0]}</span>
                 </span>
                 <span className="font-mono font-black text-xs bg-white px-1.5 py-0.2 rounded border border-slate-200 text-slate-900 shadow-2xs">
@@ -375,7 +389,7 @@ export default function CalendarScheduleView({
                 </span>
               </div>
               <p className="text-[10px] text-slate-500 mt-1 truncate">
-                {count === 0 ? 'No bids this week' : `${count} bid${count === 1 ? '' : 's'} due`}
+                {count === 0 ? 'No bids' : `${count} bid${count === 1 ? '' : 's'}`}
               </p>
             </div>
           );
@@ -392,15 +406,47 @@ export default function CalendarScheduleView({
         >
           <div className="flex items-center justify-between">
             <span className="font-bold text-slate-800 flex items-center gap-1.5 truncate">
-              <span className="w-2 h-2 rounded-full bg-rose-500 flex-shrink-0" />
-              <span>Needs Estimator</span>
+              <span className="w-2.5 h-2.5 rounded-full bg-rose-500 flex-shrink-0" />
+              <span>Needs Est.</span>
             </span>
             <span className="font-mono font-black text-xs bg-white px-1.5 py-0.2 rounded border border-slate-200 text-rose-700 shadow-2xs">
               {weekEstimatorCounts['Unassigned'] || 0}
             </span>
           </div>
           <p className="text-[10px] text-slate-500 mt-1 truncate">
-            Scheduled, unassigned
+            Unassigned
+          </p>
+        </div>
+
+        {/* Not Bidding / Grey */}
+        <div
+          onClick={() => setFilterEstimator('Not Bidding')}
+          style={
+            filterEstimator === 'Not Bidding'
+              ? {
+                  borderColor: 'rgb(148, 163, 184)',
+                  backgroundColor: 'rgb(241, 245, 249)',
+                  boxShadow: '0 0 0 2px rgb(148, 163, 184)',
+                }
+              : {}
+          }
+          className={`p-2 rounded-xl border transition-all cursor-pointer flex flex-col justify-between ${
+            filterEstimator === 'Not Bidding'
+              ? 'shadow-xs font-bold'
+              : 'bg-slate-50/70 border-slate-200 hover:bg-slate-100/70'
+          }`}
+        >
+          <div className="flex items-center justify-between">
+            <span className="font-bold text-slate-700 flex items-center gap-1.5 truncate">
+              <span className="w-2.5 h-2.5 rounded-full bg-slate-400 flex-shrink-0" />
+              <span>Not Bidding</span>
+            </span>
+            <span className="font-mono font-black text-xs bg-white px-1.5 py-0.2 rounded border border-slate-200 text-slate-700 shadow-2xs">
+              {weekEstimatorCounts['Not Bidding'] || 0}
+            </span>
+          </div>
+          <p className="text-[10px] text-slate-500 mt-1 truncate">
+            Marked grey
           </p>
         </div>
       </div>
@@ -418,7 +464,16 @@ export default function CalendarScheduleView({
               const allDayBids = bidsByDate[day.ymd] || [];
               const dayBids = allDayBids.filter((b) => {
                 if (filterEstimator === 'ALL') return true;
-                if (filterEstimator === 'Unassigned') return !b.assignedEstimator;
+                if (filterEstimator === 'Unassigned') {
+                  return (!b.assignedEstimator || b.assignedEstimator === '') && b.estimatorStatus !== 'no_bid';
+                }
+                if (filterEstimator === 'Not Bidding') {
+                  return (
+                    b.assignedEstimator === 'Not Bidding' ||
+                    b.assignedEstimator === 'No Bid' ||
+                    b.estimatorStatus === 'no_bid'
+                  );
+                }
                 return b.assignedEstimator === filterEstimator;
               });
 
@@ -479,36 +534,64 @@ export default function CalendarScheduleView({
                       </div>
                     ) : (
                       dayBids.map((bid) => {
-                        const estColor = getEstimatorColor(bid.assignedEstimator);
+                        const isNotBidding =
+                          bid.assignedEstimator === 'Not Bidding' ||
+                          bid.assignedEstimator === 'No Bid' ||
+                          bid.estimatorStatus === 'no_bid';
+                        const estColor = getEstimatorColor(isNotBidding ? 'Not Bidding' : bid.assignedEstimator);
                         const isAssigningThis = isAssigningInline[bid.id];
 
                         return (
                           <div
                             key={bid.id}
-                            className={`p-3 rounded-xl border bg-white hover:bg-slate-50/90 shadow-2xs hover:shadow-xs transition-all border-l-4 ${estColor.cardBorder} border-t-slate-200 border-r-slate-200 border-b-slate-200 flex flex-col justify-between gap-2 group relative`}
+                            style={{
+                              borderLeftColor: estColor.primaryColor,
+                              backgroundColor: isNotBidding ? 'rgba(241, 245, 249, 0.95)' : undefined,
+                            }}
+                            className={`p-3 rounded-xl border ${
+                              isNotBidding
+                                ? 'bg-slate-100/90 text-slate-600'
+                                : 'bg-white hover:bg-slate-50/90'
+                            } shadow-2xs hover:shadow-xs transition-all border-l-4 border-t-slate-200 border-r-slate-200 border-b-slate-200 flex flex-col justify-between gap-2 group relative`}
                           >
                             {/* Card Top Row: Bid Number & Review Button */}
                             <div className="flex items-center justify-between gap-1 text-[11px]">
                               <span
                                 onClick={() => onSelectBid(bid)}
-                                className="font-mono font-bold text-blue-900 bg-blue-50/80 px-1.5 py-0.5 rounded border border-blue-200/80 hover:bg-blue-100 transition-colors cursor-pointer"
+                                className={`font-mono font-bold px-1.5 py-0.5 rounded border transition-colors cursor-pointer ${
+                                  isNotBidding
+                                    ? 'bg-slate-200 text-slate-700 border-slate-300'
+                                    : 'text-blue-900 bg-blue-50/80 border-blue-200/80 hover:bg-blue-100'
+                                }`}
                                 title="Click to view bid details"
                               >
                                 {bid.bidNumber || 'Pending Bid #'}
                               </span>
 
-                              {Boolean(bid.attachmentsCount && bid.attachmentsCount > 0) && (
-                                <span className="text-[10px] text-slate-400 flex items-center gap-0.5 font-mono">
-                                  <Paperclip className="w-3 h-3 text-slate-400" />
-                                  <span>{bid.attachmentsCount}</span>
-                                </span>
-                              )}
+                              <div className="flex items-center gap-1.5">
+                                {isNotBidding && (
+                                  <span className="text-[10px] font-bold px-1.5 py-0.2 rounded bg-slate-200 text-slate-700 border border-slate-300">
+                                    Not Bidding
+                                  </span>
+                                )}
+
+                                {Boolean(bid.attachmentsCount && bid.attachmentsCount > 0) && (
+                                  <span className="text-[10px] text-slate-400 flex items-center gap-0.5 font-mono">
+                                    <Paperclip className="w-3 h-3 text-slate-400" />
+                                    <span>{bid.attachmentsCount}</span>
+                                  </span>
+                                )}
+                              </div>
                             </div>
 
                             {/* Project Name (Primary Clickable Title) */}
                             <h4
                               onClick={() => onSelectBid(bid)}
-                              className="text-xs font-bold text-slate-900 group-hover:text-blue-700 transition-colors line-clamp-2 leading-snug cursor-pointer"
+                              className={`text-xs font-bold transition-colors line-clamp-2 leading-snug cursor-pointer ${
+                                isNotBidding
+                                  ? 'text-slate-600 line-through decoration-slate-400'
+                                  : 'text-slate-900 group-hover:text-blue-700'
+                              }`}
                               title={bid.projectName || bid.subject}
                             >
                               {bid.projectName || bid.subject}
@@ -533,15 +616,24 @@ export default function CalendarScheduleView({
                             <div className="pt-2 border-t border-slate-100 flex items-center justify-between gap-1 text-[10px]">
                               <div className="flex-1 min-w-0">
                                 <select
-                                  value={bid.assignedEstimator || ''}
+                                  value={isNotBidding ? 'Not Bidding' : (bid.assignedEstimator || '')}
                                   onChange={(e) => handleInlineAssign(e, bid)}
                                   disabled={isAssigningThis}
-                                  className={`w-full text-[11px] font-bold py-1 px-1.5 rounded-lg border focus:outline-none focus:ring-1 focus:ring-blue-500 cursor-pointer ${
-                                    bid.assignedEstimator
-                                      ? `${estColor.pillBg} ${estColor.pillText} ${estColor.pillBorder}`
-                                      : 'bg-rose-50 text-rose-800 border-rose-300'
+                                  style={
+                                    bid.assignedEstimator || isNotBidding
+                                      ? {
+                                          backgroundColor: estColor.bgTint,
+                                          borderColor: estColor.borderColor,
+                                          color: estColor.textColor,
+                                        }
+                                      : undefined
+                                  }
+                                  className={`w-full text-[11px] font-bold py-1 px-1.5 rounded-lg border focus:outline-none focus:ring-1 focus:ring-blue-500 cursor-pointer shadow-2xs ${
+                                    !bid.assignedEstimator && !isNotBidding
+                                      ? 'bg-rose-50 text-rose-800 border-rose-300'
+                                      : ''
                                   }`}
-                                  title="Quick assign estimator"
+                                  title="Quick assign estimator or mark as Not Bidding"
                                 >
                                   <option value="">⚠️ Assign Estimator...</option>
                                   {estimators.map((est) => (
@@ -549,6 +641,7 @@ export default function CalendarScheduleView({
                                       {est}
                                     </option>
                                   ))}
+                                  <option value="Not Bidding">🚫 Not Bidding (Mark Grey)</option>
                                 </select>
                               </div>
                             </div>
