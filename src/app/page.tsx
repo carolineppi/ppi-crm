@@ -2335,6 +2335,8 @@ export default function DispatchDashboard() {
           estimators={ESTIMATORS}
           onSelectBid={openReviewModal}
           onAssignBid={handleAssignEstimatorAndDate}
+          onBidsChanged={fetchLiveBids}
+          onNotify={showToast}
         />
       ) : (
         <>

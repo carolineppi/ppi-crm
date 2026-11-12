@@ -89,3 +89,94 @@ export async function GET(request: NextRequest) {
     );
   }
 }
+
+export async function POST(request: NextRequest) {
+  try {
+    const body = await request.json();
+    const projectName = typeof body.projectName === 'string' ? body.projectName.trim() : '';
+    if (!projectName) {
+      return NextResponse.json({ error: 'Project Name is required' }, { status: 400 });
+    }
+
+    const supabase = createServerSupabaseClient();
+
+    // Generate sequential BID-YY-XXXX
+    let bidNumber: string | null = null;
+    const { data: nextNum } = await supabase.rpc('get_next_bid_number');
+    if (nextNum) {
+      bidNumber = nextNum;
+    } else {
+      const currentYear = new Date().getFullYear().toString().slice(-2);
+      const { count } = await supabase
+        .from('bid_requests')
+        .select('id', { count: 'exact', head: true })
+        .not('bid_number', 'is', null);
+      const seq = (count || 0) + 1;
+      bidNumber = `BID-${currentYear}-${seq.toString().padStart(4, '0')}`;
+    }
+
+    const assignedEstimator = typeof body.assignedEstimator === 'string' && body.assignedEstimator.trim()
+      ? body.assignedEstimator.trim()
+      : null;
+    const isNotBidding = assignedEstimator === 'Not Bidding' || assignedEstimator === 'No Bid';
+
+    const bidDueDate =
+      typeof body.bidDueDate === 'string' && /^\d{4}-\d{2}-\d{2}$/.test(body.bidDueDate.trim())
+        ? `${body.bidDueDate.trim()}T17:00:00.000Z`
+        : null;
+
+    const nowIso = new Date().toISOString();
+    const record = {
+      bid_number: bidNumber,
+      email_subject: projectName,
+      sender_email: 'manual@calendar-manager.local',
+      sender_name: body.clientCompany?.trim() || 'Manual Calendar Entry',
+      email_received_at: nowIso,
+      email_body_text: body.notes?.trim() || `Manual bid entry created from Calendar Schedule.`,
+      project_name: projectName,
+      client_company: body.clientCompany?.trim() || null,
+      project_address_city: body.projectAddressCity?.trim() || null,
+      project_address_state: body.projectAddressState?.trim() || null,
+      bid_due_date: bidDueDate,
+      google_drive_folder_url: body.googleDriveFolderUrl?.trim() || null,
+      email_intent: 'invitation_to_bid',
+      intent_confidence: 1.0,
+      intent_explanation: 'Manually created by Calendar Manager',
+      is_human_labeled: true,
+      human_label: 'ITB',
+      human_labeled_at: nowIso,
+      filter_status: 'inbox',
+      triage_status: assignedEstimator && !isNotBidding ? 'assigned' : 'ready_for_assignment',
+      estimator_status: isNotBidding ? 'no_bid' : assignedEstimator ? 'assigned' : 'unassigned',
+      duplicate_group_id: crypto.randomUUID(),
+      is_flagged_duplicate: false,
+      raw_payload: {
+        source: 'manual_calendar_entry',
+        assigned_estimator_name: assignedEstimator,
+        bid_due_time: body.bidDueTime?.trim() || null,
+        is_labeled: true,
+        human_verified: true,
+        human_label: 'ITB',
+      },
+    };
+
+    const { data: inserted, error } = await supabase
+      .from('bid_requests')
+      .insert(record)
+      .select()
+      .single();
+
+    if (error) {
+      console.error('Error creating manual bid request:', error);
+      return NextResponse.json({ error: error.message }, { status: 500 });
+    }
+
+    return NextResponse.json({ success: true, bidRequest: inserted }, { status: 201 });
+  } catch (err: any) {
+    console.error('Exception in POST /api/bid-requests:', err);
+    return NextResponse.json(
+      { error: err instanceof Error ? err.message : 'Failed to create bid request' },
+      { status: 500 }
+    );
+  }
+}

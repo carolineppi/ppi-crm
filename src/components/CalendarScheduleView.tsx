@@ -20,7 +20,11 @@ import {
   Layers,
   FolderArchive,
   ExternalLink,
+  Upload,
+  PlusCircle,
 } from 'lucide-react';
+import CalendarImportModal from './CalendarImportModal';
+import CalendarAddBidModal from './CalendarAddBidModal';
 import {
   formatFriendlyDate,
   getDueDateStatus,
@@ -54,6 +58,8 @@ interface CalendarScheduleViewProps {
   estimators: string[];
   onSelectBid: (bid: any) => void;
   onAssignBid: (bidId: string, estimator: string, dueDate: string | null) => Promise<void>;
+  onBidsChanged?: () => void;
+  onNotify?: (message: string) => void;
 }
 
 /**
@@ -74,6 +80,8 @@ export default function CalendarScheduleView({
   estimators,
   onSelectBid,
   onAssignBid,
+  onBidsChanged,
+  onNotify,
 }: CalendarScheduleViewProps) {
   // 1. STRICT FILTER: Only ITBs in the calendar view
   const itbBids = useMemo(() => {
@@ -94,6 +102,8 @@ export default function CalendarScheduleView({
   const [isAssigningInline, setIsAssigningInline] = useState<Record<string, boolean>>({});
   const [draggedBidId, setDraggedBidId] = useState<string | null>(null);
   const [dragOverYmd, setDragOverYmd] = useState<string | null>(null);
+  const [showImportModal, setShowImportModal] = useState<boolean>(false);
+  const [showAddBidModal, setShowAddBidModal] = useState<boolean>(false);
 
   const parseDueTimeMinutes = (timeStr?: string | null): number => {
     if (!timeStr) return 9999;
@@ -343,6 +353,28 @@ export default function CalendarScheduleView({
           >
             <Clock className="w-3.5 h-3.5 text-amber-600" />
             <span>Unscheduled ({unscheduledBids.length})</span>
+          </button>
+
+          {/* Import Google Calendar (.ics) */}
+          <button
+            type="button"
+            onClick={() => setShowImportModal(true)}
+            className="px-3 py-1.5 rounded-xl text-xs font-bold flex items-center gap-1.5 bg-white hover:bg-slate-50 text-slate-700 border border-slate-300 shadow-2xs transition-colors"
+            title="Import historical & upcoming bids from Google Calendar (.ics)"
+          >
+            <Upload className="w-3.5 h-3.5 text-blue-600" />
+            <span>Import .ics</span>
+          </button>
+
+          {/* Manual + Add Bid */}
+          <button
+            type="button"
+            onClick={() => setShowAddBidModal(true)}
+            className="px-3 py-1.5 rounded-xl text-xs font-bold flex items-center gap-1.5 bg-blue-600 hover:bg-blue-700 text-white shadow-xs transition-colors"
+            title="Manually add a new bid to the calendar"
+          >
+            <PlusCircle className="w-3.5 h-3.5" />
+            <span>Add Bid</span>
           </button>
         </div>
       </div>
@@ -876,6 +908,35 @@ export default function CalendarScheduleView({
           )}
         </div>
       )}
+
+      {/* Google Calendar (.ics) Importer Modal */}
+      <CalendarImportModal
+        isOpen={showImportModal}
+        estimators={estimators}
+        onClose={() => setShowImportModal(false)}
+        onImportComplete={({ createdCount, enrichedCount, skippedCount }) => {
+          if (onNotify) {
+            onNotify(
+              `✔ Calendar import complete: ${createdCount} added, ${enrichedCount} matched & updated, ${skippedCount} skipped.`
+            );
+          }
+          if (onBidsChanged) onBidsChanged();
+        }}
+      />
+
+      {/* Manual Add Bid Modal */}
+      <CalendarAddBidModal
+        isOpen={showAddBidModal}
+        estimators={estimators}
+        defaultDueDate={todayYmd}
+        onClose={() => setShowAddBidModal(false)}
+        onCreated={(bidNumber) => {
+          if (onNotify) {
+            onNotify(`✔ Added manual bid ${bidNumber || ''} to calendar!`);
+          }
+          if (onBidsChanged) onBidsChanged();
+        }}
+      />
     </div>
   );
 }
