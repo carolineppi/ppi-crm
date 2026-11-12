@@ -17,6 +17,8 @@ interface UpdatePayload {
   filterStatus?: string | null;
   moveToDuplicates?: boolean;
   restoreFromDuplicates?: boolean;
+  unmarkDuplicate?: boolean;
+  keepEmail?: boolean;
   isHumanLabeled?: boolean;
   isGcWonPrime?: boolean;
 }
@@ -123,10 +125,11 @@ export async function PATCH(
       updates.duplicate_resolution = 'duplicate';
       updates.is_flagged_duplicate = true;
     }
-    if (body.restoreFromDuplicates) {
+    if (body.restoreFromDuplicates || body.unmarkDuplicate || body.keepEmail) {
       updates.filter_status = 'inbox';
       updates.duplicate_resolution = 'marked_distinct';
       updates.is_flagged_duplicate = false;
+      updates.duplicate_of_id = null;
     }
     if (body.isHumanLabeled) {
       updates.is_human_labeled = true;
@@ -195,6 +198,11 @@ export async function PATCH(
           };
           updates.triage_status = 'assigned';
         }
+      } else {
+        return NextResponse.json(
+          { error: `Cannot link: Active project with Bid Number "${targetBidNum}" does not exist.` },
+          { status: 400 }
+        );
       }
     }
 

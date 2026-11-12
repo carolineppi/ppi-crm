@@ -1,6 +1,6 @@
 'use client';
 
-import React, { useState, useEffect, useMemo } from 'react';
+import React, { useState, useEffect, useMemo, useCallback } from 'react';
 import Link from 'next/link';
 import {
   Inbox,
@@ -46,6 +46,11 @@ import {
   Columns,
   ListFilter,
   AlertCircle,
+  Maximize2,
+  Minimize2,
+  Eye,
+  CheckCircle2,
+  Split,
 } from 'lucide-react';
 import EmailDocumentViewer from '@/components/EmailDocumentViewer';
 import CalendarScheduleView from '@/components/CalendarScheduleView';
@@ -62,7 +67,8 @@ interface DisplayBidRequest {
   subject: string;
   senderEmail: string;
   senderName: string;
-  receivedAt: string;
+  rawReceivedAt: string; // ISO timestamp
+  receivedAt: string;    // Formatted: Time if today, Month DD (ex: Nov 11) if earlier
   jobCode: string | null;
   projectName?: string | null;
   clientCompany?: string | null;
@@ -128,14 +134,43 @@ const CATEGORIES = [
   'Spam',
 ];
 
+/**
+ * Format received date:
+ * - If received today: list the time (e.g., 10:45 AM)
+ * - If anything but today: list Month DD (ex: Nov 11)
+ */
+function formatReceivedDate(isoString: string | null | undefined): string {
+  if (!isoString) return '';
+  const date = new Date(isoString);
+  if (isNaN(date.getTime())) return '';
+
+  const now = new Date();
+  const isToday =
+    date.getFullYear() === now.getFullYear() &&
+    date.getMonth() === now.getMonth() &&
+    date.getDate() === now.getDate();
+
+  if (isToday) {
+    return date.toLocaleTimeString([], { hour: 'numeric', minute: '2-digit' });
+  }
+
+  const monthNames = [
+    'Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun',
+    'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec',
+  ];
+  const month = monthNames[date.getMonth()];
+  const day = date.getDate().toString().padStart(2, '0');
+  return `${month} ${day}`;
+}
+
 export default function DispatchDashboard() {
   const [bids, setBids] = useState<DisplayBidRequest[]>([]);
   const [activeFilter, setActiveFilter] = useState<string>('ALL');
   const [verificationFilter, setVerificationFilter] = useState<'all' | 'human_only' | 'unverified_only'>('all');
   const [viewMode, setViewMode] = useState<'feed' | 'calendar'>('feed');
-  const [layoutMode, setLayoutMode] = useState<'split' | 'list'>('split');
+  const [layoutMode, setLayoutMode] = useState<'fullscreen' | 'split' | 'list'>('fullscreen');
+  const [isSplitMaximized, setIsSplitMaximized] = useState(false);
   const [selectedEmailId, setSelectedEmailId] = useState<string | null>(null);
-  const [isMobileDetailOpen, setIsMobileDetailOpen] = useState(false);
   const [isUsingLiveDb, setIsUsingLiveDb] = useState(false);
   const [isLoading, setIsLoading] = useState(false);
   const [expandedGroups, setExpandedGroups] = useState<Record<string, boolean>>({});
@@ -165,11 +200,17 @@ export default function DispatchDashboard() {
   const [isSavingReclassification, setIsSavingReclassification] = useState(false);
   const [showModalEmailBody, setShowModalEmailBody] = useState(true);
 
-  // Standalone Link / Relink Modal State (for Calendar Manager)
+  // Standalone Link / Relink Modal State
   const [linkingBid, setLinkingBid] = useState<DisplayBidRequest | null>(null);
   const [targetBidNumberForLink, setTargetBidNumberForLink] = useState('');
   const [relinkSearchQuery, setRelinkSearchQuery] = useState('');
   const [isLinkingLoading, setIsLinkingLoading] = useState(false);
+
+  // Duplicate Inspection & Comparison Modal State
+  const [comparingDuplicateBid, setComparingDuplicateBid] = useState<{
+    current: DisplayBidRequest;
+    original: DisplayBidRequest;
+  } | null>(null);
 
   const toggleEmailDropdown = (id: string) => {
     setExpandedEmails((prev) => ({
@@ -231,6 +272,9 @@ export default function DispatchDashboard() {
             ? r.raw_payload.attachments
             : [];
 
+          const rawReceivedAt = r.email_received_at || r.created_at;
+          const receivedAt = formatReceivedDate(rawReceivedAt);
+
           const rawAiDueDate = r.ai_analysis?.bidDueDate || null;
           const normalizedAiDueDate = normalizeDateToYyyyMmDd(rawAiDueDate);
           const bidDueDate = r.bid_due_date ? normalizeDateToYyyyMmDd(r.bid_due_date) : null;
@@ -249,10 +293,8 @@ export default function DispatchDashboard() {
             subject: r.email_subject,
             senderEmail: r.sender_email,
             senderName: r.sender_name || r.sender_email.split('@')[0],
-            receivedAt: new Date(r.email_received_at || r.created_at).toLocaleTimeString([], {
-              hour: '2-digit',
-              minute: '2-digit',
-            }),
+            rawReceivedAt,
+            receivedAt,
             jobCode: r.job_code,
             projectName,
             clientCompany,
@@ -313,14 +355,25 @@ export default function DispatchDashboard() {
     }
   }, []);
 
-  // Distinct list of active ITBs that have generated Bid Numbers (for linking Addendums/Wons/Losses)
+  // Distinct list of active ITBs with numbers
   const activeITBsWithNumbers = useMemo(() => {
     return bids.filter((b) => b.bidNumber && b.sticker === 'ITB');
   }, [bids]);
 
+  // Set of all real, non-empty bid numbers existing in the database
+  const validBidNumbers = useMemo(() => {
+    const set = new Set<string>();
+    for (const b of bids) {
+      if (b.bidNumber && b.bidNumber.trim()) {
+        set.add(b.bidNumber.trim());
+      }
+    }
+    return set;
+  }, [bids]);
+
   // Sibling & Cross-Contractor Matching Engine:
   // Detects if the same project has been received from a DIFFERENT GC contractor
-  const findCrossContractorMatches = (target: DisplayBidRequest): CrossContractorMatch[] => {
+  const findCrossContractorMatches = useCallback((target: DisplayBidRequest): CrossContractorMatch[] => {
     if (!target) return [];
     const targetSender = (target.originalSenderEmail || target.senderEmail || '').toLowerCase();
     const targetCompany = (target.clientCompany || target.originalSenderName || target.senderName || '').toLowerCase().trim();
@@ -338,14 +391,20 @@ export default function DispatchDashboard() {
       const otherSender = (other.originalSenderEmail || other.senderEmail || '').toLowerCase();
       const otherCompany = (other.clientCompany || other.originalSenderName || other.senderName || '').toLowerCase().trim();
 
-      // Must be a different sender or contractor company
       const isDifferentContractor =
         (targetSender && otherSender && targetSender !== otherSender) ||
         (targetCompany && otherCompany && targetCompany !== otherCompany && !targetCompany.includes(otherCompany) && !otherCompany.includes(targetCompany));
 
       if (!isDifferentContractor) continue;
 
-      // 1. Same duplicate group id (already linked or clustered)
+      // Only assign bidNumber if that bid number actually exists in the active database
+      const validNumber = other.bidNumber && validBidNumbers.has(other.bidNumber)
+        ? other.bidNumber
+        : other.matchedBidNumber && validBidNumbers.has(other.matchedBidNumber)
+        ? other.matchedBidNumber
+        : null;
+
+      // 1. Same duplicate group id
       if (target.duplicateGroupId && other.duplicateGroupId && target.duplicateGroupId === other.duplicateGroupId) {
         seenIds.add(other.id);
         matches.push({
@@ -353,7 +412,7 @@ export default function DispatchDashboard() {
           matchedOn: 'group',
           contractorName: other.clientCompany || other.originalSenderName || other.senderName,
           assignedEstimator: other.assignedEstimator,
-          bidNumber: other.bidNumber || other.matchedBidNumber || null,
+          bidNumber: validNumber,
         });
         continue;
       }
@@ -366,7 +425,7 @@ export default function DispatchDashboard() {
           matchedOn: 'job_code',
           contractorName: other.clientCompany || other.originalSenderName || other.senderName,
           assignedEstimator: other.assignedEstimator,
-          bidNumber: other.bidNumber || other.matchedBidNumber || null,
+          bidNumber: validNumber,
         });
         continue;
       }
@@ -381,7 +440,7 @@ export default function DispatchDashboard() {
             matchedOn: 'project_name',
             contractorName: other.clientCompany || other.originalSenderName || other.senderName,
             assignedEstimator: other.assignedEstimator,
-            bidNumber: other.bidNumber || other.matchedBidNumber || null,
+            bidNumber: validNumber,
           });
           continue;
         }
@@ -397,7 +456,7 @@ export default function DispatchDashboard() {
             matchedOn: 'project_address',
             contractorName: other.clientCompany || other.originalSenderName || other.senderName,
             assignedEstimator: other.assignedEstimator,
-            bidNumber: other.bidNumber || other.matchedBidNumber || null,
+            bidNumber: validNumber,
           });
           continue;
         }
@@ -405,7 +464,7 @@ export default function DispatchDashboard() {
     }
 
     return matches;
-  };
+  }, [bids, validBidNumbers]);
 
   // Due Date Extension Detection Helper
   const checkDueDateExtension = (bid: DisplayBidRequest): { isExtension: boolean; revisedDate: string | null; reason: string } => {
@@ -433,52 +492,93 @@ export default function DispatchDashboard() {
     return { isExtension: false, revisedDate: null, reason: '' };
   };
 
-  // Duplicate Detection Helper
-  const checkDuplicateStatus = (bid: DisplayBidRequest): { isDuplicate: boolean; duplicateOfBid?: DisplayBidRequest; reason: string } => {
+  /**
+   * DUPLICATE DETECTION ENGINE:
+   * Rule: The first/earliest received email is the ORIGINAL and is NEVER a duplicate.
+   * Only emails received AFTER the first are marked as duplicate copies.
+   */
+  const checkDuplicateStatus = useCallback((bid: DisplayBidRequest): { isDuplicate: boolean; duplicateOfBid?: DisplayBidRequest; reason: string } => {
     if (!bid) return { isDuplicate: false, reason: '' };
+
+    const bidTime = new Date(bid.rawReceivedAt || bid.receivedAt).getTime();
+
+    // 1. If explicitly in duplicate folder
     if (bid.filterStatus === 'duplicate_folder' || bid.duplicateResolution === 'duplicate') {
-      return { isDuplicate: true, reason: 'Moved to Duplicates Folder' };
+      const original = bids.find(
+        (b) =>
+          b.id !== bid.id &&
+          (b.duplicateGroupId === bid.duplicateGroupId || (b.subject === bid.subject && b.senderEmail === bid.senderEmail)) &&
+          new Date(b.rawReceivedAt || b.receivedAt).getTime() <= bidTime
+      );
+      return { isDuplicate: true, duplicateOfBid: original, reason: 'Moved to Duplicates Folder' };
     }
+
+    // 2. Check if this email was received AFTER an earlier identical email (same subject & sender)
+    const earlierIdentical = bids.find(
+      (b) =>
+        b.id !== bid.id &&
+        b.subject.trim().toLowerCase() === bid.subject.trim().toLowerCase() &&
+        b.senderEmail.trim().toLowerCase() === bid.senderEmail.trim().toLowerCase() &&
+        new Date(b.rawReceivedAt || b.receivedAt).getTime() < bidTime
+    );
+    if (earlierIdentical) {
+      return {
+        isDuplicate: true,
+        duplicateOfBid: earlierIdentical,
+        reason: `Duplicate copy received after original email (${earlierIdentical.receivedAt})`,
+      };
+    }
+
+    // 3. If flagged as duplicate in database: verify if there is an earlier primary in the group
     if (bid.isFlaggedDuplicate) {
-      const reason = bid.duplicateReasons?.length ? bid.duplicateReasons.join(', ') : 'Flagged as duplicate or related inquiry';
-      const primary = bids.find((b) => b.duplicateGroupId === bid.duplicateGroupId && b.id !== bid.id && !b.isFlaggedDuplicate);
-      return { isDuplicate: true, duplicateOfBid: primary, reason };
+      const primary = bids.find(
+        (b) =>
+          b.duplicateGroupId === bid.duplicateGroupId &&
+          b.id !== bid.id &&
+          new Date(b.rawReceivedAt || b.receivedAt).getTime() < bidTime
+      ) || bids.find((b) => b.duplicateGroupId === bid.duplicateGroupId && b.id !== bid.id && !b.isFlaggedDuplicate);
+
+      if (primary) {
+        return {
+          isDuplicate: true,
+          duplicateOfBid: primary,
+          reason: `Duplicate copy in project bundle (Original: ${primary.bidNumber || primary.receivedAt})`,
+        };
+      }
     }
-    const identical = bids.find((b) => b.id !== bid.id && b.subject === bid.subject && b.senderEmail === bid.senderEmail);
-    if (identical) {
-      return { isDuplicate: true, duplicateOfBid: identical, reason: 'Identical sender & subject as an earlier email' };
-    }
+
     return { isDuplicate: false, reason: '' };
-  };
+  }, [bids]);
 
   // Main Queue Filter:
   // Duplicates are strictly isolated into the "Duplicates" folder!
+  // The first/original copy always stays in the active inbox!
   const filteredBids = useMemo(() => {
     return bids.filter((b) => {
       // 1. Verification filter mode
       if (verificationFilter === 'human_only' && !b.isHumanLabeled) return false;
       if (verificationFilter === 'unverified_only' && b.isHumanLabeled) return false;
 
-      // 2. Duplicate folder determination
-      const isMarkedDuplicate = b.filterStatus === 'duplicate_folder' || b.duplicateResolution === 'duplicate';
+      // 2. Duplicate determination:
+      // An email is only in the duplicate folder if it was explicitly moved or is a later duplicate copy
+      const dupStatus = checkDuplicateStatus(b);
+      const isDuplicateCopy = dupStatus.isDuplicate;
 
       if (activeFilter === 'Duplicates') {
-        return isMarkedDuplicate || b.isFlaggedDuplicate;
+        return isDuplicateCopy;
       }
 
-      // If not viewing Duplicates folder, exclude items sent to duplicates
-      if (isMarkedDuplicate) {
+      // In non-duplicate folders, exclude duplicate copies received after the original
+      if (isDuplicateCopy) {
         return false;
       }
 
       // 3. Category / Folder filter
       if (activeFilter === 'ALL') {
-        // Main active queue excludes Spam and Auto-Filtered
         if (b.sticker === 'Spam' || b.filterStatus === 'auto_filtered') return false;
       } else if (activeFilter === 'Won') {
         if (b.sticker !== 'Won' && b.sticker !== 'Contractor Awarded') return false;
       } else if (activeFilter === 'Addendum / RFI') {
-        // Unified Addendum / RFI category (combines Addendum, RFI/Forms, RFI / Scope)
         if (b.sticker !== 'Addendum / RFI' && b.sticker !== 'Addendum' && b.sticker !== 'RFI/Forms' && b.sticker !== 'RFI / Scope') return false;
       } else if (activeFilter === 'Spam') {
         if (b.sticker !== 'Spam' && b.filterStatus !== 'auto_filtered') return false;
@@ -505,23 +605,25 @@ export default function DispatchDashboard() {
 
       return true;
     });
-  }, [bids, activeFilter, verificationFilter, feedSearchQuery]);
+  }, [bids, activeFilter, verificationFilter, feedSearchQuery, checkDuplicateStatus]);
 
-  // Keep selected email active or default to the first email in the filtered queue
+  // Keep selected email active or default to the first email in the filtered queue (in split mode)
   useEffect(() => {
-    if (filteredBids.length > 0) {
-      if (!selectedEmailId || !filteredBids.some((b) => b.id === selectedEmailId)) {
-        setSelectedEmailId(filteredBids[0].id);
+    if (layoutMode === 'split') {
+      if (filteredBids.length > 0) {
+        if (!selectedEmailId || !filteredBids.some((b) => b.id === selectedEmailId)) {
+          setSelectedEmailId(filteredBids[0].id);
+        }
+      } else {
+        setSelectedEmailId(null);
       }
-    } else {
-      setSelectedEmailId(null);
     }
-  }, [filteredBids, selectedEmailId]);
+  }, [filteredBids, selectedEmailId, layoutMode]);
 
   // Currently selected email object
   const selectedBid = useMemo(() => {
-    return bids.find((b) => b.id === selectedEmailId) || filteredBids[0] || null;
-  }, [bids, selectedEmailId, filteredBids]);
+    return bids.find((b) => b.id === selectedEmailId) || null;
+  }, [bids, selectedEmailId]);
 
   // Lazy-fetch full email HTML body if not yet loaded when selecting an email
   useEffect(() => {
@@ -602,7 +704,27 @@ export default function DispatchDashboard() {
     }
   };
 
-  // 1. Direct Estimator & Due Date Assignment (Persisted to Supabase)
+  // Keyboard navigation (Esc to close full-screen viewer)
+  useEffect(() => {
+    const handleKeyDown = (e: KeyboardEvent) => {
+      if (e.target instanceof HTMLInputElement || e.target instanceof HTMLTextAreaElement || e.target instanceof HTMLSelectElement) {
+        return;
+      }
+      if (e.key === 'Escape') {
+        if (comparingDuplicateBid) {
+          setComparingDuplicateBid(null);
+        } else if (layoutMode === 'fullscreen' && selectedEmailId) {
+          setSelectedEmailId(null);
+        } else if (isSplitMaximized) {
+          setIsSplitMaximized(false);
+        }
+      }
+    };
+    window.addEventListener('keydown', handleKeyDown);
+    return () => window.removeEventListener('keydown', handleKeyDown);
+  }, [layoutMode, selectedEmailId, isSplitMaximized, comparingDuplicateBid]);
+
+  // 1. Direct Estimator & Due Date Assignment
   const handleAssignEstimatorAndDate = async (
     bidId: string,
     estimator?: string | null,
@@ -642,7 +764,7 @@ export default function DispatchDashboard() {
     }
   };
 
-  // 2. Quick Category Sticker Change (Authoritative Human Label)
+  // 2. Quick Category Sticker Change
   const handleQuickCategoryChange = async (bidId: string, newSticker: string) => {
     const normalized = (newSticker === 'Addendum' || newSticker === 'RFI/Forms' || newSticker === 'RFI / Scope')
       ? 'Addendum / RFI'
@@ -680,12 +802,13 @@ export default function DispatchDashboard() {
 
   // 3. Move Email to Duplicates Folder
   const handleMoveToDuplicates = async (bidId: string) => {
-    // Advance to next email in queue
     const idx = filteredBids.findIndex((b) => b.id === bidId);
     if (idx < filteredBids.length - 1) {
       setSelectedEmailId(filteredBids[idx + 1].id);
     } else if (idx > 0) {
       setSelectedEmailId(filteredBids[idx - 1].id);
+    } else {
+      setSelectedEmailId(null);
     }
 
     setBids((prev) =>
@@ -718,7 +841,40 @@ export default function DispatchDashboard() {
     }
   };
 
-  // 4. Restore Email from Duplicates Folder back into Inbox
+  // 4. "Keep Email (Not a Duplicate)" Handler
+  const handleKeepEmail = async (bidId: string) => {
+    setBids((prev) =>
+      prev.map((b) =>
+        b.id === bidId
+          ? {
+              ...b,
+              isFlaggedDuplicate: false,
+              duplicateResolution: 'marked_distinct',
+              filterStatus: 'inbox',
+            }
+          : b
+      )
+    );
+
+    showToast('✔ Confirmed distinct email — kept in active queue');
+    setComparingDuplicateBid(null);
+
+    try {
+      const res = await fetch(`/api/bid-requests/${bidId}`, {
+        method: 'PATCH',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ unmarkDuplicate: true, keepEmail: true }),
+      });
+      if (!res.ok) {
+        showToast('Error saving status on server');
+        await fetchLiveBids();
+      }
+    } catch {
+      showToast('Network error saving status');
+    }
+  };
+
+  // 5. Restore Email from Duplicates Folder back into Inbox
   const handleRestoreFromDuplicates = async (bidId: string) => {
     setBids((prev) =>
       prev.map((b) =>
@@ -750,12 +906,16 @@ export default function DispatchDashboard() {
     }
   };
 
-  // 5. Link with Sibling Contractor Project
+  // 6. Link with Sibling Contractor Project
   const handleLinkToOtherContractor = async (
     sourceBidId: string,
     targetBidNumber: string,
     targetEstimator?: string
   ) => {
+    if (!validBidNumbers.has(targetBidNumber)) {
+      showToast(`Cannot link: Bid Number "${targetBidNumber}" does not exist.`);
+      return;
+    }
     try {
       const payload: any = { linkToBidNumber: targetBidNumber };
       if (targetEstimator) payload.assignedEstimator = targetEstimator;
@@ -769,14 +929,15 @@ export default function DispatchDashboard() {
         showToast(`✔ Linked to ${targetBidNumber}! Shared folder and estimator updated.`);
         await fetchLiveBids();
       } else {
-        showToast('Failed to link bids');
+        const err = await res.json();
+        showToast(err.error || 'Failed to link bids');
       }
     } catch {
       showToast('Network error linking bids');
     }
   };
 
-  // 6. Accept Revised Due Date (from Addendum)
+  // 7. Accept Revised Due Date (from Addendum)
   const handleAcceptRevisedDueDate = async (bidId: string, revisedDueDate: string) => {
     setBids((prev) =>
       prev.map((b) =>
@@ -808,11 +969,15 @@ export default function DispatchDashboard() {
     }
   };
 
-  // 7. Open Human-in-the-Loop Review Modal
+  // 8. Open Human-in-the-Loop Review Modal
   const openReviewModal = (bid: DisplayBidRequest) => {
     setReviewingBid(bid);
     setTargetSticker(bid.sticker);
-    setSelectedBidNumberToLink(bid.matchedBidNumber || (activeITBsWithNumbers[0]?.bidNumber || ''));
+    setSelectedBidNumberToLink(
+      bid.matchedBidNumber && validBidNumbers.has(bid.matchedBidNumber)
+        ? bid.matchedBidNumber
+        : ''
+    );
     setSelectedEstimatorForITB(bid.assignedEstimator || '');
     setSelectedDueDateForITB(bid.bidDueDate || bid.normalizedAiDueDate || '');
     setIsGcWonPrimeCheckbox(Boolean(bid.isGcWonPrime));
@@ -822,7 +987,7 @@ export default function DispatchDashboard() {
     setShowModalEmailBody(true);
   };
 
-  // 8. Save Reclassification & Workflow Transition
+  // 9. Save Reclassification & Workflow Transition
   const handleSaveReclassification = async () => {
     if (!reviewingBid) return;
     setIsSavingReclassification(true);
@@ -873,16 +1038,24 @@ export default function DispatchDashboard() {
     }
   };
 
-  // 9. Standalone Link / Relink Modal Open & Handlers
+  // 10. Standalone Link / Relink Modal Open & Handlers
   const openLinkModal = (bid: DisplayBidRequest) => {
     setLinkingBid(bid);
-    setTargetBidNumberForLink(bid.matchedBidNumber || (activeITBsWithNumbers[0]?.bidNumber || ''));
+    setTargetBidNumberForLink(
+      bid.matchedBidNumber && validBidNumbers.has(bid.matchedBidNumber)
+        ? bid.matchedBidNumber
+        : ''
+    );
     setRelinkSearchQuery('');
   };
 
   const handleExecuteLink = async (sourceBidId: string, targetBidNumber: string) => {
     if (!targetBidNumber) {
       showToast('Please select an active project / bid number to link to.');
+      return;
+    }
+    if (!validBidNumbers.has(targetBidNumber)) {
+      showToast(`Cannot link: Bid Number "${targetBidNumber}" does not exist.`);
       return;
     }
     setIsLinkingLoading(true);
@@ -908,7 +1081,7 @@ export default function DispatchDashboard() {
     }
   };
 
-  // 10. Unlink Bid Handler
+  // 11. Unlink Bid Handler
   const handleUnlinkBid = async (bidId: string) => {
     if (!confirm('Are you sure you want to unlink this email? It will become an independent bid folder with its own bid number.')) {
       return;
@@ -960,15 +1133,15 @@ export default function DispatchDashboard() {
     );
   });
 
-  // Counts for Category Tabs (excluding Duplicates from active folders)
-  const isDup = (b: DisplayBidRequest) => b.filterStatus === 'duplicate_folder' || b.duplicateResolution === 'duplicate';
-  const countAllQueue = bids.filter((b) => b.sticker !== 'Spam' && b.filterStatus !== 'auto_filtered' && !isDup(b)).length;
-  const countITB = bids.filter((b) => b.sticker === 'ITB' && !isDup(b)).length;
-  const countAddendumRFI = bids.filter((b) => (b.sticker === 'Addendum / RFI' || b.sticker === 'Addendum' || b.sticker === 'RFI/Forms' || b.sticker === 'RFI / Scope') && !isDup(b)).length;
-  const countReminder = bids.filter((b) => b.sticker === 'Date Reminder' && !isDup(b)).length;
-  const countWon = bids.filter((b) => (b.sticker === 'Won' || b.sticker === 'Contractor Awarded') && !isDup(b)).length;
-  const countLost = bids.filter((b) => b.sticker === 'Lost' && !isDup(b)).length;
-  const countDuplicates = bids.filter((b) => isDup(b) || b.isFlaggedDuplicate).length;
+  // Accurate Counts for Category Tabs (excluding Duplicates from active folders)
+  const isDuplicateItem = (b: DisplayBidRequest) => checkDuplicateStatus(b).isDuplicate;
+  const countAllQueue = bids.filter((b) => b.sticker !== 'Spam' && b.filterStatus !== 'auto_filtered' && !isDuplicateItem(b)).length;
+  const countITB = bids.filter((b) => b.sticker === 'ITB' && !isDuplicateItem(b)).length;
+  const countAddendumRFI = bids.filter((b) => (b.sticker === 'Addendum / RFI' || b.sticker === 'Addendum' || b.sticker === 'RFI/Forms' || b.sticker === 'RFI / Scope') && !isDuplicateItem(b)).length;
+  const countReminder = bids.filter((b) => b.sticker === 'Date Reminder' && !isDuplicateItem(b)).length;
+  const countWon = bids.filter((b) => (b.sticker === 'Won' || b.sticker === 'Contractor Awarded') && !isDuplicateItem(b)).length;
+  const countLost = bids.filter((b) => b.sticker === 'Lost' && !isDuplicateItem(b)).length;
+  const countDuplicates = bids.filter((b) => isDuplicateItem(b)).length;
   const countSpam = bids.filter((b) => b.sticker === 'Spam' || b.filterStatus === 'auto_filtered').length;
   const countHumanVerified = bids.filter((b) => b.isHumanLabeled).length;
   const countUnverified = bids.filter((b) => !b.isHumanLabeled).length;
@@ -976,7 +1149,7 @@ export default function DispatchDashboard() {
   // Selected email AI alerts
   const crossContractorMatches = useMemo(() => {
     return selectedBid ? findCrossContractorMatches(selectedBid) : [];
-  }, [selectedBid, bids]);
+  }, [selectedBid, findCrossContractorMatches]);
 
   const dueDateExt = useMemo(() => {
     return selectedBid ? checkDueDateExtension(selectedBid) : { isExtension: false, revisedDate: null, reason: '' };
@@ -984,7 +1157,7 @@ export default function DispatchDashboard() {
 
   const dupDetails = useMemo(() => {
     return selectedBid ? checkDuplicateStatus(selectedBid) : { isDuplicate: false, reason: '' };
-  }, [selectedBid, bids]);
+  }, [selectedBid, checkDuplicateStatus]);
 
   const renderStickerBadge = (sticker: string, bid: DisplayBidRequest) => {
     let badgeClass = 'bg-blue-600 text-white';
@@ -1053,6 +1226,509 @@ export default function DispatchDashboard() {
     );
   };
 
+  /**
+   * Reading Pane Render Component:
+   * Displays full-screen email document alongside Top AI Intelligence Notes
+   */
+  const renderReadingPane = (isFullScreen: boolean) => {
+    if (!selectedBid) {
+      return (
+        <div className="flex-1 flex flex-col items-center justify-center p-12 text-center text-slate-400 bg-white">
+          <Mail className="w-12 h-12 text-slate-300 mb-3" />
+          <p className="text-sm font-semibold text-slate-600">No email selected</p>
+          <p className="text-xs text-slate-400 mt-1">
+            Choose an email from the queue to read and review.
+          </p>
+        </div>
+      );
+    }
+
+    const hasValidMasterLink = Boolean(
+      selectedBid.matchedBidNumber && validBidNumbers.has(selectedBid.matchedBidNumber)
+    );
+
+    return (
+      <div className="flex-1 flex flex-col bg-slate-50/40 overflow-hidden w-full">
+        {/* Top Action Toolbar */}
+        <div className="bg-white border-b border-slate-200 px-4 sm:px-6 py-3 flex items-center justify-between gap-3 flex-wrap">
+          {/* Left Controls: Back to Queue & Prev/Next */}
+          <div className="flex items-center gap-3">
+            {/* Back to Queue Button (Prominent in Full-Screen Mode) */}
+            {(layoutMode === 'fullscreen' || isSplitMaximized) && (
+              <button
+                type="button"
+                onClick={() => {
+                  if (isSplitMaximized) setIsSplitMaximized(false);
+                  else setSelectedEmailId(null);
+                }}
+                className="px-3 py-1.5 rounded-xl bg-slate-100 hover:bg-slate-200 text-slate-800 text-xs font-bold transition-all flex items-center gap-1.5 border border-slate-200 shadow-2xs"
+                title="Back to queue list (Esc)"
+              >
+                <ArrowLeft className="w-4 h-4 text-slate-700" />
+                <span>Back to Queue</span>
+              </button>
+            )}
+
+            {/* Stepper (Prev / Next) */}
+            <div className="flex items-center border border-slate-300 rounded-lg overflow-hidden bg-white shadow-2xs">
+              <button
+                type="button"
+                onClick={handleSelectPrevEmail}
+                disabled={currentEmailIndex <= 0}
+                title="Previous email in queue"
+                className="p-1.5 text-slate-700 hover:text-slate-950 hover:bg-slate-100 disabled:opacity-30 disabled:cursor-not-allowed border-r border-slate-200 transition-colors"
+              >
+                <ChevronLeft className="w-4 h-4" />
+              </button>
+              <button
+                type="button"
+                onClick={handleSelectNextEmail}
+                disabled={currentEmailIndex >= filteredBids.length - 1}
+                title="Next email in queue"
+                className="p-1.5 text-slate-700 hover:text-slate-950 hover:bg-slate-100 disabled:opacity-30 disabled:cursor-not-allowed transition-colors"
+              >
+                <ChevronRight className="w-4 h-4" />
+              </button>
+            </div>
+
+            <span className="text-xs font-semibold text-slate-500 font-mono">
+              {currentEmailIndex + 1} of {filteredBids.length}
+            </span>
+          </div>
+
+          {/* Right Action Controls */}
+          <div className="flex items-center gap-2 flex-wrap">
+            {/* Quick Category Selector */}
+            <div className="flex items-center gap-1">
+              <span className="text-[11px] text-slate-500 font-bold hidden sm:inline">
+                Category:
+              </span>
+              <select
+                value={selectedBid.sticker}
+                onChange={(e) => handleQuickCategoryChange(selectedBid.id, e.target.value)}
+                className="text-xs font-bold border border-slate-300 rounded-lg px-2 py-1 bg-white text-slate-800 shadow-2xs focus:ring-2 focus:ring-blue-500"
+              >
+                {CATEGORIES.map((cat) => (
+                  <option key={cat} value={cat}>
+                    {cat}
+                  </option>
+                ))}
+              </select>
+            </div>
+
+            {/* Estimator Assignment Picker */}
+            <div className="flex items-center gap-1">
+              <span className="text-[11px] text-slate-500 font-bold hidden sm:inline">
+                Estimator:
+              </span>
+              <select
+                value={selectedBid.assignedEstimator || ''}
+                onChange={(e) =>
+                  handleAssignEstimatorAndDate(selectedBid.id, e.target.value || null, undefined)
+                }
+                className="text-xs font-medium border border-slate-300 rounded-lg px-2 py-1 bg-white text-slate-800 shadow-2xs focus:ring-2 focus:ring-blue-500"
+              >
+                <option value="">Unassigned...</option>
+                {ESTIMATORS.map((est) => (
+                  <option key={est} value={est}>
+                    {est}
+                  </option>
+                ))}
+              </select>
+            </div>
+
+            {/* Bid Due Date Picker */}
+            <div className="flex items-center gap-1">
+              <span className="text-[11px] text-slate-500 font-bold hidden sm:inline">
+                Due:
+              </span>
+              <input
+                type="date"
+                value={selectedBid.bidDueDate || ''}
+                onChange={(e) =>
+                  handleAssignEstimatorAndDate(selectedBid.id, undefined, e.target.value || null)
+                }
+                className="text-xs font-medium border border-slate-300 rounded-lg px-2 py-1 bg-white text-slate-800 shadow-2xs focus:ring-2 focus:ring-blue-500"
+              />
+            </div>
+
+            {/* Move to Duplicates / Restore Button */}
+            {selectedBid.filterStatus !== 'duplicate_folder' ? (
+              <button
+                type="button"
+                onClick={() => handleMoveToDuplicates(selectedBid.id)}
+                className="p-1.5 px-2.5 rounded-lg border border-slate-300 bg-white hover:bg-amber-50 text-amber-800 hover:border-amber-300 text-xs font-bold transition-colors shadow-2xs flex items-center gap-1"
+                title="Move this email into the Duplicates folder"
+              >
+                <FolderArchive className="w-3.5 h-3.5 text-amber-600" />
+                <span className="hidden md:inline">Duplicates</span>
+              </button>
+            ) : (
+              <button
+                type="button"
+                onClick={() => handleRestoreFromDuplicates(selectedBid.id)}
+                className="p-1.5 px-2.5 rounded-lg border border-slate-300 bg-white hover:bg-blue-50 text-blue-800 hover:border-blue-300 text-xs font-bold transition-colors shadow-2xs flex items-center gap-1"
+                title="Restore email to main inbox queue"
+              >
+                <RotateCcw className="w-3.5 h-3.5 text-blue-600" />
+                <span>Restore to Inbox</span>
+              </button>
+            )}
+
+            {/* Link to Master Bid Button */}
+            <button
+              type="button"
+              onClick={() => openLinkModal(selectedBid)}
+              className="p-1.5 px-2.5 rounded-lg border border-slate-300 bg-white hover:bg-slate-100 text-slate-700 text-xs font-bold transition-colors shadow-2xs flex items-center gap-1"
+              title="Link or relink to master project folder"
+            >
+              <LinkIcon className="w-3.5 h-3.5 text-blue-600" />
+              <span className="hidden md:inline">Link</span>
+            </button>
+
+            {/* Full Review Modal Trigger */}
+            <button
+              type="button"
+              onClick={() => openReviewModal(selectedBid)}
+              className="p-1.5 px-2.5 rounded-lg border border-slate-300 bg-white hover:bg-slate-100 text-slate-700 text-xs font-bold transition-colors shadow-2xs flex items-center gap-1"
+              title="Full classification & workflow editor"
+            >
+              <Edit3 className="w-3.5 h-3.5 text-slate-600" />
+              <span className="hidden md:inline">Edit</span>
+            </button>
+
+            {/* Maximize / Minimize Button (In Split Mode) */}
+            {layoutMode === 'split' && (
+              <button
+                type="button"
+                onClick={() => setIsSplitMaximized(!isSplitMaximized)}
+                className="p-1.5 rounded-lg border border-slate-300 bg-white hover:bg-slate-100 text-slate-700 text-xs font-bold transition-colors shadow-2xs flex items-center"
+                title={isSplitMaximized ? 'Restore 2-Pane Split' : 'Take up Whole Screen (Maximize)'}
+              >
+                {isSplitMaximized ? <Minimize2 className="w-4 h-4" /> : <Maximize2 className="w-4 h-4" />}
+              </button>
+            )}
+          </div>
+        </div>
+
+        {/* Scrollable Reading Content */}
+        <div className="flex-1 overflow-y-auto p-4 sm:p-6 space-y-5">
+          {/* TOP AI INTELLIGENCE & TRIAGE BANNER */}
+          <div className="bg-gradient-to-r from-slate-900 via-indigo-950 to-slate-900 text-white rounded-2xl p-5 border border-slate-700/80 shadow-md space-y-4">
+            {/* Title & Status Badges */}
+            <div className="flex flex-wrap items-center justify-between gap-3 pb-3 border-b border-white/10">
+              <div className="flex items-center gap-2.5 flex-wrap">
+                <span className="text-xs font-bold uppercase tracking-wider text-amber-300 flex items-center gap-1.5">
+                  <Sparkles className="w-4 h-4 text-amber-400" />
+                  AI Intelligence & Triage Notes
+                </span>
+
+                {/* Assigned Bid Number or Verified Master Bid Link */}
+                {selectedBid.sticker === 'ITB' ? (
+                  <span className="font-mono bg-blue-500/20 text-blue-300 border border-blue-400/40 px-2.5 py-0.5 rounded-lg text-xs font-bold flex items-center gap-1">
+                    <Hash className="w-3.5 h-3.5 text-blue-400" />
+                    {selectedBid.bidNumber ? `Bid #: ${selectedBid.bidNumber}` : 'Assigning Bid #'}
+                  </span>
+                ) : hasValidMasterLink ? (
+                  <span className="font-mono bg-purple-500/20 text-purple-300 border border-purple-400/40 px-2.5 py-0.5 rounded-lg text-xs font-bold flex items-center gap-1">
+                    <LinkIcon className="w-3.5 h-3.5 text-purple-400" />
+                    Attached to Master: {selectedBid.matchedBidNumber}
+                  </span>
+                ) : (
+                  <div className="inline-flex items-center gap-1.5">
+                    <span className="font-mono bg-slate-700/60 text-slate-300 border border-slate-600 px-2 py-0.5 rounded-lg text-xs font-medium flex items-center gap-1">
+                      <LinkIcon className="w-3 h-3 text-slate-400" />
+                      {selectedBid.matchedBidNumber
+                        ? `Unlinked (Bid ${selectedBid.matchedBidNumber} not found)`
+                        : 'Not Linked to Master Bid'}
+                    </span>
+                    <button
+                      type="button"
+                      onClick={() => openLinkModal(selectedBid)}
+                      className="px-2 py-0.5 rounded bg-blue-600 hover:bg-blue-500 text-white text-[11px] font-bold shadow-2xs transition-colors"
+                    >
+                      Link Now
+                    </button>
+                  </div>
+                )}
+
+                {/* Category Sticker Badge */}
+                <span
+                  className={`px-2.5 py-0.5 rounded font-black text-xs uppercase tracking-wider ${
+                    selectedBid.sticker === 'ITB'
+                      ? 'bg-blue-600 text-white'
+                      : selectedBid.sticker === 'Addendum / RFI'
+                      ? 'bg-purple-600 text-white'
+                      : selectedBid.sticker === 'Won'
+                      ? 'bg-emerald-600 text-white'
+                      : selectedBid.sticker === 'Lost'
+                      ? 'bg-rose-600 text-white'
+                      : selectedBid.sticker === 'Spam'
+                      ? 'bg-slate-700 text-white'
+                      : 'bg-indigo-600 text-white'
+                  }`}
+                >
+                  {selectedBid.sticker}
+                </span>
+
+                {/* Human Verified Indicator */}
+                {selectedBid.isHumanLabeled && (
+                  <span className="px-2 py-0.5 rounded text-[11px] font-bold bg-emerald-500/20 text-emerald-300 border border-emerald-500/40 flex items-center gap-1">
+                    <UserCheck className="w-3 h-3 text-emerald-400" />
+                    User Verified
+                  </span>
+                )}
+              </div>
+
+              {/* Received Date & Time Details */}
+              <div className="flex items-center gap-2 text-xs flex-wrap">
+                <span className="text-slate-300">Received:</span>
+                <strong
+                  className="text-white bg-white/10 px-2 py-0.5 rounded font-semibold cursor-help"
+                  title={new Date(selectedBid.rawReceivedAt).toLocaleString()}
+                >
+                  {selectedBid.receivedAt}
+                </strong>
+                <span className="text-slate-400">•</span>
+                <span className="text-slate-300">Estimator:</span>
+                <strong className="text-white bg-white/10 px-2 py-0.5 rounded font-semibold">
+                  {selectedBid.assignedEstimator || 'Unassigned'}
+                </strong>
+                <span className="text-slate-400">•</span>
+                <span className="text-slate-300">Due:</span>
+                <strong className="text-white bg-white/10 px-2 py-0.5 rounded font-semibold">
+                  {selectedBid.bidDueDate ? formatFriendlyDate(selectedBid.bidDueDate) : 'No Date Set'}
+                </strong>
+              </div>
+            </div>
+
+            {/* ALERT 1: Multi-Contractor Job Alert */}
+            {crossContractorMatches.length > 0 && (
+              <div className="p-3.5 bg-indigo-500/15 rounded-xl border border-indigo-400/30 text-indigo-100 flex flex-col sm:flex-row sm:items-center justify-between gap-3 shadow-inner animate-in fade-in">
+                <div className="flex items-start gap-2.5">
+                  <Building2 className="w-5 h-5 text-indigo-400 flex-shrink-0 mt-0.5" />
+                  <div className="text-xs space-y-0.5">
+                    <div className="font-bold text-white text-sm flex items-center gap-2">
+                      <span>Multi-Contractor Job Alert</span>
+                      <span className="px-2 py-0.2 rounded-full text-[10px] bg-indigo-500/30 text-indigo-200 border border-indigo-400/30">
+                        {crossContractorMatches.length} Other GC{crossContractorMatches.length > 1 ? 's' : ''}
+                      </span>
+                    </div>
+                    <p className="text-indigo-200">
+                      This same project was also submitted by{' '}
+                      <strong className="text-white">
+                        {crossContractorMatches.map((m) => m.contractorName).join(', ')}
+                      </strong>
+                      .
+                      {crossContractorMatches[0].assignedEstimator && (
+                        <>
+                          {' '}Currently assigned to{' '}
+                          <strong className="text-amber-300">
+                            {crossContractorMatches[0].assignedEstimator}
+                          </strong>{' '}
+                          under{' '}
+                          <strong className="font-mono text-white">
+                            {crossContractorMatches[0].bidNumber || 'Pending'}
+                          </strong>
+                          .
+                        </>
+                      )}
+                      {' '}One takeoff covers all quotes — link them to avoid double estimating!
+                    </p>
+                  </div>
+                </div>
+                {crossContractorMatches[0].bidNumber && validBidNumbers.has(crossContractorMatches[0].bidNumber) && (
+                  <button
+                    type="button"
+                    onClick={() =>
+                      handleLinkToOtherContractor(
+                        selectedBid.id,
+                        crossContractorMatches[0].bidNumber!,
+                        crossContractorMatches[0].assignedEstimator || undefined
+                      )
+                    }
+                    className="px-3.5 py-1.5 rounded-lg bg-indigo-600 hover:bg-indigo-500 text-white font-bold text-xs shadow-sm flex items-center gap-1.5 self-start sm:self-auto flex-shrink-0 transition-colors"
+                  >
+                    <LinkIcon className="w-3.5 h-3.5" />
+                    <span>Link to {crossContractorMatches[0].bidNumber}</span>
+                  </button>
+                )}
+              </div>
+            )}
+
+            {/* ALERT 2: Due Date Extension Alert */}
+            {dueDateExt.isExtension && dueDateExt.revisedDate && (
+              <div className="p-3.5 bg-amber-500/15 rounded-xl border border-amber-400/30 text-amber-100 flex flex-col sm:flex-row sm:items-center justify-between gap-3 shadow-inner animate-in fade-in">
+                <div className="flex items-start gap-2.5">
+                  <Clock className="w-5 h-5 text-amber-400 flex-shrink-0 mt-0.5" />
+                  <div className="text-xs space-y-0.5">
+                    <div className="font-bold text-white text-sm flex items-center gap-2">
+                      <span>⏰ Bid Due Date Extension Detected</span>
+                    </div>
+                    <p className="text-amber-200">
+                      An addendum or notice revised the bid deadline to{' '}
+                      <strong className="text-amber-300 underline font-semibold">
+                        {formatFriendlyDate(dueDateExt.revisedDate)}
+                      </strong>
+                      {selectedBid.bidDueDate && (
+                        <> (previously set to {formatFriendlyDate(selectedBid.bidDueDate)})</>
+                      )}
+                      .
+                    </p>
+                  </div>
+                </div>
+                <button
+                  type="button"
+                  onClick={() => handleAcceptRevisedDueDate(selectedBid.id, dueDateExt.revisedDate!)}
+                  className="px-3.5 py-1.5 rounded-lg bg-emerald-600 hover:bg-emerald-500 text-white font-bold text-xs shadow-sm flex items-center gap-1.5 self-start sm:self-auto flex-shrink-0 transition-colors"
+                >
+                  <Check className="w-3.5 h-3.5" />
+                  <span>Accept Revised Due Date</span>
+                </button>
+              </div>
+            )}
+
+            {/* ALERT 3: Duplicate Alert with Comparison Modal Option & Keep Email Button */}
+            {dupDetails.isDuplicate && (
+              <div className="p-3.5 bg-rose-500/15 rounded-xl border border-rose-400/30 text-rose-100 flex flex-col sm:flex-row sm:items-center justify-between gap-3 shadow-inner animate-in fade-in">
+                <div className="flex items-start gap-2.5">
+                  <Copy className="w-5 h-5 text-rose-400 flex-shrink-0 mt-0.5" />
+                  <div className="text-xs space-y-0.5">
+                    <div className="font-bold text-white text-sm flex items-center gap-2">
+                      <span>Duplicate Copy Detected (Received After First)</span>
+                    </div>
+                    <p className="text-rose-200">
+                      {dupDetails.reason}
+                      {dupDetails.duplicateOfBid && (
+                        <>
+                          {' '}— Original email received:{' '}
+                          <strong className="text-white">
+                            {dupDetails.duplicateOfBid.receivedAt} ({dupDetails.duplicateOfBid.senderName})
+                          </strong>
+                        </>
+                      )}
+                      .
+                    </p>
+                  </div>
+                </div>
+
+                <div className="flex items-center gap-2 flex-wrap self-start sm:self-auto flex-shrink-0">
+                  {/* Option to Open Supposed Original in Comparison Modal */}
+                  {dupDetails.duplicateOfBid && (
+                    <button
+                      type="button"
+                      onClick={() =>
+                        setComparingDuplicateBid({
+                          current: selectedBid,
+                          original: dupDetails.duplicateOfBid!,
+                        })
+                      }
+                      className="px-3 py-1.5 rounded-lg bg-white/10 hover:bg-white/20 text-white font-bold text-xs shadow-2xs flex items-center gap-1.5 transition-colors border border-white/20"
+                      title="Inspect original email side-by-side with this copy"
+                    >
+                      <Eye className="w-3.5 h-3.5 text-blue-300" />
+                      <span>Compare with Original</span>
+                    </button>
+                  )}
+
+                  {/* Keep Email (Not a Duplicate) Button */}
+                  <button
+                    type="button"
+                    onClick={() => handleKeepEmail(selectedBid.id)}
+                    className="px-3 py-1.5 rounded-lg bg-emerald-600 hover:bg-emerald-500 text-white font-bold text-xs shadow-sm flex items-center gap-1.5 transition-colors"
+                    title="Confirm this is NOT a duplicate and keep in active inbox"
+                  >
+                    <CheckCircle2 className="w-3.5 h-3.5" />
+                    <span>Keep Email (Not Duplicate)</span>
+                  </button>
+
+                  {/* Move to Duplicates Folder Button */}
+                  {selectedBid.filterStatus !== 'duplicate_folder' && (
+                    <button
+                      type="button"
+                      onClick={() => handleMoveToDuplicates(selectedBid.id)}
+                      className="px-3 py-1.5 rounded-lg bg-rose-600 hover:bg-rose-500 text-white font-bold text-xs shadow-sm flex items-center gap-1.5 transition-colors"
+                      title="Move to Duplicates folder"
+                    >
+                      <FolderArchive className="w-3.5 h-3.5" />
+                      <span>Move to Duplicates</span>
+                    </button>
+                  )}
+                </div>
+              </div>
+            )}
+
+            {/* Scope Summary & Project Context Grid */}
+            <div className="grid grid-cols-1 md:grid-cols-2 gap-3 pt-1 text-xs">
+              <div className="bg-white/5 rounded-xl p-3 border border-white/10 space-y-1">
+                <span className="font-bold text-indigo-300 flex items-center gap-1.5">
+                  <Sparkles className="w-3.5 h-3.5 text-indigo-400" />
+                  AI Scope Summary:
+                </span>
+                <p className="text-slate-200 leading-relaxed text-[11px]">
+                  {selectedBid.scopeSummary ||
+                    'General construction ITB document. Division 10 toilet partitions & accessories scope.'}
+                </p>
+              </div>
+
+              <div className="bg-white/5 rounded-xl p-3 border border-white/10 space-y-1">
+                <span className="font-bold text-blue-300 flex items-center gap-1.5">
+                  <Briefcase className="w-3.5 h-3.5 text-blue-400" />
+                  Project & Contractor Details:
+                </span>
+                <div className="text-slate-200 text-[11px] space-y-0.5">
+                  <div>
+                    GC / Sender:{' '}
+                    <strong className="text-white">
+                      {selectedBid.clientCompany || selectedBid.originalSenderName || selectedBid.senderName}
+                    </strong>
+                  </div>
+                  {selectedBid.projectName && (
+                    <div>
+                      Project Name:{' '}
+                      <strong className="text-white">{selectedBid.projectName}</strong>
+                    </div>
+                  )}
+                  {selectedBid.projectAddress && (
+                    <div>
+                      Address:{' '}
+                      <strong className="text-white">{selectedBid.projectAddress}</strong>
+                    </div>
+                  )}
+                  {selectedBid.jobCode && (
+                    <div>
+                      Job Code:{' '}
+                      <span className="font-mono text-amber-300">{selectedBid.jobCode}</span>
+                    </div>
+                  )}
+                </div>
+              </div>
+            </div>
+          </div>
+
+          {/* HIGH FIDELITY EMAIL DOCUMENT VIEWER (Full Screen Sizing) */}
+          <div className="bg-white rounded-2xl border border-slate-200 shadow-sm overflow-hidden w-full">
+            <EmailDocumentViewer
+              id={selectedBid.id}
+              subject={selectedBid.subject}
+              senderName={selectedBid.senderName}
+              senderEmail={selectedBid.senderEmail}
+              receivedAt={selectedBid.receivedAt}
+              isForwarded={selectedBid.isForwarded}
+              forwardedBy={selectedBid.forwardedBy}
+              originalSenderName={selectedBid.originalSenderName}
+              originalSenderEmail={selectedBid.originalSenderEmail}
+              bodyText={selectedBid.bodyText}
+              bodyHtml={selectedBid.bodyHtml}
+              attachments={selectedBid.attachments}
+              maxHeight="min-h-[750px] h-[calc(100vh-260px)]"
+            />
+          </div>
+        </div>
+      </div>
+    );
+  };
+
   return (
     <div className="space-y-4">
       {/* Toast Notification */}
@@ -1080,7 +1756,7 @@ export default function DispatchDashboard() {
             </div>
             <p className="text-blue-200 text-xs sm:text-sm flex items-center gap-1.5">
               <Sparkles className="w-4 h-4 text-amber-300 flex-shrink-0" />
-              <strong>Intelligent Inbound Queue:</strong> Inspect emails alongside top AI notes — multi-contractor job alerts, due date extensions, duplicate filtering, and instant estimator assignment.
+              <strong>Intelligent Inbound Queue:</strong> Inspect full-screen emails alongside top AI notes — multi-contractor job alerts, due date extensions, duplicate filtering, and instant estimator assignment.
             </p>
           </div>
 
@@ -1158,25 +1834,51 @@ export default function DispatchDashboard() {
           </button>
         </div>
 
-        {/* Layout Toggle (Gmail Split Queue vs Grouped Cards) */}
+        {/* Layout Switcher (Full Screen Viewer vs Split 2-Pane vs Grouped Cards) */}
         {viewMode === 'feed' && (
           <div className="flex items-center gap-2">
             <span className="text-xs text-slate-400 font-semibold hidden md:inline">Layout:</span>
             <div className="inline-flex items-center p-1 bg-slate-100 rounded-xl border border-slate-200 text-xs font-bold">
+              {/* Full-Screen Email Viewer (Gmail Default) */}
               <button
                 type="button"
-                onClick={() => setLayoutMode('split')}
+                onClick={() => {
+                  setLayoutMode('fullscreen');
+                  setIsSplitMaximized(false);
+                }}
+                className={`px-2.5 py-1 rounded-lg transition-all flex items-center gap-1.5 ${
+                  layoutMode === 'fullscreen'
+                    ? 'bg-white text-blue-700 shadow-2xs font-extrabold'
+                    : 'text-slate-600 hover:text-slate-900'
+                }`}
+                title="Full-Screen Email Viewer (Gmail standard: Click email to take up whole screen)"
+              >
+                <Maximize2 className="w-3.5 h-3.5 text-blue-600" />
+                <span>Full Screen Viewer</span>
+              </button>
+
+              {/* Split 2-Pane */}
+              <button
+                type="button"
+                onClick={() => {
+                  setLayoutMode('split');
+                  setIsSplitMaximized(false);
+                  if (!selectedEmailId && filteredBids.length > 0) {
+                    setSelectedEmailId(filteredBids[0].id);
+                  }
+                }}
                 className={`px-2.5 py-1 rounded-lg transition-all flex items-center gap-1.5 ${
                   layoutMode === 'split'
                     ? 'bg-white text-blue-700 shadow-2xs font-extrabold'
                     : 'text-slate-600 hover:text-slate-900'
                 }`}
-                title="Gmail Split View: Email Queue on Left, Reading Pane on Right"
+                title="Split 2-Pane View (Side-by-side queue and reader)"
               >
                 <Columns className="w-3.5 h-3.5 text-blue-600" />
-                <span>Gmail Queue (2-Pane)</span>
+                <span>Split 2-Pane</span>
               </button>
 
+              {/* Grouped Cards */}
               <button
                 type="button"
                 onClick={() => setLayoutMode('list')}
@@ -1397,62 +2099,206 @@ export default function DispatchDashboard() {
             </div>
           </div>
 
-          {/* GMAIL-STYLE 2-PANE SPLIT VIEW (DEFAULT) */}
-          {layoutMode === 'split' ? (
-            <div className="bg-white rounded-2xl border border-slate-200 shadow-sm overflow-hidden flex flex-col lg:flex-row min-h-[720px] max-h-[88vh]">
-              {/* LEFT COLUMN: EMAIL QUEUE LIST */}
-              <div
-                className={`w-full lg:w-[410px] xl:w-[460px] flex-shrink-0 border-r border-slate-200 flex flex-col bg-slate-50/50 ${
-                  isMobileDetailOpen ? 'hidden lg:flex' : 'flex'
-                }`}
-              >
-                {/* Queue Mini Header with Pagination & Navigation */}
-                <div className="p-3 bg-white border-b border-slate-200 flex items-center justify-between gap-2 text-xs">
-                  <div className="font-semibold text-slate-700 flex items-center gap-1.5">
-                    <Inbox className="w-4 h-4 text-blue-600" />
-                    <span>Inbound Queue</span>
-                    <span className="text-slate-400 font-normal">
-                      ({totalItems} {totalItems === 1 ? 'email' : 'emails'})
+          {/* VIEW MODE 1: FULL SCREEN VIEWER (GMAIL STANDARD) */}
+          {layoutMode === 'fullscreen' ? (
+            selectedBid ? (
+              /* When an email is selected, it takes up the WHOLE screen! */
+              <div className="bg-white rounded-2xl border border-slate-200 shadow-sm overflow-hidden flex flex-col min-h-[calc(100vh-180px)] w-full animate-in fade-in">
+                {renderReadingPane(true)}
+              </div>
+            ) : (
+              /* Full-Width Email Queue List */
+              <div className="bg-white rounded-2xl border border-slate-200 shadow-sm overflow-hidden flex flex-col">
+                {/* List Header with Pagination */}
+                <div className="p-4 border-b border-slate-200 flex items-center justify-between gap-3 text-xs bg-slate-50/60">
+                  <div className="flex items-center gap-2">
+                    <span className="font-bold text-slate-800 text-sm">
+                      {activeFilter === 'ALL' && 'Inbound Opportunity Queue'}
+                      {activeFilter === 'ITB' && 'ITBs Needing Estimator Assignment'}
+                      {activeFilter === 'Addendum / RFI' && 'Addendums & RFIs'}
+                      {activeFilter === 'Duplicates' && 'Duplicates Folder (Copies Received After Original)'}
+                      {activeFilter !== 'ALL' && activeFilter !== 'ITB' && activeFilter !== 'Addendum / RFI' && activeFilter !== 'Duplicates' && activeFilter}
+                    </span>
+                    <span className="px-2 py-0.5 rounded-full text-[11px] bg-slate-200 text-slate-700 font-semibold font-mono">
+                      {totalItems}
                     </span>
                   </div>
 
-                  <div className="flex items-center gap-2">
-                    <span className="text-[11px] font-mono text-slate-500">
+                  <div className="flex items-center gap-3">
+                    <span className="text-xs font-mono text-slate-500">
                       {totalItems === 0 ? '0 of 0' : `${startIndex + 1}–${endIndex} of ${totalItems}`}
                     </span>
-                    <div className="flex items-center border border-slate-200 rounded-lg bg-white overflow-hidden shadow-2xs">
+                    <div className="flex items-center border border-slate-300 rounded-lg bg-white overflow-hidden shadow-2xs">
                       <button
                         type="button"
                         onClick={() => setCurrentPage((p) => Math.max(1, p - 1))}
                         disabled={safeCurrentPage <= 1}
                         title="Previous page"
-                        className="p-1 text-slate-600 hover:text-slate-900 hover:bg-slate-100 disabled:opacity-30 disabled:cursor-not-allowed border-r border-slate-200"
+                        className="p-1.5 text-slate-600 hover:text-slate-900 hover:bg-slate-100 disabled:opacity-30 disabled:cursor-not-allowed border-r border-slate-200"
                       >
-                        <ChevronLeft className="w-3.5 h-3.5" />
+                        <ChevronLeft className="w-4 h-4" />
                       </button>
                       <button
                         type="button"
                         onClick={() => setCurrentPage((p) => Math.min(totalPages, p + 1))}
                         disabled={safeCurrentPage >= totalPages}
                         title="Next page"
-                        className="p-1 text-slate-600 hover:text-slate-900 hover:bg-slate-100 disabled:opacity-30 disabled:cursor-not-allowed"
+                        className="p-1.5 text-slate-600 hover:text-slate-900 hover:bg-slate-100 disabled:opacity-30 disabled:cursor-not-allowed"
                       >
-                        <ChevronRight className="w-3.5 h-3.5" />
+                        <ChevronRight className="w-4 h-4" />
                       </button>
                     </div>
                   </div>
                 </div>
 
-                {/* Scrollable Email Items List */}
-                <div className="flex-1 overflow-y-auto divide-y divide-slate-100">
+                {/* Full-Width Email Rows */}
+                <div className="divide-y divide-slate-100">
                   {paginatedBids.length === 0 ? (
-                    <div className="p-8 text-center text-slate-400 text-xs">
+                    <div className="p-16 text-center text-slate-400 text-sm">
                       {feedSearchQuery
                         ? `No emails found matching "${feedSearchQuery}".`
                         : `No emails in ${activeFilter}.`}
                     </div>
                   ) : (
                     paginatedBids.map((bid) => {
+                      const hasMultiGC = findCrossContractorMatches(bid).length > 0;
+                      const hasDueExt = checkDueDateExtension(bid).isExtension;
+                      const isDupItem = checkDuplicateStatus(bid).isDuplicate;
+
+                      return (
+                        <div
+                          key={bid.id}
+                          onClick={() => setSelectedEmailId(bid.id)}
+                          className="p-4 hover:bg-blue-50/40 cursor-pointer transition-colors flex items-center justify-between gap-4 text-xs group"
+                        >
+                          {/* Left: Sender & Badges */}
+                          <div className="flex items-center gap-3 min-w-[220px] max-w-[260px] flex-shrink-0">
+                            {renderStickerBadge(bid.sticker, bid)}
+                            <span className="font-bold text-slate-900 truncate">
+                              {bid.clientCompany || bid.originalSenderName || bid.senderName}
+                            </span>
+                          </div>
+
+                          {/* Center: Subject & Snippet */}
+                          <div className="flex-1 min-w-0 flex items-center gap-2">
+                            {bid.bidNumber && (
+                              <span className="font-mono text-[10px] font-bold text-blue-700 bg-blue-100/70 px-1.5 py-0.5 rounded flex-shrink-0">
+                                {bid.bidNumber}
+                              </span>
+                            )}
+                            <span className="font-medium text-slate-800 truncate group-hover:text-blue-900">
+                              {bid.subject}
+                            </span>
+
+                            {/* Alert Badges */}
+                            <div className="hidden lg:flex items-center gap-1.5 ml-2 flex-shrink-0">
+                              {hasMultiGC && (
+                                <span
+                                  title="Multiple GCs bidding this same project"
+                                  className="px-1.5 py-0.5 rounded text-[10px] font-bold bg-indigo-100 text-indigo-900 border border-indigo-200 flex items-center gap-0.5"
+                                >
+                                  <Building2 className="w-2.5 h-2.5 text-indigo-700" />
+                                  <span>Multi-GC</span>
+                                </span>
+                              )}
+
+                              {hasDueExt && (
+                                <span
+                                  title="Due date extension detected"
+                                  className="px-1.5 py-0.5 rounded text-[10px] font-bold bg-amber-100 text-amber-900 border border-amber-300 flex items-center gap-0.5"
+                                >
+                                  <Clock className="w-2.5 h-2.5 text-amber-700" />
+                                  <span>Due Ext</span>
+                                </span>
+                              )}
+
+                              {isDupItem && (
+                                <span
+                                  title="Duplicate copy received after original"
+                                  className="px-1.5 py-0.5 rounded text-[10px] font-bold bg-rose-100 text-rose-900 border border-rose-200 flex items-center gap-0.5"
+                                >
+                                  <Copy className="w-2.5 h-2.5 text-rose-700" />
+                                  <span>Dup</span>
+                                </span>
+                              )}
+                            </div>
+                          </div>
+
+                          {/* Right: Estimator, Attachments & Received Date */}
+                          <div className="flex items-center gap-4 flex-shrink-0 text-slate-500">
+                            {bid.assignedEstimator && (
+                              <span
+                                className={`px-2 py-0.5 rounded text-[11px] font-bold border hidden sm:inline ${getEstimatorColor(
+                                  bid.assignedEstimator
+                                )}`}
+                              >
+                                {bid.assignedEstimator.split(' ')[0]}
+                              </span>
+                            )}
+
+                            {bid.attachmentsCount > 0 && (
+                              <span className="text-[11px] text-slate-500 flex items-center gap-0.5">
+                                <Paperclip className="w-3 h-3 text-slate-400" />
+                                <span>{bid.attachmentsCount}</span>
+                              </span>
+                            )}
+
+                            <span
+                              className="font-mono text-xs font-semibold text-slate-600 min-w-[55px] text-right"
+                              title={new Date(bid.rawReceivedAt).toLocaleString()}
+                            >
+                              {bid.receivedAt}
+                            </span>
+                          </div>
+                        </div>
+                      );
+                    })
+                  )}
+                </div>
+              </div>
+            )
+          ) : layoutMode === 'split' ? (
+            /* VIEW MODE 2: SPLIT 2-PANE (SIDE-BY-SIDE OR MAXIMIZED) */
+            <div className="bg-white rounded-2xl border border-slate-200 shadow-sm overflow-hidden flex flex-col lg:flex-row min-h-[720px] max-h-[88vh]">
+              {/* LEFT COLUMN: EMAIL QUEUE LIST (Hidden when Maximized) */}
+              {!isSplitMaximized && (
+                <div className="w-full lg:w-[410px] xl:w-[460px] flex-shrink-0 border-r border-slate-200 flex flex-col bg-slate-50/50">
+                  {/* Mini Header */}
+                  <div className="p-3 bg-white border-b border-slate-200 flex items-center justify-between gap-2 text-xs">
+                    <div className="font-semibold text-slate-700 flex items-center gap-1.5">
+                      <Inbox className="w-4 h-4 text-blue-600" />
+                      <span>Queue</span>
+                      <span className="text-slate-400 font-normal">({totalItems})</span>
+                    </div>
+
+                    <div className="flex items-center gap-2">
+                      <span className="text-[11px] font-mono text-slate-500">
+                        {totalItems === 0 ? '0 of 0' : `${startIndex + 1}–${endIndex} of ${totalItems}`}
+                      </span>
+                      <div className="flex items-center border border-slate-200 rounded-lg bg-white overflow-hidden shadow-2xs">
+                        <button
+                          type="button"
+                          onClick={() => setCurrentPage((p) => Math.max(1, p - 1))}
+                          disabled={safeCurrentPage <= 1}
+                          className="p-1 text-slate-600 hover:text-slate-900 disabled:opacity-30 border-r border-slate-200"
+                        >
+                          <ChevronLeft className="w-3.5 h-3.5" />
+                        </button>
+                        <button
+                          type="button"
+                          onClick={() => setCurrentPage((p) => Math.min(totalPages, p + 1))}
+                          disabled={safeCurrentPage >= totalPages}
+                          className="p-1 text-slate-600 hover:text-slate-900 disabled:opacity-30"
+                        >
+                          <ChevronRight className="w-3.5 h-3.5" />
+                        </button>
+                      </div>
+                    </div>
+                  </div>
+
+                  {/* Scrollable Email Items List */}
+                  <div className="flex-1 overflow-y-auto divide-y divide-slate-100">
+                    {paginatedBids.map((bid) => {
                       const isSelected = selectedEmailId === bid.id;
                       const hasMultiGC = findCrossContractorMatches(bid).length > 0;
                       const hasDueExt = checkDueDateExtension(bid).isExtension;
@@ -1461,99 +2307,65 @@ export default function DispatchDashboard() {
                       return (
                         <div
                           key={bid.id}
-                          onClick={() => {
-                            setSelectedEmailId(bid.id);
-                            setIsMobileDetailOpen(true);
-                          }}
+                          onClick={() => setSelectedEmailId(bid.id)}
                           className={`p-3.5 cursor-pointer transition-all text-xs relative ${
                             isSelected
                               ? 'bg-blue-50/90 border-l-4 border-blue-600 shadow-2xs'
                               : 'bg-white hover:bg-slate-50 text-slate-700'
                           }`}
                         >
-                          {/* Row 1: Sender / Contractor & Time */}
                           <div className="flex items-center justify-between gap-2 mb-1">
-                            <span
-                              className={`truncate font-bold ${
-                                isSelected ? 'text-blue-950 font-black' : 'text-slate-900'
-                              }`}
-                            >
+                            <span className={`truncate font-bold ${isSelected ? 'text-blue-950 font-black' : 'text-slate-900'}`}>
                               {bid.clientCompany || bid.originalSenderName || bid.senderName}
                             </span>
-                            <span className="text-[10px] text-slate-400 font-mono flex-shrink-0">
+                            <span
+                              className="text-[10px] text-slate-500 font-mono flex-shrink-0"
+                              title={new Date(bid.rawReceivedAt).toLocaleString()}
+                            >
                               {bid.receivedAt}
                             </span>
                           </div>
 
-                          {/* Row 2: Subject */}
-                          <p
-                            className={`truncate text-xs mb-1.5 ${
-                              isSelected
-                                ? 'text-blue-900 font-semibold'
-                                : bid.isHumanLabeled
-                                ? 'text-slate-700'
-                                : 'text-slate-900 font-medium'
-                            }`}
-                          >
+                          <p className={`truncate text-xs mb-1.5 ${isSelected ? 'text-blue-900 font-semibold' : 'text-slate-800 font-medium'}`}>
                             {bid.subject}
                           </p>
 
-                          {/* Row 3: Badges Line (Sticker, Multi-GC, Due Ext, Estimator, Attachments) */}
                           <div className="flex items-center gap-1.5 flex-wrap">
                             {renderStickerBadge(bid.sticker, bid)}
 
-                            {/* Internal Bid Number */}
                             {bid.bidNumber && (
                               <span className="font-mono text-[10px] font-bold text-blue-700 bg-blue-100/70 px-1.5 py-0.5 rounded">
                                 {bid.bidNumber}
                               </span>
                             )}
 
-                            {/* Multi-GC Sibling Alert Badge */}
                             {hasMultiGC && (
-                              <span
-                                title="Multiple GCs bidding this same project"
-                                className="px-1.5 py-0.5 rounded text-[10px] font-bold bg-indigo-100 text-indigo-900 border border-indigo-200 flex items-center gap-0.5"
-                              >
+                              <span className="px-1.5 py-0.5 rounded text-[10px] font-bold bg-indigo-100 text-indigo-900 border border-indigo-200 flex items-center gap-0.5">
                                 <Building2 className="w-2.5 h-2.5 text-indigo-700" />
                                 <span>Multi-GC</span>
                               </span>
                             )}
 
-                            {/* Due Date Extension Badge */}
                             {hasDueExt && (
-                              <span
-                                title="Due date extension detected"
-                                className="px-1.5 py-0.5 rounded text-[10px] font-bold bg-amber-100 text-amber-900 border border-amber-300 flex items-center gap-0.5"
-                              >
+                              <span className="px-1.5 py-0.5 rounded text-[10px] font-bold bg-amber-100 text-amber-900 border border-amber-300 flex items-center gap-0.5">
                                 <Clock className="w-2.5 h-2.5 text-amber-700" />
                                 <span>Due Ext</span>
                               </span>
                             )}
 
-                            {/* Duplicate Badge */}
                             {isDupItem && (
-                              <span
-                                title="Duplicate or related inquiry"
-                                className="px-1.5 py-0.5 rounded text-[10px] font-bold bg-rose-100 text-rose-900 border border-rose-200 flex items-center gap-0.5"
-                              >
+                              <span className="px-1.5 py-0.5 rounded text-[10px] font-bold bg-rose-100 text-rose-900 border border-rose-200 flex items-center gap-0.5">
                                 <Copy className="w-2.5 h-2.5 text-rose-700" />
                                 <span>Dup</span>
                               </span>
                             )}
 
-                            {/* Estimator Avatar/Name Tag */}
                             {bid.assignedEstimator && (
-                              <span
-                                className={`px-1.5 py-0.5 rounded text-[10px] font-bold border ${getEstimatorColor(
-                                  bid.assignedEstimator
-                                )}`}
-                              >
+                              <span className={`px-1.5 py-0.5 rounded text-[10px] font-bold border ${getEstimatorColor(bid.assignedEstimator)}`}>
                                 {bid.assignedEstimator.split(' ')[0]}
                               </span>
                             )}
 
-                            {/* Attachments Icon */}
                             {bid.attachmentsCount > 0 && (
                               <span className="text-[10px] text-slate-500 flex items-center gap-0.5 ml-auto">
                                 <Paperclip className="w-2.5 h-2.5 text-slate-400" />
@@ -1563,445 +2375,16 @@ export default function DispatchDashboard() {
                           </div>
                         </div>
                       );
-                    })
-                  )}
-                </div>
-              </div>
-
-              {/* RIGHT COLUMN: READING PANE & AI INTELLIGENCE */}
-              <div
-                className={`flex-1 flex flex-col bg-slate-50/40 overflow-hidden ${
-                  isMobileDetailOpen ? 'flex' : 'hidden lg:flex'
-                }`}
-              >
-                {selectedBid ? (
-                  <>
-                    {/* Top Action Toolbar (Gmail-style) */}
-                    <div className="bg-white border-b border-slate-200 px-4 sm:px-6 py-3 flex items-center justify-between gap-3 flex-wrap">
-                      {/* Left: Mobile Back Button + Prev/Next Steppers */}
-                      <div className="flex items-center gap-2">
-                        {/* Mobile Back Button */}
-                        <button
-                          type="button"
-                          onClick={() => setIsMobileDetailOpen(false)}
-                          className="lg:hidden p-1.5 rounded-lg text-slate-600 hover:bg-slate-100 transition-colors"
-                          title="Back to queue list"
-                        >
-                          <ArrowLeft className="w-4 h-4" />
-                        </button>
-
-                        {/* Prev / Next buttons */}
-                        <div className="flex items-center border border-slate-300 rounded-lg overflow-hidden bg-white shadow-2xs">
-                          <button
-                            type="button"
-                            onClick={handleSelectPrevEmail}
-                            disabled={currentEmailIndex <= 0}
-                            title="Previous email in queue"
-                            className="p-1.5 text-slate-700 hover:text-slate-950 hover:bg-slate-100 disabled:opacity-30 disabled:cursor-not-allowed border-r border-slate-200 transition-colors"
-                          >
-                            <ChevronLeft className="w-4 h-4" />
-                          </button>
-                          <button
-                            type="button"
-                            onClick={handleSelectNextEmail}
-                            disabled={currentEmailIndex >= filteredBids.length - 1}
-                            title="Next email in queue"
-                            className="p-1.5 text-slate-700 hover:text-slate-950 hover:bg-slate-100 disabled:opacity-30 disabled:cursor-not-allowed transition-colors"
-                          >
-                            <ChevronRight className="w-4 h-4" />
-                          </button>
-                        </div>
-
-                        <span className="text-xs font-semibold text-slate-500 font-mono">
-                          {currentEmailIndex + 1} of {filteredBids.length}
-                        </span>
-                      </div>
-
-                      {/* Right: Quick Action Controls */}
-                      <div className="flex items-center gap-2 flex-wrap">
-                        {/* Quick Category Selector */}
-                        <div className="flex items-center gap-1">
-                          <span className="text-[11px] text-slate-500 font-bold hidden sm:inline">
-                            Category:
-                          </span>
-                          <select
-                            value={selectedBid.sticker}
-                            onChange={(e) => handleQuickCategoryChange(selectedBid.id, e.target.value)}
-                            className="text-xs font-bold border border-slate-300 rounded-lg px-2 py-1 bg-white text-slate-800 shadow-2xs focus:ring-2 focus:ring-blue-500"
-                          >
-                            {CATEGORIES.map((cat) => (
-                              <option key={cat} value={cat}>
-                                {cat}
-                              </option>
-                            ))}
-                          </select>
-                        </div>
-
-                        {/* Estimator Assignment Picker */}
-                        <div className="flex items-center gap-1">
-                          <span className="text-[11px] text-slate-500 font-bold hidden sm:inline">
-                            Estimator:
-                          </span>
-                          <select
-                            value={selectedBid.assignedEstimator || ''}
-                            onChange={(e) =>
-                              handleAssignEstimatorAndDate(selectedBid.id, e.target.value || null, undefined)
-                            }
-                            className="text-xs font-medium border border-slate-300 rounded-lg px-2 py-1 bg-white text-slate-800 shadow-2xs focus:ring-2 focus:ring-blue-500"
-                          >
-                            <option value="">Unassigned...</option>
-                            {ESTIMATORS.map((est) => (
-                              <option key={est} value={est}>
-                                {est}
-                              </option>
-                            ))}
-                          </select>
-                        </div>
-
-                        {/* Bid Due Date Picker */}
-                        <div className="flex items-center gap-1">
-                          <span className="text-[11px] text-slate-500 font-bold hidden sm:inline">
-                            Due:
-                          </span>
-                          <input
-                            type="date"
-                            value={selectedBid.bidDueDate || ''}
-                            onChange={(e) =>
-                              handleAssignEstimatorAndDate(selectedBid.id, undefined, e.target.value || null)
-                            }
-                            className="text-xs font-medium border border-slate-300 rounded-lg px-2 py-1 bg-white text-slate-800 shadow-2xs focus:ring-2 focus:ring-blue-500"
-                          />
-                        </div>
-
-                        {/* Move to Duplicates Folder Button */}
-                        {selectedBid.filterStatus !== 'duplicate_folder' ? (
-                          <button
-                            type="button"
-                            onClick={() => handleMoveToDuplicates(selectedBid.id)}
-                            className="p-1.5 px-2.5 rounded-lg border border-slate-300 bg-white hover:bg-amber-50 text-amber-800 hover:border-amber-300 text-xs font-bold transition-colors shadow-2xs flex items-center gap-1"
-                            title="Move this email into the Duplicates folder"
-                          >
-                            <FolderArchive className="w-3.5 h-3.5 text-amber-600" />
-                            <span className="hidden md:inline">Duplicates</span>
-                          </button>
-                        ) : (
-                          <button
-                            type="button"
-                            onClick={() => handleRestoreFromDuplicates(selectedBid.id)}
-                            className="p-1.5 px-2.5 rounded-lg border border-slate-300 bg-white hover:bg-blue-50 text-blue-800 hover:border-blue-300 text-xs font-bold transition-colors shadow-2xs flex items-center gap-1"
-                            title="Restore email to main inbox queue"
-                          >
-                            <RotateCcw className="w-3.5 h-3.5 text-blue-600" />
-                            <span>Restore to Inbox</span>
-                          </button>
-                        )}
-
-                        {/* Link / Relink Modal Trigger */}
-                        <button
-                          type="button"
-                          onClick={() => openLinkModal(selectedBid)}
-                          className="p-1.5 px-2.5 rounded-lg border border-slate-300 bg-white hover:bg-slate-100 text-slate-700 text-xs font-bold transition-colors shadow-2xs flex items-center gap-1"
-                          title="Link or relink to master project folder"
-                        >
-                          <LinkIcon className="w-3.5 h-3.5 text-blue-600" />
-                          <span className="hidden md:inline">Link</span>
-                        </button>
-
-                        {/* Full Review Modal Trigger */}
-                        <button
-                          type="button"
-                          onClick={() => openReviewModal(selectedBid)}
-                          className="p-1.5 px-2.5 rounded-lg border border-slate-300 bg-white hover:bg-slate-100 text-slate-700 text-xs font-bold transition-colors shadow-2xs flex items-center gap-1"
-                          title="Full classification & workflow editor"
-                        >
-                          <Edit3 className="w-3.5 h-3.5 text-slate-600" />
-                          <span className="hidden md:inline">Edit</span>
-                        </button>
-                      </div>
-                    </div>
-
-                    {/* Scrollable Reading Content */}
-                    <div className="flex-1 overflow-y-auto p-4 sm:p-6 space-y-5">
-                      {/* TOP AI INTELLIGENCE & TRIAGE BANNER */}
-                      <div className="bg-gradient-to-r from-slate-900 via-indigo-950 to-slate-900 text-white rounded-2xl p-5 border border-slate-700/80 shadow-md space-y-4">
-                        {/* Title & Status Badges */}
-                        <div className="flex flex-wrap items-center justify-between gap-3 pb-3 border-b border-white/10">
-                          <div className="flex items-center gap-2.5 flex-wrap">
-                            <span className="text-xs font-bold uppercase tracking-wider text-amber-300 flex items-center gap-1.5">
-                              <Sparkles className="w-4 h-4 text-amber-400" />
-                              AI Intelligence & Triage Notes
-                            </span>
-
-                            {/* Assigned Bid Number or Matched Master Bid */}
-                            {selectedBid.sticker === 'ITB' ? (
-                              <span className="font-mono bg-blue-500/20 text-blue-300 border border-blue-400/40 px-2.5 py-0.5 rounded-lg text-xs font-bold flex items-center gap-1">
-                                <Hash className="w-3.5 h-3.5 text-blue-400" />
-                                {selectedBid.bidNumber ? `Bid #: ${selectedBid.bidNumber}` : 'Assigning Bid #'}
-                              </span>
-                            ) : (
-                              <span className="font-mono bg-purple-500/20 text-purple-300 border border-purple-400/40 px-2.5 py-0.5 rounded-lg text-xs font-bold flex items-center gap-1">
-                                <LinkIcon className="w-3.5 h-3.5 text-purple-400" />
-                                {selectedBid.matchedBidNumber
-                                  ? `Attached to Master: ${selectedBid.matchedBidNumber}`
-                                  : 'Unlinked — Link to Master Bid'}
-                              </span>
-                            )}
-
-                            {/* Category Sticker Badge */}
-                            <span
-                              className={`px-2.5 py-0.5 rounded font-black text-xs uppercase tracking-wider ${
-                                selectedBid.sticker === 'ITB'
-                                  ? 'bg-blue-600 text-white'
-                                  : selectedBid.sticker === 'Addendum / RFI'
-                                  ? 'bg-purple-600 text-white'
-                                  : selectedBid.sticker === 'Won'
-                                  ? 'bg-emerald-600 text-white'
-                                  : selectedBid.sticker === 'Lost'
-                                  ? 'bg-rose-600 text-white'
-                                  : selectedBid.sticker === 'Spam'
-                                  ? 'bg-slate-700 text-white'
-                                  : 'bg-indigo-600 text-white'
-                              }`}
-                            >
-                              {selectedBid.sticker}
-                            </span>
-
-                            {/* Human Verified Indicator */}
-                            {selectedBid.isHumanLabeled && (
-                              <span className="px-2 py-0.5 rounded text-[11px] font-bold bg-emerald-500/20 text-emerald-300 border border-emerald-500/40 flex items-center gap-1">
-                                <UserCheck className="w-3 h-3 text-emerald-400" />
-                                User Verified
-                              </span>
-                            )}
-                          </div>
-
-                          {/* Estimator & Due Date Quick Indicators */}
-                          <div className="flex items-center gap-2 text-xs flex-wrap">
-                            <span className="text-slate-300">Estimator:</span>
-                            <strong className="text-white bg-white/10 px-2 py-0.5 rounded font-semibold">
-                              {selectedBid.assignedEstimator || 'Unassigned'}
-                            </strong>
-                            <span className="text-slate-400">•</span>
-                            <span className="text-slate-300">Due:</span>
-                            <strong className="text-white bg-white/10 px-2 py-0.5 rounded font-semibold">
-                              {selectedBid.bidDueDate ? formatFriendlyDate(selectedBid.bidDueDate) : 'No Date Set'}
-                            </strong>
-                          </div>
-                        </div>
-
-                        {/* ALERT 1: Multi-Contractor Job Alert */}
-                        {crossContractorMatches.length > 0 && (
-                          <div className="p-3.5 bg-indigo-500/15 rounded-xl border border-indigo-400/30 text-indigo-100 flex flex-col sm:flex-row sm:items-center justify-between gap-3 shadow-inner animate-in fade-in">
-                            <div className="flex items-start gap-2.5">
-                              <Building2 className="w-5 h-5 text-indigo-400 flex-shrink-0 mt-0.5" />
-                              <div className="text-xs space-y-0.5">
-                                <div className="font-bold text-white text-sm flex items-center gap-2">
-                                  <span>Multi-Contractor Job Alert</span>
-                                  <span className="px-2 py-0.2 rounded-full text-[10px] bg-indigo-500/30 text-indigo-200 border border-indigo-400/30">
-                                    {crossContractorMatches.length} Other GC{crossContractorMatches.length > 1 ? 's' : ''}
-                                  </span>
-                                </div>
-                                <p className="text-indigo-200">
-                                  This same project was also submitted by{' '}
-                                  <strong className="text-white">
-                                    {crossContractorMatches.map((m) => m.contractorName).join(', ')}
-                                  </strong>
-                                  .
-                                  {crossContractorMatches[0].assignedEstimator && (
-                                    <>
-                                      {' '}Currently assigned to{' '}
-                                      <strong className="text-amber-300">
-                                        {crossContractorMatches[0].assignedEstimator}
-                                      </strong>{' '}
-                                      under{' '}
-                                      <strong className="font-mono text-white">
-                                        {crossContractorMatches[0].bidNumber || 'Pending'}
-                                      </strong>
-                                      .
-                                    </>
-                                  )}
-                                  {' '}One takeoff covers all quotes — link them to avoid double work!
-                                </p>
-                              </div>
-                            </div>
-                            {crossContractorMatches[0].bidNumber && (
-                              <button
-                                type="button"
-                                onClick={() =>
-                                  handleLinkToOtherContractor(
-                                    selectedBid.id,
-                                    crossContractorMatches[0].bidNumber!,
-                                    crossContractorMatches[0].assignedEstimator || undefined
-                                  )
-                                }
-                                className="px-3.5 py-1.5 rounded-lg bg-indigo-600 hover:bg-indigo-500 text-white font-bold text-xs shadow-sm flex items-center gap-1.5 self-start sm:self-auto flex-shrink-0 transition-colors"
-                              >
-                                <LinkIcon className="w-3.5 h-3.5" />
-                                <span>Link to {crossContractorMatches[0].bidNumber}</span>
-                              </button>
-                            )}
-                          </div>
-                        )}
-
-                        {/* ALERT 2: Due Date Extension Alert */}
-                        {dueDateExt.isExtension && dueDateExt.revisedDate && (
-                          <div className="p-3.5 bg-amber-500/15 rounded-xl border border-amber-400/30 text-amber-100 flex flex-col sm:flex-row sm:items-center justify-between gap-3 shadow-inner animate-in fade-in">
-                            <div className="flex items-start gap-2.5">
-                              <Clock className="w-5 h-5 text-amber-400 flex-shrink-0 mt-0.5" />
-                              <div className="text-xs space-y-0.5">
-                                <div className="font-bold text-white text-sm flex items-center gap-2">
-                                  <span>⏰ Bid Due Date Extension Detected</span>
-                                </div>
-                                <p className="text-amber-200">
-                                  An addendum or notice revised the bid deadline to{' '}
-                                  <strong className="text-amber-300 underline font-semibold">
-                                    {formatFriendlyDate(dueDateExt.revisedDate)}
-                                  </strong>
-                                  {selectedBid.bidDueDate && (
-                                    <> (previously set to {formatFriendlyDate(selectedBid.bidDueDate)})</>
-                                  )}
-                                  .
-                                </p>
-                              </div>
-                            </div>
-                            <button
-                              type="button"
-                              onClick={() => handleAcceptRevisedDueDate(selectedBid.id, dueDateExt.revisedDate!)}
-                              className="px-3.5 py-1.5 rounded-lg bg-emerald-600 hover:bg-emerald-500 text-white font-bold text-xs shadow-sm flex items-center gap-1.5 self-start sm:self-auto flex-shrink-0 transition-colors"
-                            >
-                              <Check className="w-3.5 h-3.5" />
-                              <span>Accept Revised Due Date</span>
-                            </button>
-                          </div>
-                        )}
-
-                        {/* ALERT 3: Duplicate Alert */}
-                        {dupDetails.isDuplicate && (
-                          <div className="p-3.5 bg-rose-500/15 rounded-xl border border-rose-400/30 text-rose-100 flex flex-col sm:flex-row sm:items-center justify-between gap-3 shadow-inner animate-in fade-in">
-                            <div className="flex items-start gap-2.5">
-                              <Copy className="w-5 h-5 text-rose-400 flex-shrink-0 mt-0.5" />
-                              <div className="text-xs space-y-0.5">
-                                <div className="font-bold text-white text-sm">
-                                  <span>Duplicate / Related Email Detected</span>
-                                </div>
-                                <p className="text-rose-200">
-                                  {dupDetails.reason}
-                                  {dupDetails.duplicateOfBid && (
-                                    <>
-                                      {' '}(Primary record:{' '}
-                                      <strong className="text-white">
-                                        {dupDetails.duplicateOfBid.bidNumber || dupDetails.duplicateOfBid.subject.slice(0, 30)}
-                                      </strong>
-                                      )
-                                    </>
-                                  )}
-                                  .
-                                </p>
-                              </div>
-                            </div>
-                            {selectedBid.filterStatus !== 'duplicate_folder' ? (
-                              <button
-                                type="button"
-                                onClick={() => handleMoveToDuplicates(selectedBid.id)}
-                                className="px-3.5 py-1.5 rounded-lg bg-rose-600 hover:bg-rose-500 text-white font-bold text-xs shadow-sm flex items-center gap-1.5 self-start sm:self-auto flex-shrink-0 transition-colors"
-                              >
-                                <FolderArchive className="w-3.5 h-3.5" />
-                                <span>Move to Duplicates Folder</span>
-                              </button>
-                            ) : (
-                              <button
-                                type="button"
-                                onClick={() => handleRestoreFromDuplicates(selectedBid.id)}
-                                className="px-3.5 py-1.5 rounded-lg bg-slate-700 hover:bg-slate-600 text-white font-bold text-xs shadow-sm flex items-center gap-1.5 self-start sm:self-auto flex-shrink-0 transition-colors"
-                              >
-                                <RotateCcw className="w-3.5 h-3.5" />
-                                <span>Restore to Inbox</span>
-                              </button>
-                            )}
-                          </div>
-                        )}
-
-                        {/* Scope Summary & Project Context Grid */}
-                        <div className="grid grid-cols-1 md:grid-cols-2 gap-3 pt-1 text-xs">
-                          <div className="bg-white/5 rounded-xl p-3 border border-white/10 space-y-1">
-                            <span className="font-bold text-indigo-300 flex items-center gap-1.5">
-                              <Sparkles className="w-3.5 h-3.5 text-indigo-400" />
-                              AI Scope Summary:
-                            </span>
-                            <p className="text-slate-200 leading-relaxed text-[11px]">
-                              {selectedBid.scopeSummary ||
-                                'General construction ITB document. Division 10 toilet partitions & accessories scope.'}
-                            </p>
-                          </div>
-
-                          <div className="bg-white/5 rounded-xl p-3 border border-white/10 space-y-1">
-                            <span className="font-bold text-blue-300 flex items-center gap-1.5">
-                              <Briefcase className="w-3.5 h-3.5 text-blue-400" />
-                              Project & Contractor Details:
-                            </span>
-                            <div className="text-slate-200 text-[11px] space-y-0.5">
-                              <div>
-                                GC / Sender:{' '}
-                                <strong className="text-white">
-                                  {selectedBid.clientCompany || selectedBid.originalSenderName || selectedBid.senderName}
-                                </strong>
-                              </div>
-                              {selectedBid.projectName && (
-                                <div>
-                                  Project Name:{' '}
-                                  <strong className="text-white">{selectedBid.projectName}</strong>
-                                </div>
-                              )}
-                              {selectedBid.projectAddress && (
-                                <div>
-                                  Address:{' '}
-                                  <strong className="text-white">{selectedBid.projectAddress}</strong>
-                                </div>
-                              )}
-                              {selectedBid.jobCode && (
-                                <div>
-                                  Job Code:{' '}
-                                  <span className="font-mono text-amber-300">{selectedBid.jobCode}</span>
-                                </div>
-                              )}
-                            </div>
-                          </div>
-                        </div>
-                      </div>
-
-                      {/* HIGH FIDELITY EMAIL DOCUMENT VIEWER */}
-                      <div className="bg-white rounded-2xl border border-slate-200 shadow-sm overflow-hidden">
-                        <EmailDocumentViewer
-                          id={selectedBid.id}
-                          subject={selectedBid.subject}
-                          senderName={selectedBid.senderName}
-                          senderEmail={selectedBid.senderEmail}
-                          receivedAt={selectedBid.receivedAt}
-                          isForwarded={selectedBid.isForwarded}
-                          forwardedBy={selectedBid.forwardedBy}
-                          originalSenderName={selectedBid.originalSenderName}
-                          originalSenderEmail={selectedBid.originalSenderEmail}
-                          bodyText={selectedBid.bodyText}
-                          bodyHtml={selectedBid.bodyHtml}
-                          attachments={selectedBid.attachments}
-                          maxHeight="h-[600px]"
-                        />
-                      </div>
-                    </div>
-                  </>
-                ) : (
-                  <div className="flex-1 flex flex-col items-center justify-center p-12 text-center text-slate-400">
-                    <Mail className="w-12 h-12 text-slate-300 mb-3" />
-                    <p className="text-sm font-semibold text-slate-600">No email selected</p>
-                    <p className="text-xs text-slate-400 mt-1">
-                      Choose an email from the queue on the left to read and review.
-                    </p>
+                    })}
                   </div>
-                )}
-              </div>
+                </div>
+              )}
+
+              {/* RIGHT READING PANE */}
+              {renderReadingPane(isSplitMaximized)}
             </div>
           ) : (
-            /* ALTERNATE GROUPED CARDS VIEW (FOR BULK OVERVIEW) */
+            /* VIEW MODE 3: GROUPED CARDS VIEW (PROJECT BUNDLES) */
             <div id="dispatch-feed-list" className="bg-white rounded-xl border border-slate-200 shadow-sm overflow-hidden scroll-mt-6">
               <div className="p-4 sm:p-5 border-b border-slate-200 flex flex-col md:flex-row md:items-center justify-between gap-4">
                 <div>
@@ -2139,7 +2522,7 @@ export default function DispatchDashboard() {
                                   </span>
                                 )}
 
-                                {primary.sticker !== 'ITB' && primary.matchedBidNumber && (
+                                {primary.sticker !== 'ITB' && primary.matchedBidNumber && validBidNumbers.has(primary.matchedBidNumber) && (
                                   <span className="px-2.5 py-0.5 rounded text-xs font-mono font-bold bg-purple-100 text-purple-900 border border-purple-200 flex items-center gap-1">
                                     <LinkIcon className="w-3 h-3 text-purple-600" /> Attached to {primary.matchedBidNumber}
                                   </span>
@@ -2181,23 +2564,15 @@ export default function DispatchDashboard() {
                                 )}
 
                                 <span className="text-slate-400">•</span>
-                                <span>Received: {primary.receivedAt}</span>
+                                <span title={new Date(primary.rawReceivedAt).toLocaleString()}>
+                                  Received: {primary.receivedAt}
+                                </span>
                                 <span className="text-slate-400">•</span>
                                 <span className="flex items-center gap-1">
                                   <Paperclip className="w-3.5 h-3.5" />
                                   {primary.attachmentsCount} Attachment{primary.attachmentsCount > 1 ? 's' : ''}
                                 </span>
                               </div>
-
-                              {primary.scopeSummary && (
-                                <div className="p-3 bg-slate-50 rounded-lg border border-slate-200 text-xs text-slate-700 space-y-1">
-                                  <div className="flex items-center gap-1.5 text-indigo-700 font-semibold">
-                                    <Sparkles className="w-3.5 h-3.5" />
-                                    AI Scope Summary:
-                                  </div>
-                                  <p className="leading-relaxed">{primary.scopeSummary}</p>
-                                </div>
-                              )}
 
                               <div className="pt-0.5">
                                 <button
@@ -2278,64 +2653,6 @@ export default function DispatchDashboard() {
                             </button>
                           </div>
                         </div>
-
-                        {/* Expanded Duplicates View in Group */}
-                        {isExpanded && duplicates.length > 0 && (
-                          <div className="mt-4 ml-8 pl-4 border-l-2 border-amber-300 space-y-3">
-                            <p className="text-xs font-semibold text-amber-900 uppercase tracking-wider flex items-center gap-1">
-                              <Copy className="w-3.5 h-3.5 text-amber-600" />
-                              Related Inquiries / Sibling Quotes Under This Project
-                            </p>
-
-                            {duplicates.map((dup) => (
-                              <div
-                                key={dup.id}
-                                className="p-3 bg-amber-50/60 rounded-lg border border-amber-200/80 text-xs space-y-2"
-                              >
-                                <div className="flex items-center justify-between">
-                                  <div className="font-medium text-slate-800 flex items-center gap-2">
-                                    {renderStickerBadge(dup.sticker, dup)}
-                                    <span className="text-amber-700">↳</span>
-                                    {dup.subject}
-                                  </div>
-                                  <span className="text-slate-400">{dup.receivedAt}</span>
-                                </div>
-
-                                <div className="text-slate-600 flex items-center gap-3">
-                                  <span>From: {dup.senderEmail}</span>
-                                  <span>Attachments: {dup.attachmentsCount}</span>
-                                </div>
-
-                                <div className="flex items-center justify-between pt-2 border-t border-amber-200/60 flex-wrap gap-2">
-                                  <div className="text-[11px] text-amber-800 flex items-center gap-1">
-                                    <LinkIcon className="w-3 h-3 text-amber-600" />
-                                    <span>
-                                      Grouped under <strong>{primary.bidNumber || primary.subject.slice(0, 30)}</strong>
-                                    </span>
-                                  </div>
-                                  <div className="flex items-center gap-2">
-                                    <button
-                                      type="button"
-                                      onClick={() => openLinkModal(dup)}
-                                      className="px-2.5 py-1 rounded bg-white hover:bg-amber-100 text-amber-900 border border-amber-300 text-[11px] font-semibold flex items-center gap-1 transition-colors shadow-2xs"
-                                    >
-                                      <ArrowRightLeft className="w-3 h-3 text-amber-700" />
-                                      <span>Relink</span>
-                                    </button>
-                                    <button
-                                      type="button"
-                                      onClick={() => handleUnlinkBid(dup.id)}
-                                      className="px-2.5 py-1 rounded bg-white hover:bg-rose-50 text-rose-700 border border-rose-200 text-[11px] font-semibold flex items-center gap-1 transition-colors shadow-2xs"
-                                    >
-                                      <Unlink className="w-3 h-3 text-rose-600" />
-                                      <span>Unlink</span>
-                                    </button>
-                                  </div>
-                                </div>
-                              </div>
-                            ))}
-                          </div>
-                        )}
                       </div>
                     );
                   })}
@@ -2346,11 +2663,151 @@ export default function DispatchDashboard() {
         </>
       )}
 
+      {/* POPUP MODAL: DUPLICATE ASSESSMENT & ORIGINAL COMPARISON */}
+      {comparingDuplicateBid && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-slate-900/70 backdrop-blur-sm animate-in fade-in">
+          <div className="bg-white rounded-2xl shadow-2xl border border-slate-200 max-w-5xl w-full max-h-[92vh] flex flex-col p-6 animate-in zoom-in-95 space-y-4">
+            {/* Header */}
+            <div className="flex items-start justify-between pb-3 border-b border-slate-200">
+              <div>
+                <span className="text-xs font-bold text-rose-600 uppercase tracking-wider flex items-center gap-1.5">
+                  <Copy className="w-3.5 h-3.5" /> Duplicate Verification & Original Comparison
+                </span>
+                <h3 className="text-lg font-bold text-slate-900 mt-0.5">
+                  Compare Supposed Original vs Received Duplicate
+                </h3>
+                <p className="text-xs text-slate-500">
+                  Assess if this is an identical copy or a distinct request with new details. If distinct, keep the email in the active queue.
+                </p>
+              </div>
+              <button
+                type="button"
+                onClick={() => setComparingDuplicateBid(null)}
+                className="text-slate-400 hover:text-slate-600 p-1 rounded-lg hover:bg-slate-100"
+              >
+                <X className="w-5 h-5" />
+              </button>
+            </div>
+
+            {/* Side-by-Side Comparison Columns */}
+            <div className="flex-1 overflow-y-auto grid grid-cols-1 md:grid-cols-2 gap-4 text-xs pr-1">
+              {/* Column 1: Supposed Original Email (Received First) */}
+              <div className="p-4 bg-emerald-50/50 rounded-xl border border-emerald-200 space-y-3 flex flex-col">
+                <div className="flex items-center justify-between pb-2 border-b border-emerald-200">
+                  <span className="px-2.5 py-0.5 rounded font-black text-[10px] uppercase tracking-wider bg-emerald-600 text-white flex items-center gap-1">
+                    <CheckCircle className="w-3 h-3" /> Original (Received First)
+                  </span>
+                  <span
+                    className="font-mono text-emerald-900 font-bold"
+                    title={new Date(comparingDuplicateBid.original.rawReceivedAt).toLocaleString()}
+                  >
+                    {comparingDuplicateBid.original.receivedAt}
+                  </span>
+                </div>
+
+                <div className="space-y-1">
+                  <div className="font-bold text-slate-900 text-sm">
+                    {comparingDuplicateBid.original.subject}
+                  </div>
+                  <div className="text-slate-600">
+                    From: <strong>{comparingDuplicateBid.original.senderName}</strong> &lt;{comparingDuplicateBid.original.senderEmail}&gt;
+                  </div>
+                  {comparingDuplicateBid.original.bidNumber && (
+                    <div className="text-blue-700 font-mono font-bold">
+                      Bid Number: {comparingDuplicateBid.original.bidNumber}
+                    </div>
+                  )}
+                  {comparingDuplicateBid.original.attachmentsCount > 0 && (
+                    <div className="text-slate-600 flex items-center gap-1">
+                      <Paperclip className="w-3 h-3" />
+                      <span>{comparingDuplicateBid.original.attachmentsCount} Attachment(s)</span>
+                    </div>
+                  )}
+                </div>
+
+                <div className="flex-1 bg-white p-3 rounded-lg border border-emerald-200 overflow-y-auto max-h-[280px] font-mono text-[11px] leading-relaxed whitespace-pre-wrap select-text text-slate-800">
+                  {comparingDuplicateBid.original.bodyText || comparingDuplicateBid.original.scopeSummary || '(No body text available)'}
+                </div>
+              </div>
+
+              {/* Column 2: Current Duplicate Email (Received Later) */}
+              <div className="p-4 bg-rose-50/50 rounded-xl border border-rose-200 space-y-3 flex flex-col">
+                <div className="flex items-center justify-between pb-2 border-b border-rose-200">
+                  <span className="px-2.5 py-0.5 rounded font-black text-[10px] uppercase tracking-wider bg-rose-600 text-white flex items-center gap-1">
+                    <Copy className="w-3 h-3" /> Duplicate Copy (Received Later)
+                  </span>
+                  <span
+                    className="font-mono text-rose-900 font-bold"
+                    title={new Date(comparingDuplicateBid.current.rawReceivedAt).toLocaleString()}
+                  >
+                    {comparingDuplicateBid.current.receivedAt}
+                  </span>
+                </div>
+
+                <div className="space-y-1">
+                  <div className="font-bold text-slate-900 text-sm">
+                    {comparingDuplicateBid.current.subject}
+                  </div>
+                  <div className="text-slate-600">
+                    From: <strong>{comparingDuplicateBid.current.senderName}</strong> &lt;{comparingDuplicateBid.current.senderEmail}&gt;
+                  </div>
+                  {comparingDuplicateBid.current.attachmentsCount > 0 && (
+                    <div className="text-slate-600 flex items-center gap-1">
+                      <Paperclip className="w-3 h-3" />
+                      <span>{comparingDuplicateBid.current.attachmentsCount} Attachment(s)</span>
+                    </div>
+                  )}
+                </div>
+
+                <div className="flex-1 bg-white p-3 rounded-lg border border-rose-200 overflow-y-auto max-h-[280px] font-mono text-[11px] leading-relaxed whitespace-pre-wrap select-text text-slate-800">
+                  {comparingDuplicateBid.current.bodyText || comparingDuplicateBid.current.scopeSummary || '(No body text available)'}
+                </div>
+              </div>
+            </div>
+
+            {/* Modal Footer Decision Buttons */}
+            <div className="flex items-center justify-between pt-3 border-t border-slate-200 flex-wrap gap-2">
+              <button
+                type="button"
+                onClick={() => setComparingDuplicateBid(null)}
+                className="px-4 py-2 rounded-lg text-xs font-semibold text-slate-600 hover:bg-slate-100 transition-colors"
+              >
+                Close
+              </button>
+
+              <div className="flex items-center gap-2">
+                {/* KEEP EMAIL BUTTON: Confirms Distinct */}
+                <button
+                  type="button"
+                  onClick={() => handleKeepEmail(comparingDuplicateBid.current.id)}
+                  className="px-4 py-2 rounded-lg text-xs font-bold bg-emerald-600 hover:bg-emerald-700 text-white shadow-sm transition-colors flex items-center gap-1.5"
+                >
+                  <CheckCircle2 className="w-4 h-4" />
+                  <span>Keep Email (Not a Duplicate)</span>
+                </button>
+
+                {/* MOVE TO DUPLICATES BUTTON */}
+                <button
+                  type="button"
+                  onClick={() => {
+                    handleMoveToDuplicates(comparingDuplicateBid.current.id);
+                    setComparingDuplicateBid(null);
+                  }}
+                  className="px-4 py-2 rounded-lg text-xs font-bold bg-rose-600 hover:bg-rose-700 text-white shadow-sm transition-colors flex items-center gap-1.5"
+                >
+                  <FolderArchive className="w-4 h-4" />
+                  <span>Confirm & Move to Duplicates</span>
+                </button>
+              </div>
+            </div>
+          </div>
+        </div>
+      )}
+
       {/* HUMAN-IN-THE-LOOP REVIEW & RECLASSIFICATION MODAL */}
       {reviewingBid && (
         <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-slate-900/60 backdrop-blur-sm animate-in fade-in">
           <div className="bg-white rounded-2xl shadow-2xl border border-slate-200 max-w-4xl w-full max-h-[92vh] flex flex-col p-6 animate-in zoom-in-95">
-            {/* Modal Header */}
             <div className="flex items-start justify-between pb-3 border-b border-slate-100">
               <div>
                 <span className="text-xs font-bold text-blue-600 uppercase tracking-wider">
@@ -2359,16 +2816,6 @@ export default function DispatchDashboard() {
                 <h3 className="text-lg font-bold text-slate-900 mt-0.5">
                   Change Classification & Adjust Workflow
                 </h3>
-                {(reviewingBid.isFlaggedDuplicate || reviewingBid.matchedBidNumber) && (
-                  <button
-                    type="button"
-                    onClick={() => handleUnlinkBid(reviewingBid.id)}
-                    className="mt-2 inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-bold text-rose-700 bg-rose-50 hover:bg-rose-100 border border-rose-200 transition-colors shadow-2xs"
-                  >
-                    <Unlink className="w-3.5 h-3.5 text-rose-600" />
-                    <span>Unlink from Group into Standalone Project</span>
-                  </button>
-                )}
               </div>
               <button
                 onClick={() => setReviewingBid(null)}
@@ -2378,45 +2825,16 @@ export default function DispatchDashboard() {
               </button>
             </div>
 
-            {/* Scrollable Modal Content */}
-            <div className="overflow-y-auto pr-1 py-4 space-y-5 flex-1">
-              <div className="bg-slate-50 rounded-xl border border-slate-200 overflow-hidden text-xs">
-                <div className="p-3.5 space-y-1.5">
-                  <div className="flex items-start justify-between gap-2">
-                    <h4 className="font-bold text-slate-900 text-sm leading-snug">
-                      {reviewingBid.subject}
-                    </h4>
-                    <span className="px-2 py-0.5 rounded text-[10px] font-bold uppercase bg-slate-200 text-slate-700 flex-shrink-0">
-                      Current: {reviewingBid.sticker}
-                    </span>
-                  </div>
-
-                  <div className="flex items-center gap-2 text-slate-600 flex-wrap">
-                    {reviewingBid.isForwarded ? (
-                      <span className="inline-flex items-center gap-1 text-indigo-700 font-medium">
-                        <UserCheck className="w-3 h-3 text-indigo-500" />
-                        Client/GC: <strong>{reviewingBid.originalSenderName || reviewingBid.senderName}</strong> &lt;{reviewingBid.originalSenderEmail || reviewingBid.senderEmail}&gt;
-                        <span className="text-indigo-400 font-normal">↳ (via {reviewingBid.forwardedBy || 'Coworker'})</span>
-                      </span>
-                    ) : (
-                      <span>From: <strong>{reviewingBid.senderName}</strong> &lt;{reviewingBid.senderEmail}&gt;</span>
-                    )}
-                    <span className="text-slate-400">•</span>
-                    <span>Received: {reviewingBid.receivedAt}</span>
-                  </div>
-
-                  {reviewingBid.scopeSummary && (
-                    <div className="mt-2 p-2.5 bg-indigo-50/80 border border-indigo-100 rounded-lg text-slate-700">
-                      <span className="font-semibold text-indigo-900 flex items-center gap-1">
-                        <Sparkles className="w-3.5 h-3.5 text-indigo-600" /> AI Scope Summary:
-                      </span>
-                      <p className="mt-0.5 text-[11px] leading-relaxed">{reviewingBid.scopeSummary}</p>
-                    </div>
-                  )}
+            <div className="overflow-y-auto pr-1 py-4 space-y-5 flex-1 text-xs">
+              <div className="bg-slate-50 rounded-xl p-3.5 border border-slate-200 space-y-1">
+                <h4 className="font-bold text-slate-900 text-sm leading-snug">
+                  {reviewingBid.subject}
+                </h4>
+                <div className="text-slate-600">
+                  From: <strong>{reviewingBid.senderName}</strong> &lt;{reviewingBid.senderEmail}&gt; • Received: {reviewingBid.receivedAt}
                 </div>
               </div>
 
-              {/* Target Classification Selector */}
               <div>
                 <label className="block text-xs font-bold text-slate-700 mb-2">
                   Select Correct Category:
@@ -2445,7 +2863,6 @@ export default function DispatchDashboard() {
                 </div>
               </div>
 
-              {/* Dynamic Controls depending on target category */}
               {targetSticker === 'ITB' && (
                 <div className="p-4 bg-blue-50/60 rounded-xl border border-blue-200 space-y-3">
                   <h5 className="font-bold text-blue-950 text-xs">ITB Assignment Details</h5>
@@ -2485,13 +2902,13 @@ export default function DispatchDashboard() {
               {(targetSticker === 'Addendum / RFI' || targetSticker === 'Addendum' || targetSticker === 'Won' || targetSticker === 'Lost') && (
                 <div className="p-4 bg-purple-50/60 rounded-xl border border-purple-200 space-y-3">
                   <h5 className="font-bold text-purple-950 text-xs">
-                    Link to Master Project (BID-26-XXXX)
+                    Link to Master Project (Active BID-26-XXXX)
                   </h5>
                   <input
                     type="text"
                     value={bidSearchQuery}
                     onChange={(e) => setBidSearchQuery(e.target.value)}
-                    placeholder="Search master bids..."
+                    placeholder="Search active master bids..."
                     className="w-full text-xs border border-slate-300 rounded-lg px-2.5 py-2 bg-white"
                   />
                   <select
@@ -2510,7 +2927,6 @@ export default function DispatchDashboard() {
               )}
             </div>
 
-            {/* Modal Actions */}
             <div className="flex items-center justify-end gap-3 pt-3 border-t border-slate-100">
               <button
                 type="button"
@@ -2561,7 +2977,7 @@ export default function DispatchDashboard() {
               <Search className="w-3.5 h-3.5 absolute left-3 top-1/2 -translate-y-1/2 text-slate-400" />
               <input
                 type="text"
-                placeholder="Search by project name, GC contractor, or BID number..."
+                placeholder="Search active bids by project name, GC contractor, or BID number..."
                 value={relinkSearchQuery}
                 onChange={(e) => setRelinkSearchQuery(e.target.value)}
                 className="w-full text-xs pl-8 pr-3 py-2 border border-slate-300 rounded-lg bg-white placeholder-slate-400 focus:outline-none focus:ring-2 focus:ring-blue-500"
