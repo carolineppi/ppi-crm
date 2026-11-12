@@ -480,9 +480,9 @@ export default function CalendarScheduleView({
           style={
             filterEstimator === 'Not Bidding'
               ? {
-                  borderColor: 'rgb(148, 163, 184)',
-                  backgroundColor: 'rgb(241, 245, 249)',
-                  boxShadow: '0 0 0 2px rgb(148, 163, 184)',
+                  borderColor: 'rgb(194, 194, 194)',
+                  backgroundColor: 'rgba(194, 194, 194, 0.35)',
+                  boxShadow: '0 0 0 2px rgb(194, 194, 194)',
                 }
               : {}
           }
@@ -494,7 +494,10 @@ export default function CalendarScheduleView({
         >
           <div className="flex items-center justify-between">
             <span className="font-bold text-slate-700 flex items-center gap-1.5 truncate">
-              <span className="w-2.5 h-2.5 rounded-full bg-slate-400 flex-shrink-0" />
+              <span
+                className="w-2.5 h-2.5 rounded-full flex-shrink-0"
+                style={{ backgroundColor: 'rgb(194, 194, 194)' }}
+              />
               <span>Not Bidding</span>
             </span>
             <span className="font-mono font-black text-xs bg-white px-1.5 py-0.2 rounded border border-slate-200 text-slate-700 shadow-2xs">

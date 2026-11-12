@@ -88,61 +88,140 @@ function parseDtStart(rawValue: string): { dueDate: string; dueTime: string | nu
   return null;
 }
 
+const ESTIMATOR_COLOR_TARGETS: Array<{ estimator: string; rgb: [number, number, number] }> = [
+  { estimator: 'Not Bidding', rgb: [194, 194, 194] },
+  { estimator: 'Lisa Williams', rgb: [250, 209, 101] },
+  { estimator: 'Harrison Schumaker', rgb: [154, 156, 255] },
+  { estimator: 'Nick Mudd', rgb: [205, 116, 230] },
+  { estimator: 'Joe Bunn', rgb: [22, 167, 101] },
+  { estimator: 'Stacey Scott', rgb: [246, 145, 178] },
+  { estimator: 'Jennifer MacPherson', rgb: [255, 173, 70] },
+  { estimator: 'Rob Brinlee', rgb: [73, 134, 231] },
+];
+
+// Google Calendar colorId mapping (1-11)
+const GOOGLE_COLOR_ID_MAP: Record<string, string> = {
+  '1': 'Harrison Schumaker', // Lavender / Periwinkle
+  '2': 'Joe Bunn',           // Sage / Green
+  '3': 'Nick Mudd',          // Grape / Purple
+  '4': 'Stacey Scott',       // Flamingo / Pink
+  '5': 'Lisa Williams',      // Banana / Golden Yellow
+  '6': 'Jennifer MacPherson',// Tangerine / Orange
+  '7': 'Rob Brinlee',        // Peacock / Blue
+  '8': 'Not Bidding',        // Graphite / Grey
+  '9': 'Rob Brinlee',        // Blueberry / Blue
+  '10': 'Joe Bunn',          // Basil / Green
+};
+
+function parseRgbColor(raw: string): [number, number, number] | null {
+  const s = raw.trim().toLowerCase();
+
+  // rgb(r, g, b) or rgba(r, g, b, a)
+  const rgbMatch = s.match(/rgba?\(\s*(\d{1,3})\s*,\s*(\d{1,3})\s*,\s*(\d{1,3})/);
+  if (rgbMatch) {
+    return [Number(rgbMatch[1]), Number(rgbMatch[2]), Number(rgbMatch[3])];
+  }
+
+  // #RRGGBB or RRGGBB
+  const hex6 = s.match(/#?([0-9a-f]{6})\b/i);
+  if (hex6) {
+    const h = hex6[1];
+    return [
+      parseInt(h.slice(0, 2), 16),
+      parseInt(h.slice(2, 4), 16),
+      parseInt(h.slice(4, 6), 16),
+    ];
+  }
+
+  // #RGB
+  const hex3 = s.match(/^#([0-9a-f]{3})$/i);
+  if (hex3) {
+    const h = hex3[1];
+    return [
+      parseInt(h[0] + h[0], 16),
+      parseInt(h[1] + h[1], 16),
+      parseInt(h[2] + h[2], 16),
+    ];
+  }
+
+  return null;
+}
+
+function matchEstimatorByColor(rawColor: string | null): string | null {
+  if (!rawColor) return null;
+  const trimmed = rawColor.trim();
+
+  // 1. Google Calendar numeric colorId
+  if (GOOGLE_COLOR_ID_MAP[trimmed]) {
+    return GOOGLE_COLOR_ID_MAP[trimmed];
+  }
+
+  // 2. Exact or nearest RGB/Hex match against the 8 company estimator colors
+  const parsedRgb = parseRgbColor(trimmed);
+  if (parsedRgb) {
+    let bestEst: string | null = null;
+    let bestDist = Infinity;
+    for (const target of ESTIMATOR_COLOR_TARGETS) {
+      const dr = parsedRgb[0] - target.rgb[0];
+      const dg = parsedRgb[1] - target.rgb[1];
+      const db = parsedRgb[2] - target.rgb[2];
+      const dist = Math.sqrt(dr * dr + dg * dg + db * db);
+      if (dist < bestDist) {
+        bestDist = dist;
+        bestEst = target.estimator;
+      }
+    }
+    if (bestEst && bestDist <= 75) {
+      return bestEst;
+    }
+  }
+
+  // 3. CSS / Google color name fallback
+  const c = trimmed.toLowerCase();
+  if (c.includes('yellow') || c.includes('gold') || c.includes('banana')) return 'Lisa Williams';
+  if (c.includes('lavender') || c.includes('periwinkle')) return 'Harrison Schumaker';
+  if (c.includes('purple') || c.includes('grape') || c.includes('orchid') || c.includes('violet')) return 'Nick Mudd';
+  if (c.includes('green') || c.includes('sage') || c.includes('basil') || c.includes('emerald')) return 'Joe Bunn';
+  if (c.includes('pink') || c.includes('flamingo') || c.includes('rose')) return 'Stacey Scott';
+  if (c.includes('orange') || c.includes('tangerine') || c.includes('amber')) return 'Jennifer MacPherson';
+  if (c.includes('blue') || c.includes('blueberry') || c.includes('peacock') || c.includes('cobalt')) return 'Rob Brinlee';
+  if (c.includes('gray') || c.includes('grey') || c.includes('graphite') || c.includes('silver')) return 'Not Bidding';
+
+  return null;
+}
+
 function detectEstimatorFromEvent(
   summary: string,
   description: string,
   categories: string,
   rawColor: string | null
 ): string | null {
+  // 1. Match by explicit event color first (matches Google Calendar color-coding)
+  const colorMatched = matchEstimatorByColor(rawColor);
+  if (colorMatched) {
+    return colorMatched;
+  }
+
   const combined = `${summary} ${description} ${categories}`.toLowerCase();
 
-  // Check Not Bidding / No Bid
+  // 2. Check Not Bidding / No Bid
   if (/\b(not\s*bidding|no\s*bid|passed|declined)\b/i.test(combined)) {
     return 'Not Bidding';
   }
 
-  // Check full estimator names first
+  // 3. Check full estimator names
   for (const est of KNOWN_ESTIMATORS) {
     if (combined.includes(est.toLowerCase())) {
       return est;
     }
   }
 
-  // Check first names / initials with word boundaries
+  // 4. Check first names with word boundaries
   for (const est of KNOWN_ESTIMATORS) {
     const first = est.split(' ')[0].toLowerCase();
     const regex = new RegExp(`\\b${first}\\b`, 'i');
     if (regex.test(combined)) {
       return est;
-    }
-  }
-
-  // Fallback: map Google Calendar / CSS colors if present
-  if (rawColor) {
-    const c = rawColor.toLowerCase();
-    if (c.includes('yellow') || c.includes('gold') || c.includes('banana') || c.includes('fad165')) {
-      return 'Lisa Williams';
-    }
-    if (c.includes('lavender') || c.includes('periwinkle') || c.includes('9a9cff') || c.includes('7986cb')) {
-      return 'Harrison Schumaker';
-    }
-    if (c.includes('purple') || c.includes('grape') || c.includes('8e24aa')) {
-      return 'Nick Mudd';
-    }
-    if (c.includes('green') || c.includes('sage') || c.includes('basil') || c.includes('0b8043') || c.includes('33b679')) {
-      return 'Joe Bunn';
-    }
-    if (c.includes('pink') || c.includes('flamingo') || c.includes('f691b2') || c.includes('e67c73')) {
-      return 'Stacey Scott';
-    }
-    if (c.includes('blue') || c.includes('blueberry') || c.includes('peacock') || c.includes('3f51b5') || c.includes('039be5')) {
-      return 'Rob Brinlee';
-    }
-    if (c.includes('orange') || c.includes('tangerine') || c.includes('f4511e') || c.includes('ef6c00')) {
-      return 'Jennifer MacPherson';
-    }
-    if (c.includes('gray') || c.includes('grey') || c.includes('graphite') || c.includes('616161')) {
-      return 'Not Bidding';
     }
   }
 
@@ -211,7 +290,12 @@ export function parseIcsCalendar(rawIcsText: string): ParsedCalendarEvent[] {
         const description = current['DESCRIPTION'] ? unescapeIcsText(current['DESCRIPTION']) : '';
         const location = current['LOCATION'] ? unescapeIcsText(current['LOCATION']) : null;
         const categories = unescapeIcsText(current['CATEGORIES'] || '');
-        const rawColor = current['COLOR'] || current['X-GOOGLE-CALENDAR-EVENT-COLOR'] || null;
+        const rawColor =
+          current['COLOR'] ||
+          current['X-GOOGLE-CALENDAR-EVENT-COLOR'] ||
+          current['X-GOOGLE-CALENDAR-COLOR-ID'] ||
+          current['X-APPLE-CALENDAR-COLOR'] ||
+          null;
 
         const { projectName, clientCompany } = extractProjectAndContractor(summary, description);
         const detectedEstimator = detectEstimatorFromEvent(summary, description, categories, rawColor);

@@ -191,18 +191,18 @@ export interface EstimatorColorConfig {
  * Exact company color branding:
  * - Lisa Williams: Golden Yellow (rgb(250, 209, 101))
  * - Harrison Schumaker: Periwinkle (rgb(154, 156, 255))
- * - Nick Mudd: Purple (rgb(168, 85, 247))
- * - Joe Bunn: Green (rgb(34, 197, 94))
+ * - Nick Mudd: Purple (rgb(205, 116, 230))
+ * - Joe Bunn: Green (rgb(22, 167, 101))
  * - Stacey Scott: Pink (rgb(246, 145, 178))
- * - Rob Brinlee: Blue (rgb(59, 130, 246))
- * - Jennifer MacPherson: Orange (rgb(249, 115, 22))
- * - Not Bidding: Slate Grey (rgb(148, 163, 184))
+ * - Jennifer MacPherson: Orange (rgb(255, 173, 70))
+ * - Rob Brinlee: Blue (rgb(73, 134, 231))
+ * - Not Bidding: Grey (rgb(194, 194, 194))
  */
 export const ESTIMATOR_COLORS: Record<string, EstimatorColorConfig> = {
   'Lisa Williams': {
     primaryColor: 'rgb(250, 209, 101)',
     bgTint: 'rgba(250, 209, 101, 0.32)',
-    borderColor: 'rgb(245, 196, 70)',
+    borderColor: 'rgb(250, 209, 101)',
     textColor: '#451a03',
     pillBg: 'bg-amber-100',
     pillText: 'text-amber-950 font-bold',
@@ -213,7 +213,7 @@ export const ESTIMATOR_COLORS: Record<string, EstimatorColorConfig> = {
   'Harrison Schumaker': {
     primaryColor: 'rgb(154, 156, 255)',
     bgTint: 'rgba(154, 156, 255, 0.28)',
-    borderColor: 'rgb(130, 133, 255)',
+    borderColor: 'rgb(154, 156, 255)',
     textColor: '#1e1b4b',
     pillBg: 'bg-indigo-100',
     pillText: 'text-indigo-950 font-bold',
@@ -222,9 +222,9 @@ export const ESTIMATOR_COLORS: Record<string, EstimatorColorConfig> = {
     cardBorder: 'border-l-indigo-400',
   },
   'Nick Mudd': {
-    primaryColor: 'rgb(168, 85, 247)',
-    bgTint: 'rgba(168, 85, 247, 0.22)',
-    borderColor: 'rgb(168, 85, 247)',
+    primaryColor: 'rgb(205, 116, 230)',
+    bgTint: 'rgba(205, 116, 230, 0.24)',
+    borderColor: 'rgb(205, 116, 230)',
     textColor: '#3b0764',
     pillBg: 'bg-purple-100',
     pillText: 'text-purple-950 font-bold',
@@ -233,9 +233,9 @@ export const ESTIMATOR_COLORS: Record<string, EstimatorColorConfig> = {
     cardBorder: 'border-l-purple-500',
   },
   'Joe Bunn': {
-    primaryColor: 'rgb(34, 197, 94)',
-    bgTint: 'rgba(34, 197, 94, 0.22)',
-    borderColor: 'rgb(34, 197, 94)',
+    primaryColor: 'rgb(22, 167, 101)',
+    bgTint: 'rgba(22, 167, 101, 0.22)',
+    borderColor: 'rgb(22, 167, 101)',
     textColor: '#052e16',
     pillBg: 'bg-emerald-100',
     pillText: 'text-emerald-950 font-bold',
@@ -246,7 +246,7 @@ export const ESTIMATOR_COLORS: Record<string, EstimatorColorConfig> = {
   'Stacey Scott': {
     primaryColor: 'rgb(246, 145, 178)',
     bgTint: 'rgba(246, 145, 178, 0.28)',
-    borderColor: 'rgb(240, 115, 155)',
+    borderColor: 'rgb(246, 145, 178)',
     textColor: '#500724',
     pillBg: 'bg-pink-100',
     pillText: 'text-pink-950 font-bold',
@@ -255,9 +255,9 @@ export const ESTIMATOR_COLORS: Record<string, EstimatorColorConfig> = {
     cardBorder: 'border-l-pink-400',
   },
   'Rob Brinlee': {
-    primaryColor: 'rgb(59, 130, 246)',
-    bgTint: 'rgba(59, 130, 246, 0.22)',
-    borderColor: 'rgb(59, 130, 246)',
+    primaryColor: 'rgb(73, 134, 231)',
+    bgTint: 'rgba(73, 134, 231, 0.22)',
+    borderColor: 'rgb(73, 134, 231)',
     textColor: '#172554',
     pillBg: 'bg-blue-100',
     pillText: 'text-blue-950 font-bold',
@@ -266,9 +266,9 @@ export const ESTIMATOR_COLORS: Record<string, EstimatorColorConfig> = {
     cardBorder: 'border-l-blue-500',
   },
   'Jennifer MacPherson': {
-    primaryColor: 'rgb(249, 115, 22)',
-    bgTint: 'rgba(249, 115, 22, 0.25)',
-    borderColor: 'rgb(249, 115, 22)',
+    primaryColor: 'rgb(255, 173, 70)',
+    bgTint: 'rgba(255, 173, 70, 0.28)',
+    borderColor: 'rgb(255, 173, 70)',
     textColor: '#431407',
     pillBg: 'bg-orange-100',
     pillText: 'text-orange-950 font-bold',
@@ -277,9 +277,9 @@ export const ESTIMATOR_COLORS: Record<string, EstimatorColorConfig> = {
     cardBorder: 'border-l-orange-500',
   },
   'Not Bidding': {
-    primaryColor: 'rgb(148, 163, 184)',
-    bgTint: 'rgb(241, 245, 249)',
-    borderColor: 'rgb(148, 163, 184)',
+    primaryColor: 'rgb(194, 194, 194)',
+    bgTint: 'rgba(194, 194, 194, 0.35)',
+    borderColor: 'rgb(194, 194, 194)',
     textColor: '#334155',
     pillBg: 'bg-slate-200',
     pillText: 'text-slate-700 font-bold',
@@ -288,9 +288,9 @@ export const ESTIMATOR_COLORS: Record<string, EstimatorColorConfig> = {
     cardBorder: 'border-l-slate-400',
   },
   'No Bid': {
-    primaryColor: 'rgb(148, 163, 184)',
-    bgTint: 'rgb(241, 245, 249)',
-    borderColor: 'rgb(148, 163, 184)',
+    primaryColor: 'rgb(194, 194, 194)',
+    bgTint: 'rgba(194, 194, 194, 0.35)',
+    borderColor: 'rgb(194, 194, 194)',
     textColor: '#334155',
     pillBg: 'bg-slate-200',
     pillText: 'text-slate-700 font-bold',
