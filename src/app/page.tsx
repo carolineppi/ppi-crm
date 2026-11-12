@@ -618,7 +618,9 @@ export default function DispatchDashboard() {
     }
 
     // 3. If flagged as duplicate in database: verify if there is an earlier primary in the group
-    if (bid.isFlaggedDuplicate) {
+    // Note: Addendums, Awards, and Lost updates share duplicateGroupId with their parent ITB and are NOT duplicates.
+    const isUpdateEmail = ['Addendum / RFI', 'Addendum', 'RFI/Forms', 'RFI / Scope', 'Won', 'Contractor Awarded', 'Lost'].includes(bid.sticker);
+    if (bid.isFlaggedDuplicate && !isUpdateEmail) {
       const primary = bids.find(
         (b) =>
           b.duplicateGroupId === bid.duplicateGroupId &&
@@ -1911,17 +1913,18 @@ export default function DispatchDashboard() {
             )}
 
             {/* Scope Summary & Project Context Grid */}
-            <div className="grid grid-cols-1 md:grid-cols-2 gap-3 pt-1 text-xs">
-              <div className="bg-white/5 rounded-xl p-3 border border-white/10 space-y-1">
-                <span className="font-bold text-indigo-300 flex items-center gap-1.5">
-                  <Sparkles className="w-3.5 h-3.5 text-indigo-400" />
-                  AI Scope Summary:
-                </span>
-                <p className="text-slate-200 leading-relaxed text-[11px]">
-                  {selectedBid.scopeSummary ||
-                    'General construction ITB document. Division 10 toilet partitions & accessories scope.'}
-                </p>
-              </div>
+            <div className={`grid grid-cols-1 ${selectedBid.scopeSummary ? 'md:grid-cols-2' : ''} gap-3 pt-1 text-xs`}>
+              {selectedBid.scopeSummary && (
+                <div className="bg-white/5 rounded-xl p-3 border border-white/10 space-y-1">
+                  <span className="font-bold text-indigo-300 flex items-center gap-1.5">
+                    <Sparkles className="w-3.5 h-3.5 text-indigo-400" />
+                    Scope Summary:
+                  </span>
+                  <p className="text-slate-200 leading-relaxed text-[11px]">
+                    {selectedBid.scopeSummary}
+                  </p>
+                </div>
+              )}
 
               <div className="bg-white/5 rounded-xl p-3 border border-white/10 space-y-2">
                 <div className="flex items-center justify-between gap-2">
@@ -2157,24 +2160,18 @@ export default function DispatchDashboard() {
       )}
 
       {/* Top Banner */}
-      <div className="bg-gradient-to-r from-blue-950 via-slate-900 to-indigo-950 rounded-2xl p-5 text-white shadow-md">
-        <div className="flex flex-col md:flex-row md:items-center justify-between gap-4">
-          <div>
-            <div className="flex items-center gap-2.5 mb-1">
-              <h2 className="text-xl sm:text-2xl font-bold tracking-tight flex items-center gap-2">
-                <Mail className="w-5 h-5 text-blue-400" />
-                Calendar Manager Dispatch & Email Queue
-              </h2>
-              {isUsingLiveDb && (
-                <span className="px-2 py-0.5 rounded text-[11px] font-semibold bg-emerald-500/20 text-emerald-300 border border-emerald-500/30 flex items-center gap-1">
-                  <Database className="w-3 h-3" /> Live ({bids.length})
-                </span>
-              )}
-            </div>
-            <p className="text-blue-200 text-xs sm:text-sm flex items-center gap-1.5">
-              <Sparkles className="w-4 h-4 text-amber-300 flex-shrink-0" />
-              <strong>Intelligent Inbound Queue:</strong> Inspect full-screen emails alongside top AI notes — multi-contractor job alerts, due date extensions, duplicate filtering, and instant estimator assignment.
-            </p>
+      <div className="bg-gradient-to-r from-blue-950 via-slate-900 to-indigo-950 rounded-2xl px-5 py-3.5 text-white shadow-md">
+        <div className="flex flex-col md:flex-row md:items-center justify-between gap-3">
+          <div className="flex items-center gap-2.5">
+            <h2 className="text-lg sm:text-xl font-bold tracking-tight flex items-center gap-2">
+              <Mail className="w-5 h-5 text-blue-400" />
+              Calendar Manager Dispatch
+            </h2>
+            {isUsingLiveDb && (
+              <span className="px-2 py-0.5 rounded text-[11px] font-semibold bg-emerald-500/20 text-emerald-300 border border-emerald-500/30 flex items-center gap-1">
+                <Database className="w-3 h-3" /> Live ({bids.length})
+              </span>
+            )}
           </div>
 
           <div className="flex items-center gap-2 flex-wrap">

@@ -9,8 +9,44 @@ import {
 import { classifyEmailWithML } from '@/lib/ml/classifier';
 import { deconstructEmailThread } from '@/lib/email-parser/thread-cleaner';
 import { normalizeDateToYyyyMmDd } from '@/lib/date-utils';
-import { findBestBidMatchForAddendum } from '@/lib/matching/match-addendums';
+import { findBestBidMatchForAddendum, extractProjectCandidate } from '@/lib/matching/match-addendums';
 import type { EmailAttachmentPayload } from '@/types/bid-request';
+
+function extractBidMetadata(
+  subject: string,
+  bodyText: string,
+  senderName: string | null,
+  senderEmail: string
+): {
+  projectName: string | null;
+  clientCompany: string | null;
+  bidDueDate: string | null;
+  bidDueTime: string | null;
+} {
+  const combined = `${subject}\n${bodyText}`;
+
+  // 1. Project Name: explicit label or cleaned subject candidate
+  const projMatch = combined.match(/(?:Project(?:\s*Name)?|Job\s*Name)\s*:\s*([^\r\n]{3,100})/i);
+  const projectName = projMatch?.[1]?.trim() || extractProjectCandidate(subject, null) || null;
+
+  // 2. Client Company / GC: explicit label or sender name
+  const gcMatch = combined.match(/(?:General\s*Contractor|GC|Contractor|Company|From\s*Company)\s*:\s*([^\r\n]{2,80})/i);
+  const clientCompany = gcMatch?.[1]?.trim() || senderName || senderEmail.split('@')[0] || null;
+
+  // 3. Bid Due Date: "Bid Date:", "Due Date:", "Bids Due:", etc.
+  const dateMatch = combined.match(
+    /(?:Bid\s*(?:Due\s*)?Date|Due\s*Date|Bids\s*Due|Proposal\s*Due|Submit\s*By)\s*[:\-]?\s*([A-Za-z]{3,9}\s+\d{1,2},?\s+\d{4}|\d{1,2}[\/\-]\d{1,2}[\/\-]\d{2,4}|\d{4}-\d{2}-\d{2})/i
+  );
+  const bidDueDate = dateMatch?.[1] ? normalizeDateToYyyyMmDd(dateMatch[1]) : null;
+
+  // 4. Bid Due Time: "at 2:00 PM", "Bid Time: 10:30 AM", etc.
+  const timeMatch = combined.match(
+    /(?:Bid\s*Time|Due\s*(?:at|Time)|@)\s*[:\-]?\s*(\d{1,2}:\d{2}\s*(?:AM|PM))/i
+  ) || combined.match(/(?:Bid\s*Date|Bids\s*Due)[^\r\n]{0,40}?\b(\d{1,2}:\d{2}\s*(?:AM|PM))\b/i);
+  const bidDueTime = timeMatch?.[1]?.trim().toUpperCase() || null;
+
+  return { projectName, clientCompany, bidDueDate, bidDueTime };
+}
 
 const attachmentSchema = z.object({
   filename: z.string(),
@@ -153,6 +189,13 @@ export async function POST(request: NextRequest) {
       attachments: attachmentFilenames,
     });
 
+    const extractedMeta = extractBidMetadata(
+      deconstructed.originalSubject || payload.subject,
+      bodyText,
+      deconstructed.originalSenderName || directSenderName,
+      deconstructed.originalSenderEmail || directSenderEmail
+    );
+
     const ai = {
       sticker: ml.sticker,
       confidence: ml.confidence / 100,
@@ -162,11 +205,12 @@ export async function POST(request: NextRequest) {
       originalSenderEmail: deconstructed.originalSenderEmail,
       originalSenderName: deconstructed.originalSenderName,
       originalSubject: deconstructed.originalSubject,
-      projectName: payload.projectName || null,
+      projectName: payload.projectName || extractedMeta.projectName,
       projectAddress: null,
       jobCode: extractJobCode(payload.subject) || extractJobCode(bodyText),
-      clientCompany: payload.clientCompany || null,
-      bidDueDate: payload.bidDueDate || null,
+      clientCompany: payload.clientCompany || extractedMeta.clientCompany,
+      bidDueDate: payload.bidDueDate || extractedMeta.bidDueDate,
+      bidDueTime: extractedMeta.bidDueTime,
       scopeSummary: deconstructed.cleanSubject,
       matchedBidNumber: null as string | null,
       matchConfidence: 0,
@@ -325,9 +369,27 @@ export async function POST(request: NextRequest) {
       General: 'general_inquiry',
     };
 
+    // Generate a bid_number for new non-duplicate ITBs so Addendums/RFIs can auto-match to them
+    let generatedBidNumber: string | null = null;
+    if (ai.sticker === 'ITB' && !duplicateEvaluation.isDuplicate) {
+      const { data: nextNum } = await supabase.rpc('get_next_bid_number');
+      if (nextNum) {
+        generatedBidNumber = nextNum;
+      } else {
+        const currentYear = new Date().getFullYear().toString().slice(-2);
+        const { count } = await supabase
+          .from('bid_requests')
+          .select('id', { count: 'exact', head: true })
+          .not('bid_number', 'is', null);
+        const seq = (count || 0) + 1;
+        generatedBidNumber = `BID-${currentYear}-${seq.toString().padStart(4, '0')}`;
+      }
+    }
+
     // 7. Insert Record into Supabase
     const bidRequestRecord = {
       source_email_id: payload.messageId || null,
+      bid_number: generatedBidNumber,
       sender_email: effectiveSenderEmail,
       sender_name: effectiveSenderName,
       email_subject: payload.subject,
@@ -336,6 +398,7 @@ export async function POST(request: NextRequest) {
       email_received_at: payload.receivedAt || new Date().toISOString(),
       raw_payload: {
         ...rawBody,
+        ...(ai.bidDueTime ? { bid_due_time: ai.bidDueTime } : {}),
         ml_prediction: {
           predictedClass: ml.predictedClass,
           confidence: ml.confidence,
@@ -363,7 +426,7 @@ export async function POST(request: NextRequest) {
 
       // Grouping
       duplicate_group_id: finalGroupId,
-      is_flagged_duplicate: ai.sticker === 'Addendum / RFI' || duplicateEvaluation.isDuplicate,
+      is_flagged_duplicate: ai.sticker !== 'Addendum / RFI' && duplicateEvaluation.isDuplicate,
       duplicate_of_id: matchedBidId || duplicateEvaluation.duplicateOfId,
       duplicate_confidence: duplicateEvaluation.confidence,
       duplicate_reasons: duplicateEvaluation.reasons,

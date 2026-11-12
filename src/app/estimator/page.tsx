@@ -53,6 +53,8 @@ interface JobItem {
   assignedEstimator?: string | null;
   estimatorStatus: 'unassigned' | 'assigned' | 'in_progress' | 'bid_submitted' | 'won' | 'lost' | 'no_bid';
   bidDueDate?: string | null;
+  bidDueTime?: string | null;
+  googleDriveFolderUrl?: string | null;
   scopeSummary?: string | null;
   receivedAt: string;
   subject: string;
@@ -76,7 +78,6 @@ export default function EstimatorWorkspacePage() {
   const [sortBy, setSortBy] = useState<'dueDate' | 'received' | 'projectName'>('dueDate');
   const [activeJobId, setActiveJobId] = useState<string | null>(null);
   const [isModalOpen, setIsModalOpen] = useState(false);
-  const [isAssigningSample, setIsAssigningSample] = useState(false);
 
   // Load saved estimator from localStorage or default to ALL
   useEffect(() => {
@@ -186,6 +187,8 @@ export default function EstimatorWorkspacePage() {
               assignedEstimator: assignedName,
               estimatorStatus: r.estimator_status || 'assigned',
               bidDueDate: r.bid_due_date,
+              bidDueTime: r.bid_due_time || r.raw_payload?.bid_due_time || null,
+              googleDriveFolderUrl: r.google_drive_folder_url || null,
               scopeSummary: r.scope_summary || r.ai_analysis?.scopeSummary || null,
               receivedAt: new Date(r.email_received_at || r.created_at).toLocaleDateString([], {
                 month: 'short',
@@ -232,29 +235,6 @@ export default function EstimatorWorkspacePage() {
       }
     } catch (err) {
       console.error('Failed to update status:', err);
-    }
-  };
-
-  const handleAssignSampleBids = async () => {
-    setIsAssigningSample(true);
-    try {
-      // Pick top 3 unassigned ITBs and assign them to the current estimator
-      const unassigned = bids.filter((b) => !b.assignedEstimator && b.sticker === 'ITB').slice(0, 3);
-      for (const item of unassigned) {
-        await fetch(`/api/bid-requests/${item.id}`, {
-          method: 'PATCH',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({
-            assignedEstimator: selectedEstimator,
-            bidDueDate: item.bidDueDate || '2026-11-20',
-          }),
-        });
-      }
-      await fetchBids();
-    } catch (err) {
-      console.error('Failed assigning sample bids:', err);
-    } finally {
-      setIsAssigningSample(false);
     }
   };
 
@@ -342,20 +322,11 @@ export default function EstimatorWorkspacePage() {
   return (
     <div className="min-h-screen bg-slate-100/70 text-slate-800 p-3 sm:p-6 lg:p-8 space-y-6">
       {/* Top Banner Navigation */}
-      <div className="bg-gradient-to-r from-slate-900 via-blue-950 to-indigo-950 rounded-2xl p-5 sm:p-6 text-white shadow-lg border border-slate-800 flex flex-col md:flex-row md:items-center justify-between gap-4">
+      <div className="bg-gradient-to-r from-slate-900 via-blue-950 to-indigo-950 rounded-2xl px-5 py-4 text-white shadow-lg border border-slate-800 flex flex-col md:flex-row md:items-center justify-between gap-4">
         <div>
-          <div className="flex items-center gap-2 mb-1.5">
-            <span className="px-2.5 py-0.5 rounded-full text-[10px] font-extrabold uppercase bg-blue-500/30 text-blue-300 border border-blue-400/30 tracking-wider">
-              Estimator Portal
-            </span>
-            <span className="text-slate-400 text-xs">• Partition Plus Commercial CRM</span>
-          </div>
-          <h1 className="text-2xl sm:text-3xl font-black tracking-tight text-white flex items-center gap-2">
-            <span>👷 My Assigned Jobs & Takeoffs</span>
+          <h1 className="text-xl sm:text-2xl font-black tracking-tight text-white flex items-center gap-2">
+            <span>👷 Estimator Portal — Assigned Jobs & Takeoffs</span>
           </h1>
-          <p className="text-blue-200 text-xs sm:text-sm mt-1">
-            Access drawings, specs, addendums, and client communications for all bids assigned to you.
-          </p>
         </div>
 
         {/* Global Navigation Tabs to Dispatch & Calendar */}
@@ -591,23 +562,6 @@ export default function EstimatorWorkspacePage() {
                 : 'Try adjusting your search terms or clearing the status filter.'}
             </p>
           </div>
-
-          {totalAssigned === 0 && selectedEstimator !== 'ALL' && (
-            <div className="pt-2">
-              <button
-                onClick={handleAssignSampleBids}
-                disabled={isAssigningSample}
-                className="px-4 py-2 bg-blue-600 hover:bg-blue-700 text-white rounded-xl text-xs font-bold transition-all shadow-sm flex items-center gap-2 mx-auto"
-              >
-                <Sparkles className="w-4 h-4 text-amber-300" />
-                <span>
-                  {isAssigningSample
-                    ? 'Assigning 3 Bids...'
-                    : `Assign 3 Sample Bids to ${selectedEstimator}`}
-                </span>
-              </button>
-            </div>
-          )}
         </div>
       ) : (
         <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
@@ -633,11 +587,18 @@ export default function EstimatorWorkspacePage() {
                       {job.bidNumber || 'PENDING'}
                     </span>
 
-                    {due && (
-                      <span className={`px-2 py-0.5 rounded text-[10px] font-bold border ${due.badgeClass}`}>
-                        {due.label}
-                      </span>
-                    )}
+                    <div className="flex items-center gap-1.5 flex-wrap justify-end">
+                      {job.bidDueTime && (
+                        <span className="px-2 py-0.5 rounded text-[10px] font-bold bg-indigo-50 text-indigo-800 border border-indigo-200">
+                          {job.bidDueTime}
+                        </span>
+                      )}
+                      {due && (
+                        <span className={`px-2 py-0.5 rounded text-[10px] font-bold border ${due.badgeClass}`}>
+                          {due.label}
+                        </span>
+                      )}
+                    </div>
                   </div>
 
                   <div>

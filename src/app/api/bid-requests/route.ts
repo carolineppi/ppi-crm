@@ -57,17 +57,30 @@ export async function GET(request: NextRequest) {
       created_at
     `.replace(/\s+/g, ' ').trim();
 
-    const { data, error } = await supabase
-      .from('bid_requests')
-      .select(selectQuery as any)
-      .order('created_at', { ascending: false });
+    // Fetch all rows in 1000-row pages so PostgREST's default 1000-row limit never silently truncates data
+    const allRows: any[] = [];
+    const pageSize = 1000;
+    let from = 0;
 
-    if (error) {
-      console.error('Supabase query error in /api/bid-requests:', error);
-      return NextResponse.json({ error: error.message }, { status: 500 });
+    while (true) {
+      const { data, error } = await supabase
+        .from('bid_requests')
+        .select(selectQuery as any)
+        .order('created_at', { ascending: false })
+        .range(from, from + pageSize - 1);
+
+      if (error) {
+        console.error('Supabase query error in /api/bid-requests:', error);
+        return NextResponse.json({ error: error.message }, { status: 500 });
+      }
+
+      if (!data || data.length === 0) break;
+      allRows.push(...data);
+      if (data.length < pageSize) break;
+      from += pageSize;
     }
 
-    return NextResponse.json({ bidRequests: data || [] });
+    return NextResponse.json({ bidRequests: allRows });
   } catch (err: any) {
     console.error('Exception in /api/bid-requests:', err);
     return NextResponse.json(

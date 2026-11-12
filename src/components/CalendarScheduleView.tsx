@@ -85,21 +85,8 @@ export default function CalendarScheduleView({
     });
   }, [bids]);
 
-  // Determine starting reference date: pick current week or week with active ITB dates
-  const [currentDate, setCurrentDate] = useState<Date>(() => {
-    // Current simulated date is in November 2026
-    const now = new Date();
-    // Check if bids have dates in November 2026
-    const hasActiveBids = itbBids.some((b) => b.bidDueDate);
-    if (hasActiveBids) {
-      const sample = itbBids.find((b) => b.bidDueDate && b.bidDueDate.startsWith('2026-11'));
-      if (sample && sample.bidDueDate) {
-        const [y, m, d] = sample.bidDueDate.split('-').map(Number);
-        return new Date(y, m - 1, d);
-      }
-    }
-    return now;
-  });
+  // Start on current week
+  const [currentDate, setCurrentDate] = useState<Date>(() => new Date());
 
   const [filterEstimator, setFilterEstimator] = useState<string>('ALL');
   const [showWeekends, setShowWeekends] = useState<boolean>(true);
