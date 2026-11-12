@@ -75,9 +75,9 @@ export default function CalendarScheduleView({
   // 1. STRICT FILTER: Only ITBs in the calendar view
   const itbBids = useMemo(() => {
     return bids.filter((b) => {
-      const isITB = b.sticker === 'ITB' || b.email_intent === 'invitation_to_bid';
+      const isITB = b.sticker === 'ITB';
       if (!isITB) return false;
-      if (b.sticker === 'Spam' || b.filterStatus === 'auto_filtered') return false;
+      if (b.sticker === 'Spam' || b.filterStatus === 'auto_filtered' || b.filterStatus === 'duplicate_folder') return false;
       return true;
     });
   }, [bids]);
@@ -569,6 +569,19 @@ export default function CalendarScheduleView({
                               </span>
 
                               <div className="flex items-center gap-1.5">
+                                <button
+                                  type="button"
+                                  onClick={(e) => {
+                                    e.stopPropagation();
+                                    onSelectBid(bid);
+                                  }}
+                                  className="text-[10px] font-bold px-1.5 py-0.5 rounded border border-amber-300 bg-amber-50 text-amber-800 hover:bg-amber-100 transition-colors shadow-2xs flex items-center gap-0.5"
+                                  title="Reclassify this email if it is not an Invitation to Bid"
+                                >
+                                  <Layers className="w-2.5 h-2.5 text-amber-600" />
+                                  <span>Reclassify</span>
+                                </button>
+
                                 {isNotBidding && (
                                   <span className="text-[10px] font-bold px-1.5 py-0.2 rounded bg-slate-200 text-slate-700 border border-slate-300">
                                     Not Bidding
@@ -728,9 +741,14 @@ export default function CalendarScheduleView({
                     </div>
 
                     <div className="pt-2 border-t border-slate-100 flex items-center justify-between">
-                      <span className="text-[11px] text-slate-600 font-medium">
-                        {bid.assignedEstimator ? `Assigned: ${bid.assignedEstimator.split(' ')[0]}` : '⚠️ Unassigned'}
-                      </span>
+                      <button
+                        onClick={() => onSelectBid(bid)}
+                        className="text-[11px] font-bold text-amber-700 hover:text-amber-900 flex items-center gap-1"
+                        title="Reclassify this email if not an ITB"
+                      >
+                        <Layers className="w-3 h-3 text-amber-600" />
+                        <span>Reclassify</span>
+                      </button>
                       <button
                         onClick={() => onSelectBid(bid)}
                         className="text-xs font-bold text-blue-600 hover:text-blue-800 flex items-center gap-1"

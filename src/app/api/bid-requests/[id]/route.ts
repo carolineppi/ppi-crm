@@ -239,7 +239,27 @@ export async function PATCH(
 
     // 3. Handle Sticker Reclassification & Workflow Transitions
     if (body.newSticker) {
-      const sticker = body.newSticker;
+      const sticker =
+        body.newSticker === 'Addendum' ||
+        body.newSticker === 'RFI/Forms' ||
+        body.newSticker === 'RFI / Scope' ||
+        body.newSticker === 'Scopes of Work'
+          ? 'Addendum / RFI'
+          : body.newSticker;
+
+      // Authoritatively update human label flags and metadata in the database
+      updates.is_human_labeled = true;
+      updates.human_label = sticker;
+      updates.human_labeled_at = new Date().toISOString();
+      updates.duplicate_resolution = 'human_verified';
+      updates.raw_payload = {
+        ...(updates.raw_payload || currentRecord.raw_payload),
+        is_labeled: true,
+        human_verified: true,
+        labeled_at: new Date().toISOString(),
+        human_label: sticker,
+        custom_category: sticker,
+      };
 
       if (sticker === 'ITB') {
         // CASE A: Reclassified to ITB
@@ -270,7 +290,7 @@ export async function PATCH(
             updates.bid_number = `BID-${currentYear}-${seq.toString().padStart(4, '0')}`;
           }
         }
-      } else if (sticker === 'Addendum' || sticker === 'Addendum / RFI' || sticker === 'RFI/Forms' || sticker === 'RFI / Scope') {
+      } else if (sticker === 'Addendum / RFI') {
         // CASE B: Reclassified to Addendum / RFI
         updates.email_intent = 'addendum_update';
         updates.filter_status = 'inbox';
@@ -291,6 +311,7 @@ export async function PATCH(
             updates.is_flagged_duplicate = true;
             updates.match_status = 'confirmed';
             updates.match_reason = 'Linked to bid by Calendar Manager';
+            updates.bid_number = null;
 
             // Inherit estimator assignment if parent bid is already assigned
             if (parentBid.assigned_estimator_id || parentBid.raw_payload?.assigned_estimator_name) {
@@ -308,8 +329,13 @@ export async function PATCH(
             }
           }
         }
-      } else if (sticker === 'Won') {
-        // CASE C: Reclassified to Won
+      } else if (sticker === 'Date Reminder') {
+        // CASE C: Reclassified to Date Reminder
+        updates.email_intent = 'date_reminder';
+        updates.filter_status = 'inbox';
+        updates.triage_status = 'ready_for_assignment';
+      } else if (sticker === 'Won' || sticker === 'Contractor Awarded') {
+        // CASE D: Reclassified to Won
         updates.email_intent = 'bid_won';
         updates.estimator_status = 'won';
         updates.priority = 'urgent';
@@ -330,6 +356,7 @@ export async function PATCH(
             updates.duplicate_of_id = parentBid.id;
             updates.match_status = 'confirmed';
             updates.match_reason = 'Award manually linked to bid by Calendar Manager';
+            updates.bid_number = null;
 
             // Also mark parent bid as won
             await supabase
@@ -339,7 +366,7 @@ export async function PATCH(
           }
         }
       } else if (sticker === 'Lost') {
-        // CASE D: Reclassified to Lost
+        // CASE E: Reclassified to Lost
         updates.email_intent = 'bid_lost';
         updates.estimator_status = 'lost';
         updates.triage_status = 'archived';
@@ -355,6 +382,7 @@ export async function PATCH(
             updates.matched_bid_id = parentBid.id;
             updates.matched_bid_number = parentBid.bid_number;
             updates.match_status = 'confirmed';
+            updates.bid_number = null;
 
             // Mark parent as lost
             await supabase
@@ -364,14 +392,15 @@ export async function PATCH(
           }
         }
       } else if (sticker === 'Spam') {
-        // CASE E: Reclassified to Spam
+        // CASE F: Reclassified to Spam
         updates.email_intent = 'spam_noise';
         updates.filter_status = 'auto_filtered';
         updates.triage_status = 'archived';
         updates.matched_bid_id = null;
         updates.matched_bid_number = null;
+        updates.bid_number = null;
       } else {
-        // CASE F: Custom User-Defined Label (Buttons 6-9)
+        // CASE G: Custom User-Defined Label (Buttons 6-9)
         updates.email_intent = 'general_inquiry';
         updates.triage_status = 'ready_for_assignment';
         updates.filter_status = 'inbox';

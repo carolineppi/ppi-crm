@@ -1049,47 +1049,86 @@ export default function DispatchDashboard() {
     if (!reviewingBid) return;
     setIsSavingReclassification(true);
 
+    const normalizedSticker =
+      targetSticker === 'Addendum' ||
+      targetSticker === 'RFI/Forms' ||
+      targetSticker === 'RFI / Scope' ||
+      targetSticker === 'Scopes of Work'
+        ? 'Addendum / RFI'
+        : targetSticker;
+
+    const bidToUpdate = reviewingBid;
+    setReviewingBid(null);
+
+    // Optimistic local state update so the card instantly reclassifies in UI
+    setBids((prev) =>
+      prev.map((b) =>
+        b.id === bidToUpdate.id
+          ? {
+              ...b,
+              sticker: normalizedSticker,
+              isHumanLabeled: true,
+              humanLabel: normalizedSticker,
+              assignedEstimator:
+                normalizedSticker === 'ITB'
+                  ? (selectedEstimatorForITB || b.assignedEstimator)
+                  : b.assignedEstimator,
+              bidDueDate:
+                normalizedSticker === 'ITB'
+                  ? (selectedDueDateForITB || b.bidDueDate)
+                  : b.bidDueDate,
+              matchedBidNumber:
+                normalizedSticker !== 'ITB'
+                  ? (selectedBidNumberToLink || b.matchedBidNumber)
+                  : null,
+            }
+          : b
+      )
+    );
+
     try {
       const payload: any = {
-        newSticker: targetSticker,
+        newSticker: normalizedSticker,
+        isHumanLabeled: true,
       };
 
-      if (targetSticker === 'ITB') {
+      if (normalizedSticker === 'ITB') {
         if (linkToExistingItb && selectedBidNumberToLink) {
           payload.linkToBidNumber = selectedBidNumberToLink;
         } else {
           payload.assignedEstimator = selectedEstimatorForITB || null;
           payload.bidDueDate = selectedDueDateForITB || null;
         }
-      } else if (targetSticker === 'Addendum' || targetSticker === 'Addendum / RFI') {
+      } else if (normalizedSticker === 'Addendum' || normalizedSticker === 'Addendum / RFI') {
         payload.matchedBidNumber = selectedBidNumberToLink || null;
         if (addendumRevisedDueDateInput) {
           payload.acceptRevisedDueDate = true;
           payload.revisedDueDate = addendumRevisedDueDateInput;
         }
-      } else if (targetSticker === 'Won') {
+      } else if (normalizedSticker === 'Won') {
         payload.matchedBidNumber = selectedBidNumberToLink || null;
         payload.isGcWonPrime = isGcWonPrimeCheckbox;
-      } else if (targetSticker === 'Lost') {
+      } else if (normalizedSticker === 'Lost') {
         payload.matchedBidNumber = selectedBidNumberToLink || null;
       }
 
-      const res = await fetch(`/api/bid-requests/${reviewingBid.id}`, {
+      const res = await fetch(`/api/bid-requests/${bidToUpdate.id}`, {
         method: 'PATCH',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify(payload),
       });
 
       if (res.ok) {
-        showToast(`✔ Reclassified to [${targetSticker}] and workflow updated!`);
-        setReviewingBid(null);
+        showToast(`✔ Reclassified to [${normalizedSticker}] and saved to database!`);
         await fetchLiveBids();
       } else {
         const err = await res.json();
         showToast(`Failed to update: ${err.error || 'Server error'}`);
+        await fetchLiveBids();
       }
     } catch (e: any) {
       showToast(`Error: ${e.message}`);
+      await fetchLiveBids();
     } finally {
       setIsSavingReclassification(false);
     }
