@@ -195,11 +195,22 @@ export default function DispatchDashboard() {
   const [currentPage, setCurrentPage] = useState(1);
   const [itemsPerPage, setItemsPerPage] = useState(50);
   const [feedSearchQuery, setFeedSearchQuery] = useState('');
+  const [showHistorical, setShowHistorical] = useState(false);
 
-  // Reset to page 1 whenever active filter, triage sub-filter, verification filter, or search changes
+  const todayYmd = useMemo(() => {
+    const t = new Date();
+    return `${t.getFullYear()}-${String(t.getMonth() + 1).padStart(2, '0')}-${String(t.getDate()).padStart(2, '0')}`;
+  }, []);
+
+  const isHistoricalBid = useCallback((b: DisplayBidRequest) => {
+    const effectiveDue = b.revisedDueDate || b.bidDueDate || b.normalizedAiDueDate;
+    return Boolean(effectiveDue && effectiveDue < todayYmd);
+  }, [todayYmd]);
+
+  // Reset to page 1 whenever active filter, triage sub-filter, verification filter, search, or historical toggle changes
   useEffect(() => {
     setCurrentPage(1);
-  }, [activeFilter, triageSubFilter, verificationFilter, feedSearchQuery]);
+  }, [activeFilter, triageSubFilter, verificationFilter, feedSearchQuery, showHistorical]);
 
   // Review & Reclassification Modal State
   const [reviewingBid, setReviewingBid] = useState<DisplayBidRequest | null>(null);
@@ -696,16 +707,24 @@ export default function DispatchDashboard() {
       }
 
       // 3. Category / Folder filter
-      if (activeFilter === 'ALL') {
+      if (activeFilter === 'Historical') {
         if (b.sticker === 'Spam' || b.filterStatus === 'auto_filtered') return false;
-      } else if (activeFilter === 'Won') {
-        if (b.sticker !== 'Won' && b.sticker !== 'Contractor Awarded') return false;
-      } else if (activeFilter === 'Addendum / RFI') {
-        if (b.sticker !== 'Addendum / RFI' && b.sticker !== 'Addendum' && b.sticker !== 'RFI/Forms' && b.sticker !== 'RFI / Scope') return false;
-      } else if (activeFilter === 'Spam') {
-        if (b.sticker !== 'Spam' && b.filterStatus !== 'auto_filtered') return false;
-      } else if (b.sticker !== activeFilter) {
-        return false;
+        if (!isHistoricalBid(b)) return false;
+      } else {
+        if (!showHistorical && activeFilter !== 'Spam' && isHistoricalBid(b)) {
+          return false;
+        }
+        if (activeFilter === 'ALL') {
+          if (b.sticker === 'Spam' || b.filterStatus === 'auto_filtered') return false;
+        } else if (activeFilter === 'Won') {
+          if (b.sticker !== 'Won' && b.sticker !== 'Contractor Awarded') return false;
+        } else if (activeFilter === 'Addendum / RFI') {
+          if (b.sticker !== 'Addendum / RFI' && b.sticker !== 'Addendum' && b.sticker !== 'RFI/Forms' && b.sticker !== 'RFI / Scope') return false;
+        } else if (activeFilter === 'Spam') {
+          if (b.sticker !== 'Spam' && b.filterStatus !== 'auto_filtered') return false;
+        } else if (b.sticker !== activeFilter) {
+          return false;
+        }
       }
 
       // 3b. Triage Sub-Filter (Needs Action vs Dispatched to Estimators)
@@ -735,7 +754,7 @@ export default function DispatchDashboard() {
 
       return true;
     });
-  }, [bids, activeFilter, triageSubFilter, verificationFilter, feedSearchQuery, checkDuplicateStatus]);
+  }, [bids, activeFilter, triageSubFilter, verificationFilter, feedSearchQuery, checkDuplicateStatus, showHistorical, isHistoricalBid]);
 
   // Keep selected email active or default to the first email in the filtered queue (in split mode)
   useEffect(() => {
@@ -1341,6 +1360,7 @@ export default function DispatchDashboard() {
     countReminder,
     countWon,
     countLost,
+    countHistorical,
     countDuplicates,
     countSpam,
     countHumanVerified,
@@ -1354,6 +1374,7 @@ export default function DispatchDashboard() {
     let reminder = 0;
     let won = 0;
     let lost = 0;
+    let historical = 0;
     let duplicates = 0;
     let spam = 0;
     let humanVerified = 0;
@@ -1364,6 +1385,7 @@ export default function DispatchDashboard() {
     for (const b of bids) {
       const isDup = duplicateStatusMap.get(b.id)?.isDuplicate ?? false;
       const isSpam = b.sticker === 'Spam' || b.filterStatus === 'auto_filtered';
+      const isHistorical = isHistoricalBid(b);
       const isAddendum =
         b.sticker === 'Addendum / RFI' ||
         b.sticker === 'Addendum' ||
@@ -1376,6 +1398,14 @@ export default function DispatchDashboard() {
       if (isSpam) spam++;
       if (isDup) {
         duplicates++;
+        continue;
+      }
+
+      if (!isSpam && isHistorical) {
+        historical++;
+      }
+
+      if (!showHistorical && isHistorical) {
         continue;
       }
 
@@ -1406,6 +1436,7 @@ export default function DispatchDashboard() {
       countReminder: reminder,
       countWon: won,
       countLost: lost,
+      countHistorical: historical,
       countDuplicates: duplicates,
       countSpam: spam,
       countHumanVerified: humanVerified,
@@ -1413,7 +1444,7 @@ export default function DispatchDashboard() {
       countDispatchedInFilter: dispatchedInFilter,
       countNeedsActionInFilter: needsActionInFilter,
     };
-  }, [bids, duplicateStatusMap, activeFilter]);
+  }, [bids, duplicateStatusMap, activeFilter, showHistorical, isHistoricalBid]);
 
   // Selected email AI alerts
   const crossContractorMatches = useMemo(() => {
@@ -2556,6 +2587,23 @@ export default function DispatchDashboard() {
                 </span>
               </button>
 
+              {/* Dedicated Historical Archive Tab */}
+              <button
+                onClick={() => setActiveFilter('Historical')}
+                className={`px-2.5 py-1.5 rounded-lg text-xs font-bold transition-all flex items-center gap-1 ${
+                  activeFilter === 'Historical'
+                    ? 'bg-slate-700 text-white shadow-xs ring-2 ring-slate-300'
+                    : 'bg-slate-100 text-slate-700 hover:bg-slate-200'
+                }`}
+                title="Bids with a due date prior to today (hidden from active queue by default)"
+              >
+                <Clock className="w-3.5 h-3.5" />
+                <span>Historical</span>
+                <span className="px-1.5 py-0.2 rounded-full text-[10px] bg-white/20 font-black">
+                  {countHistorical}
+                </span>
+              </button>
+
               {/* Dedicated Duplicates Folder Tab */}
               <button
                 onClick={() => setActiveFilter('Duplicates')}
@@ -2590,25 +2638,43 @@ export default function DispatchDashboard() {
               </button>
             </div>
 
-            {/* In-Feed Search Input */}
-            <div className="relative min-w-[240px] flex-shrink-0">
-              <Search className="w-3.5 h-3.5 text-slate-400 absolute left-3 top-1/2 -translate-y-1/2" />
-              <input
-                type="text"
-                value={feedSearchQuery}
-                onChange={(e) => setFeedSearchQuery(e.target.value)}
-                placeholder="Search subject, GC, project..."
-                className="w-full pl-8 pr-7 py-1.5 bg-slate-50 border border-slate-200 rounded-lg text-xs text-slate-800 placeholder-slate-400 focus:outline-none focus:ring-2 focus:ring-blue-500 focus:bg-white transition-all"
-              />
-              {feedSearchQuery && (
+            {/* Historical Toggle + In-Feed Search Input */}
+            <div className="flex items-center gap-2 flex-shrink-0">
+              {activeFilter !== 'Historical' && countHistorical > 0 && (
                 <button
                   type="button"
-                  onClick={() => setFeedSearchQuery('')}
-                  className="absolute right-2.5 top-1/2 -translate-y-1/2 text-slate-400 hover:text-slate-600"
+                  onClick={() => setShowHistorical((prev) => !prev)}
+                  className={`px-2.5 py-1.5 rounded-lg text-xs font-bold border transition-all flex items-center gap-1.5 ${
+                    showHistorical
+                      ? 'bg-slate-800 text-white border-slate-800 shadow-xs'
+                      : 'bg-slate-50 text-slate-600 border-slate-200 hover:bg-slate-100'
+                  }`}
+                  title="Toggle showing bids with due dates prior to today in active tabs"
                 >
-                  <X className="w-3.5 h-3.5" />
+                  <Clock className="w-3.5 h-3.5" />
+                  <span>{showHistorical ? 'Including Historical' : `Show Historical (${countHistorical})`}</span>
                 </button>
               )}
+
+              <div className="relative min-w-[240px] flex-shrink-0">
+                <Search className="w-3.5 h-3.5 text-slate-400 absolute left-3 top-1/2 -translate-y-1/2" />
+                <input
+                  type="text"
+                  value={feedSearchQuery}
+                  onChange={(e) => setFeedSearchQuery(e.target.value)}
+                  placeholder="Search subject, GC, project..."
+                  className="w-full pl-8 pr-7 py-1.5 bg-slate-50 border border-slate-200 rounded-lg text-xs text-slate-800 placeholder-slate-400 focus:outline-none focus:ring-2 focus:ring-blue-500 focus:bg-white transition-all"
+                />
+                {feedSearchQuery && (
+                  <button
+                    type="button"
+                    onClick={() => setFeedSearchQuery('')}
+                    className="absolute right-2.5 top-1/2 -translate-y-1/2 text-slate-400 hover:text-slate-600"
+                  >
+                    <X className="w-3.5 h-3.5" />
+                  </button>
+                )}
+              </div>
             </div>
           </div>
 
