@@ -1,6 +1,6 @@
 'use client';
 
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useMemo } from 'react';
 import Link from 'next/link';
 import {
   Inbox,
@@ -60,7 +60,7 @@ interface JobItem {
   senderName: string;
   attachmentsCount: number;
   duplicateCount: number;
-  sticker: 'ITB' | 'Addendum' | 'Won' | 'Lost' | 'Spam';
+  sticker: 'ITB' | 'Addendum' | 'Won' | 'Lost' | 'Spam' | 'Date Reminder' | string;
   isForwarded?: boolean;
   forwardedBy?: string | null;
   originalSenderName?: string | null;
@@ -70,7 +70,7 @@ interface JobItem {
 export default function EstimatorWorkspacePage() {
   const [bids, setBids] = useState<JobItem[]>([]);
   const [isLoading, setIsLoading] = useState(true);
-  const [selectedEstimator, setSelectedEstimator] = useState<string>('Lisa Williams');
+  const [selectedEstimator, setSelectedEstimator] = useState<string>('ALL');
   const [statusFilter, setStatusFilter] = useState<string>('ALL');
   const [searchQuery, setSearchQuery] = useState<string>('');
   const [sortBy, setSortBy] = useState<'dueDate' | 'received' | 'projectName'>('dueDate');
@@ -78,11 +78,13 @@ export default function EstimatorWorkspacePage() {
   const [isModalOpen, setIsModalOpen] = useState(false);
   const [isAssigningSample, setIsAssigningSample] = useState(false);
 
-  // Load saved estimator from localStorage
+  // Load saved estimator from localStorage or default to ALL
   useEffect(() => {
     const saved = localStorage.getItem('ppi_current_estimator');
     if (saved && (ESTIMATORS.includes(saved) || saved === 'ALL')) {
       setSelectedEstimator(saved);
+    } else {
+      setSelectedEstimator('ALL');
     }
   }, []);
 
@@ -105,24 +107,71 @@ export default function EstimatorWorkspacePage() {
           }
         });
 
-        // Filter to primary jobs (not flagged duplicates) or standalone ITBs
+        // Filter: Keep anything assigned to an estimator or primary ITB records
         const mapped: JobItem[] = data.bidRequests
-          .filter((r: any) => !r.is_flagged_duplicate || r.email_intent === 'invitation_to_bid')
+          .filter((r: any) => {
+            const rawAssigned = r.assigned_estimator_name || r.raw_payload?.assigned_estimator_name;
+            const hasEstimator = Boolean(
+              rawAssigned &&
+              rawAssigned !== 'Not Bidding' &&
+              rawAssigned !== 'No Bid'
+            );
+            if (hasEstimator) return true;
+            return !r.is_flagged_duplicate || r.email_intent === 'invitation_to_bid';
+          })
           .map((r: any) => {
-            let sticker: JobItem['sticker'] = 'ITB';
-            if (r.email_intent === 'addendum_update') sticker = 'Addendum';
-            else if (r.email_intent === 'bid_won') sticker = 'Won';
-            else if (r.email_intent === 'bid_lost') sticker = 'Lost';
-            else if (r.email_intent === 'spam_noise') sticker = 'Spam';
+            const isHuman = Boolean(
+              r.is_human_labeled ||
+              r.duplicate_resolution === 'human_verified' ||
+              r.raw_payload?.is_labeled === true ||
+              r.raw_payload?.human_verified === true
+            );
+            const rawHumanLabel = r.human_label || r.raw_payload?.human_label || r.raw_payload?.custom_category;
+
+            let sticker: string = 'ITB';
+            if (isHuman && rawHumanLabel) {
+              if (
+                rawHumanLabel === 'Addendum' ||
+                rawHumanLabel === 'RFI/Forms' ||
+                rawHumanLabel === 'RFI / Scope' ||
+                rawHumanLabel === 'Scopes of Work' ||
+                rawHumanLabel === 'Addendum / RFI'
+              ) {
+                sticker = 'Addendum';
+              } else if (rawHumanLabel === 'Won') {
+                sticker = 'Won';
+              } else if (rawHumanLabel === 'Lost') {
+                sticker = 'Lost';
+              } else if (rawHumanLabel === 'Spam') {
+                sticker = 'Spam';
+              } else if (rawHumanLabel === 'Date Reminder') {
+                sticker = 'Date Reminder';
+              } else {
+                sticker = rawHumanLabel;
+              }
+            } else {
+              if (r.email_intent === 'addendum_update') sticker = 'Addendum';
+              else if (r.email_intent === 'bid_won' || r.email_intent === 'contractor_awarded') sticker = 'Won';
+              else if (r.email_intent === 'bid_lost') sticker = 'Lost';
+              else if (r.email_intent === 'spam_noise') sticker = 'Spam';
+              else if (r.email_intent === 'date_reminder') sticker = 'Date Reminder';
+              else sticker = 'ITB';
+            }
+
+            const rawAssigned =
+              r.assigned_estimator_name ||
+              r.raw_payload?.assigned_estimator_name ||
+              null;
 
             const assignedName =
-              r.raw_payload?.assigned_estimator_name ||
-              (r.assigned_estimator_id ? 'Assigned' : null);
+              rawAssigned && rawAssigned !== 'Not Bidding' && rawAssigned !== 'No Bid'
+                ? rawAssigned
+                : null;
 
-            const rawAtts = Array.isArray(r.raw_payload?.attachments)
-              ? r.raw_payload.attachments
-              : Array.isArray(r.attachments)
+            const rawAtts = Array.isArray(r.attachments)
               ? r.attachments
+              : Array.isArray(r.raw_payload?.attachments)
+              ? r.raw_payload.attachments
               : [];
 
             const totalInGroup = r.duplicate_group_id ? groupCounts[r.duplicate_group_id] || 1 : 1;
@@ -135,7 +184,7 @@ export default function EstimatorWorkspacePage() {
               projectAddress: [r.project_address_city, r.project_address_state].filter(Boolean).join(', ') || null,
               jobCode: r.job_code,
               assignedEstimator: assignedName,
-              estimatorStatus: r.estimator_status || 'unassigned',
+              estimatorStatus: r.estimator_status || 'assigned',
               bidDueDate: r.bid_due_date,
               scopeSummary: r.scope_summary || r.ai_analysis?.scopeSummary || null,
               receivedAt: new Date(r.email_received_at || r.created_at).toLocaleDateString([], {
@@ -148,7 +197,7 @@ export default function EstimatorWorkspacePage() {
               senderName: r.sender_name || r.sender_email?.split('@')[0] || 'Unknown Sender',
               attachmentsCount: rawAtts.length,
               duplicateCount: Math.max(0, totalInGroup - 1),
-              sticker,
+              sticker: sticker as any,
               isForwarded: Boolean(r.is_forwarded),
               forwardedBy: r.forwarded_by,
               originalSenderName: r.original_sender_name,
@@ -214,6 +263,16 @@ export default function EstimatorWorkspacePage() {
     setIsModalOpen(true);
   };
 
+  // Counts per estimator
+  const estimatorCounts = useMemo(() => {
+    const counts: Record<string, number> = {};
+    ESTIMATORS.forEach((est) => {
+      counts[est] = bids.filter((b) => b.assignedEstimator === est).length;
+    });
+    counts['ALL'] = bids.filter((b) => Boolean(b.assignedEstimator)).length;
+    return counts;
+  }, [bids]);
+
   // Filter bids by active estimator
   const estimatorBids = bids.filter((b) => {
     if (selectedEstimator === 'ALL') return Boolean(b.assignedEstimator);
@@ -229,7 +288,9 @@ export default function EstimatorWorkspacePage() {
     if (!b.bidDueDate) return false;
     const ymd = normalizeDateToYyyyMmDd(b.bidDueDate);
     if (!ymd) return false;
-    const diff = (new Date(ymd).getTime() - new Date('2026-11-10').getTime()) / (1000 * 60 * 60 * 24);
+    const today = new Date();
+    today.setHours(0, 0, 0, 0);
+    const diff = (new Date(ymd).getTime() - today.getTime()) / (1000 * 60 * 60 * 24);
     return diff >= 0 && diff <= 7;
   }).length;
 
@@ -242,7 +303,9 @@ export default function EstimatorWorkspacePage() {
       if (!b.bidDueDate) return false;
       const ymd = normalizeDateToYyyyMmDd(b.bidDueDate);
       if (!ymd) return false;
-      const diff = (new Date(ymd).getTime() - new Date('2026-11-10').getTime()) / (1000 * 60 * 60 * 24);
+      const today = new Date();
+      today.setHours(0, 0, 0, 0);
+      const diff = (new Date(ymd).getTime() - today.getTime()) / (1000 * 60 * 60 * 24);
       if (diff < 0 || diff > 7) return false;
     }
 
@@ -332,9 +395,30 @@ export default function EstimatorWorkspacePage() {
             Estimator Account:
           </span>
 
+          <button
+            onClick={() => handleSelectEstimator('ALL')}
+            className={`px-3 py-1.5 rounded-xl text-xs font-bold transition-all flex items-center gap-1.5 ${
+              selectedEstimator === 'ALL'
+                ? 'bg-slate-900 text-white shadow-xs'
+                : 'bg-slate-50 text-slate-600 hover:bg-slate-100 border border-slate-200'
+            }`}
+          >
+            <span>All Estimators</span>
+            <span
+              className={`px-1.5 py-0.2 text-[10px] rounded-full font-bold ${
+                selectedEstimator === 'ALL'
+                  ? 'bg-white/20 text-white'
+                  : 'bg-slate-200 text-slate-700'
+              }`}
+            >
+              {estimatorCounts['ALL'] || 0}
+            </span>
+          </button>
+
           {ESTIMATORS.map((est) => {
             const isSelected = selectedEstimator === est;
             const color = getEstimatorColor(est);
+            const count = estimatorCounts[est] || 0;
             const initials = est
               .split(' ')
               .map((n) => n[0])
@@ -368,24 +452,29 @@ export default function EstimatorWorkspacePage() {
                   {initials}
                 </span>
                 <span>{est}</span>
+                <span
+                  style={
+                    isSelected
+                      ? { backgroundColor: color.primaryColor, color: '#ffffff' }
+                      : undefined
+                  }
+                  className={`px-1.5 py-0.2 text-[10px] rounded-full font-bold ${
+                    isSelected
+                      ? 'text-white'
+                      : count > 0
+                      ? 'bg-blue-100 text-blue-800'
+                      : 'bg-slate-200 text-slate-500'
+                  }`}
+                >
+                  {count}
+                </span>
               </button>
             );
           })}
-
-          <button
-            onClick={() => handleSelectEstimator('ALL')}
-            className={`px-3 py-1.5 rounded-xl text-xs font-bold transition-all ${
-              selectedEstimator === 'ALL'
-                ? 'bg-slate-900 text-white shadow-xs'
-                : 'bg-slate-50 text-slate-600 hover:bg-slate-100 border border-slate-200'
-            }`}
-          >
-            All Assigned Bids
-          </button>
         </div>
 
         <div className="text-xs text-slate-500 font-medium">
-          Logged in as: <strong className="text-slate-900">{selectedEstimator}</strong>
+          Viewing: <strong className="text-slate-900">{selectedEstimator === 'ALL' ? 'All Estimators' : selectedEstimator}</strong>
         </div>
       </div>
 
