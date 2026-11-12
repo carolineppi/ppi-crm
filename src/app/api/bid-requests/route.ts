@@ -48,6 +48,7 @@ export async function GET(request: NextRequest) {
       is_due_date_revised,
       revised_due_date,
       is_gc_won_prime,
+      google_drive_folder_url,
       project_address_street,
       project_address_city,
       project_address_state,

@@ -18,6 +18,8 @@ import {
   Check,
   CalendarDays,
   Layers,
+  FolderArchive,
+  ExternalLink,
 } from 'lucide-react';
 import {
   formatFriendlyDate,
@@ -593,6 +595,20 @@ export default function CalendarScheduleView({
                                     <Paperclip className="w-3 h-3 text-slate-400" />
                                     <span>{bid.attachmentsCount}</span>
                                   </span>
+                                )}
+
+                                {bid.googleDriveFolderUrl && (
+                                  <a
+                                    href={bid.googleDriveFolderUrl}
+                                    target="_blank"
+                                    rel="noopener noreferrer"
+                                    onClick={(e) => e.stopPropagation()}
+                                    className="text-[10px] font-bold px-1.5 py-0.5 rounded border border-blue-300 bg-blue-50 text-blue-700 hover:bg-blue-100 flex items-center gap-0.5 transition-colors"
+                                    title="Open Google Drive Project Folder"
+                                  >
+                                    <FolderArchive className="w-2.5 h-2.5 text-blue-600" />
+                                    <span>Drive</span>
+                                  </a>
                                 )}
                               </div>
                             </div>

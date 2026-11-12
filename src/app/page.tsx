@@ -54,6 +54,7 @@ import {
 } from 'lucide-react';
 import EmailDocumentViewer from '@/components/EmailDocumentViewer';
 import CalendarScheduleView from '@/components/CalendarScheduleView';
+import BidDocumentManager from '@/components/BidDocumentManager';
 import {
   normalizeDateToYyyyMmDd,
   formatFriendlyDate,
@@ -86,6 +87,7 @@ interface DisplayBidRequest {
   isDueDateRevised?: boolean;
   revisedDueDate?: string | null;
   isGcWonPrime?: boolean;
+  googleDriveFolderUrl?: string | null;
   attachmentsCount: number;
   attachments?: Array<{ filename: string; size?: number; contentType?: string; storageUrl?: string }>;
 
@@ -324,6 +326,7 @@ export default function DispatchDashboard() {
             isDueDateRevised,
             revisedDueDate,
             isGcWonPrime,
+            googleDriveFolderUrl: r.google_drive_folder_url || null,
             attachmentsCount: attachmentsList.length,
             attachments: attachmentsList,
             bodyText: r.email_body_text || r.raw_payload?.bodyText || r.raw_payload?.body || null,
@@ -1888,6 +1891,19 @@ export default function DispatchDashboard() {
             </div>
           </div>
 
+          {/* BID DOCUMENTS & GOOGLE DRIVE MANAGER */}
+          <div className="bg-white rounded-2xl border border-slate-200 shadow-sm p-4 w-full">
+            <BidDocumentManager
+              bidId={selectedBid.id}
+              bidNumber={selectedBid.bidNumber}
+              projectName={selectedBid.projectName}
+              googleDriveFolderUrl={selectedBid.googleDriveFolderUrl}
+              attachments={selectedBid.attachments}
+              onDocumentAdded={fetchLiveBids}
+              onDriveUrlUpdated={fetchLiveBids}
+            />
+          </div>
+
           {/* HIGH FIDELITY EMAIL DOCUMENT VIEWER (Full Screen Sizing) */}
           <div className="bg-white rounded-2xl border border-slate-200 shadow-sm overflow-hidden w-full">
             <EmailDocumentViewer
@@ -3219,6 +3235,19 @@ export default function DispatchDashboard() {
                   </select>
                 </div>
               )}
+
+              {/* CONTRACTS, DRAWINGS & GOOGLE DRIVE FOLDER */}
+              <div className="pt-2 border-t border-slate-100">
+                <BidDocumentManager
+                  bidId={reviewingBid.id}
+                  bidNumber={reviewingBid.bidNumber}
+                  projectName={reviewingBid.projectName}
+                  googleDriveFolderUrl={reviewingBid.googleDriveFolderUrl}
+                  attachments={reviewingBid.attachments}
+                  onDocumentAdded={fetchLiveBids}
+                  onDriveUrlUpdated={fetchLiveBids}
+                />
+              </div>
             </div>
 
             <div className="flex items-center justify-end gap-3 pt-3 border-t border-slate-100">

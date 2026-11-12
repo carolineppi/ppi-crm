@@ -22,6 +22,7 @@ interface UpdatePayload {
   keepEmail?: boolean;
   isHumanLabeled?: boolean;
   isGcWonPrime?: boolean;
+  googleDriveFolderUrl?: string | null;
 }
 
 export async function GET(
@@ -235,6 +236,11 @@ export async function PATCH(
     // 2i. Handle GC Won Prime Status Flag
     if (body.isGcWonPrime !== undefined) {
       updates.is_gc_won_prime = body.isGcWonPrime;
+    }
+
+    // 2j. Handle Google Drive Folder URL
+    if (body.googleDriveFolderUrl !== undefined) {
+      updates.google_drive_folder_url = body.googleDriveFolderUrl ? body.googleDriveFolderUrl.trim() : null;
     }
 
     // 3. Handle Sticker Reclassification & Workflow Transitions
