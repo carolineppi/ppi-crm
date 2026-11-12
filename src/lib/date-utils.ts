@@ -164,6 +164,13 @@ export function getDueDateStatus(dateStr: string | null | undefined): {
 
 /**
  * Estimator display badge color map.
+ * Exact company color branding:
+ * - Lisa Williams: Golden Yellow
+ * - Harrison Schumaker: Periwinkle
+ * - Nick Mudd: Purple
+ * - Joe Bunn: Green
+ * - Stacey Scott: Pink
+ * - Rob Brinlee: Blue
  */
 export const ESTIMATOR_COLORS: Record<
   string,
@@ -175,39 +182,59 @@ export const ESTIMATOR_COLORS: Record<
     cardBorder: string;
   }
 > = {
-  'Steven Gross': {
-    pillBg: 'bg-blue-50',
-    pillText: 'text-blue-800',
-    pillBorder: 'border-blue-200',
-    dotBg: 'bg-blue-600',
-    cardBorder: 'border-l-blue-600',
+  'Lisa Williams': {
+    pillBg: 'bg-amber-100/90',
+    pillText: 'text-amber-950 font-bold',
+    pillBorder: 'border-amber-400',
+    dotBg: 'bg-amber-500',
+    cardBorder: 'border-l-amber-500',
   },
-  'Jaxson Farnholtz': {
-    pillBg: 'bg-emerald-50',
-    pillText: 'text-emerald-800',
-    pillBorder: 'border-emerald-200',
+  'Harrison Schumaker': {
+    pillBg: 'bg-indigo-100/80',
+    pillText: 'text-indigo-950 font-bold',
+    pillBorder: 'border-indigo-300',
+    dotBg: 'bg-indigo-400',
+    cardBorder: 'border-l-indigo-400',
+  },
+  'Nick Mudd': {
+    pillBg: 'bg-purple-100/80',
+    pillText: 'text-purple-950 font-bold',
+    pillBorder: 'border-purple-300',
+    dotBg: 'bg-purple-600',
+    cardBorder: 'border-l-purple-600',
+  },
+  'Joe Bunn': {
+    pillBg: 'bg-emerald-100/80',
+    pillText: 'text-emerald-950 font-bold',
+    pillBorder: 'border-emerald-300',
     dotBg: 'bg-emerald-600',
     cardBorder: 'border-l-emerald-600',
   },
-  'Matt Magnani': {
-    pillBg: 'bg-amber-50',
-    pillText: 'text-amber-800',
-    pillBorder: 'border-amber-200',
-    dotBg: 'bg-amber-600',
-    cardBorder: 'border-l-amber-600',
+  'Stacey Scott': {
+    pillBg: 'bg-pink-100/80',
+    pillText: 'text-pink-950 font-bold',
+    pillBorder: 'border-pink-300',
+    dotBg: 'bg-pink-500',
+    cardBorder: 'border-l-pink-500',
   },
-  'Mariam Azab': {
-    pillBg: 'bg-purple-50',
-    pillText: 'text-purple-800',
-    pillBorder: 'border-purple-200',
-    dotBg: 'bg-purple-600',
-    cardBorder: 'border-l-purple-600',
+  'Rob Brinlee': {
+    pillBg: 'bg-blue-100/80',
+    pillText: 'text-blue-950 font-bold',
+    pillBorder: 'border-blue-300',
+    dotBg: 'bg-blue-600',
+    cardBorder: 'border-l-blue-600',
   },
 };
 
 export function getEstimatorColor(estimatorName?: string | null) {
   if (estimatorName && ESTIMATOR_COLORS[estimatorName]) {
-    return ESTIMATOR_COLORS[estimatorName];
+    const c = ESTIMATOR_COLORS[estimatorName];
+    return {
+      ...c,
+      toString() {
+        return `${c.pillBg} ${c.pillText} ${c.pillBorder}`;
+      },
+    };
   }
   return {
     pillBg: 'bg-slate-100',
@@ -215,5 +242,8 @@ export function getEstimatorColor(estimatorName?: string | null) {
     pillBorder: 'border-slate-300',
     dotBg: 'bg-slate-400',
     cardBorder: 'border-l-slate-400',
+    toString() {
+      return 'bg-slate-100 text-slate-700 border-slate-300';
+    },
   };
 }

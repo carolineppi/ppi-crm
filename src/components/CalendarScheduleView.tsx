@@ -322,7 +322,7 @@ export default function CalendarScheduleView({
       </div>
 
       {/* Estimator Workload Balance Bar for This Week */}
-      <div className="bg-white p-3.5 rounded-2xl border border-slate-200 shadow-xs grid grid-cols-2 sm:grid-cols-3 md:grid-cols-6 gap-2.5 text-xs">
+      <div className="bg-white p-3 rounded-2xl border border-slate-200 shadow-xs grid grid-cols-2 sm:grid-cols-4 lg:grid-cols-8 gap-2 text-xs">
         {/* ALL Filter Tab */}
         <div
           onClick={() => setFilterEstimator('ALL')}

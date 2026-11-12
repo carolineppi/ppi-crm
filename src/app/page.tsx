@@ -124,7 +124,14 @@ interface CrossContractorMatch {
   bidNumber?: string | null;
 }
 
-const ESTIMATORS = ['Steven Gross', 'Jaxson Farnholtz', 'Matt Magnani', 'Mariam Azab'];
+const ESTIMATORS = [
+  'Lisa Williams',
+  'Harrison Schumaker',
+  'Nick Mudd',
+  'Joe Bunn',
+  'Stacey Scott',
+  'Rob Brinlee',
+];
 
 const CATEGORIES = [
   'ITB',

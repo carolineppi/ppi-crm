@@ -34,10 +34,12 @@ import {
 } from '@/lib/date-utils';
 
 const ESTIMATORS = [
-  'Steven Gross',
-  'Jaxson Farnholtz',
-  'Matt Magnani',
-  'Mariam Azab',
+  'Lisa Williams',
+  'Harrison Schumaker',
+  'Nick Mudd',
+  'Joe Bunn',
+  'Stacey Scott',
+  'Rob Brinlee',
 ];
 
 interface JobItem {
@@ -67,7 +69,7 @@ interface JobItem {
 export default function EstimatorWorkspacePage() {
   const [bids, setBids] = useState<JobItem[]>([]);
   const [isLoading, setIsLoading] = useState(true);
-  const [selectedEstimator, setSelectedEstimator] = useState<string>('Steven Gross');
+  const [selectedEstimator, setSelectedEstimator] = useState<string>('Lisa Williams');
   const [statusFilter, setStatusFilter] = useState<string>('ALL');
   const [searchQuery, setSearchQuery] = useState<string>('');
   const [sortBy, setSortBy] = useState<'dueDate' | 'received' | 'projectName'>('dueDate');
