@@ -295,8 +295,7 @@ export default function EstimatorJobModal({
                 >
                   <option value="assigned">🔵 Assigned (Needs Takeoff)</option>
                   <option value="in_progress">🟡 In Progress (Takeoff Underway)</option>
-                  <option value="quoted">🟣 Quoted (PDF Generated)</option>
-                  <option value="bid_submitted">🟣 Bid Submitted to GC</option>
+                  <option value="bid_submitted">🟣 Bid Submitted</option>
                   <option value="won">🟢 Won / Awarded</option>
                   <option value="lost">🔴 Lost to Competitor</option>
                   <option value="declined">🚫 Refuse Bid (Needs Reassignment)</option>

@@ -126,15 +126,15 @@ export async function POST(request: NextRequest) {
       savedCart = data;
     }
 
-    // If "quoted" (printed), switch the linked bid to "quoted" status!
+    // If "quoted" (printed), switch the linked bid to "bid_submitted" status!
     if (status === 'quoted' && bidRequestId) {
       const { error: bidErr } = await supabase
         .from('bid_requests')
-        .update({ estimator_status: 'quoted' })
+        .update({ estimator_status: 'bid_submitted' })
         .eq('id', bidRequestId);
 
       if (bidErr) {
-        console.error('Failed to update bid estimator_status to quoted:', bidErr);
+        console.error('Failed to update bid estimator_status to bid_submitted:', bidErr);
       }
     }
 

@@ -262,7 +262,7 @@ export default function EstimatorWorkspacePage() {
   // Calculate metrics
   const totalAssigned = estimatorBids.length;
   const inProgressCount = estimatorBids.filter((b) => b.estimatorStatus === 'in_progress').length;
-  const submittedCount = estimatorBids.filter((b) => b.estimatorStatus === 'bid_submitted').length;
+  const submittedCount = estimatorBids.filter((b) => b.estimatorStatus === 'bid_submitted' || b.estimatorStatus === 'quoted').length;
   const wonCount = estimatorBids.filter((b) => b.estimatorStatus === 'won').length;
   const dueSoonCount = estimatorBids.filter((b) => {
     if (!b.bidDueDate) return false;
@@ -277,7 +277,7 @@ export default function EstimatorWorkspacePage() {
   // Filter by status & search
   const filteredBids = estimatorBids.filter((b) => {
     if (statusFilter === 'in_progress' && b.estimatorStatus !== 'in_progress') return false;
-    if (statusFilter === 'bid_submitted' && b.estimatorStatus !== 'bid_submitted') return false;
+    if (statusFilter === 'bid_submitted' && b.estimatorStatus !== 'bid_submitted' && b.estimatorStatus !== 'quoted') return false;
     if (statusFilter === 'won' && b.estimatorStatus !== 'won') return false;
     if (statusFilter === 'due_soon') {
       if (!b.bidDueDate) return false;
@@ -578,8 +578,7 @@ export default function EstimatorWorkspacePage() {
 
             let cardStatusBorder = 'border-l-blue-600';
             if (job.estimatorStatus === 'in_progress') cardStatusBorder = 'border-l-amber-500';
-            else if (job.estimatorStatus === 'quoted') cardStatusBorder = 'border-l-indigo-600';
-            else if (job.estimatorStatus === 'bid_submitted') cardStatusBorder = 'border-l-purple-600';
+            else if (job.estimatorStatus === 'bid_submitted' || job.estimatorStatus === 'quoted') cardStatusBorder = 'border-l-purple-600';
             else if (job.estimatorStatus === 'won') cardStatusBorder = 'border-l-emerald-600';
             else if (job.estimatorStatus === 'lost') cardStatusBorder = 'border-l-rose-500';
             else if (job.estimatorStatus === 'declined') cardStatusBorder = 'border-l-rose-600';
@@ -667,13 +666,12 @@ export default function EstimatorWorkspacePage() {
                 <div className="p-3 bg-slate-50/80 border-t border-slate-200 flex items-center justify-between gap-2">
                   {/* Quick Status Dropdown */}
                   <select
-                    value={job.estimatorStatus}
+                    value={job.estimatorStatus === 'quoted' ? 'bid_submitted' : job.estimatorStatus}
                     onChange={(e) => handleUpdateStatus(job.id, e.target.value)}
                     className="text-[11px] font-semibold rounded-lg border border-slate-300 bg-white px-2 py-1 text-slate-800 shadow-2xs"
                   >
                     <option value="assigned">🔵 Assigned</option>
                     <option value="in_progress">🟡 In Progress</option>
-                    <option value="quoted">🟣 Quoted</option>
                     <option value="bid_submitted">🟣 Bid Submitted</option>
                     <option value="won">🟢 Won / Awarded</option>
                     <option value="lost">🔴 Lost</option>

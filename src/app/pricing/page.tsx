@@ -1206,7 +1206,7 @@ export default function PricingPage() {
                 <div className="space-y-2.5">
                   {draftCarts.length === 0 ? (
                     <div className="p-6 text-center text-slate-400 border border-dashed border-slate-300 rounded-xl">
-                      No saved draft bids yet. Save an active cart to hold it here, or print a saved bid to mark it quoted and remove it from this list.
+                      No saved draft bids yet. Save an active cart to hold it here, or print a saved bid to mark it Bid Submitted and remove it from this list.
                     </div>
                   ) : (
                     draftCarts.map((c) => {
@@ -1269,7 +1269,7 @@ export default function PricingPage() {
               {/* Link to Job / Bid (Searchable by Bid # or Name) */}
               <div className="space-y-1.5">
                 <label className="block text-[10px] font-bold uppercase text-slate-500">
-                  Link to Bid / Job (Printing marks bid as Quoted)
+                  Link to Bid / Job (Printing marks bid as Bid Submitted)
                 </label>
 
                 {linkedBid ? (
