@@ -118,6 +118,7 @@ export default function PricingPage() {
   const [savedCarts, setSavedCarts] = useState<any[]>([]);
   const [showPrintModal, setShowPrintModal] = useState(false);
   const [bidSwitchedToQuoted, setBidSwitchedToQuoted] = useState(false);
+  const [bidLinkSearch, setBidLinkSearch] = useState('');
 
   const fetchBooks = useCallback(async () => {
     const res = await fetch('/api/pricing/books');
@@ -169,9 +170,9 @@ export default function PricingPage() {
       const bidsData = await bidsRes.json();
       if (bidsData.bidRequests) {
         setBidsList(
-          bidsData.bidRequests
-            .filter((b: any) => b.filter_status !== 'auto_filtered' && b.filter_status !== 'duplicate_folder')
-            .slice(0, 250)
+          bidsData.bidRequests.filter(
+            (b: any) => b.filter_status !== 'auto_filtered' && b.filter_status !== 'duplicate_folder'
+          )
         );
       }
       const cartsData = await cartsRes.json();
@@ -418,6 +419,20 @@ export default function PricingPage() {
     () => bidsList.find((b) => b.id === linkedBidId) || null,
     [bidsList, linkedBidId]
   );
+
+  const filteredBidsForLink = useMemo(() => {
+    const q = bidLinkSearch.trim().toLowerCase();
+    if (!q) return bidsList.slice(0, 30);
+    return bidsList
+      .filter((b) => {
+        const num = (b.bid_number || '').toLowerCase();
+        const proj = (b.project_name || '').toLowerCase();
+        const subj = (b.email_subject || '').toLowerCase();
+        const gc = (b.client_company || '').toLowerCase();
+        return num.includes(q) || proj.includes(q) || subj.includes(q) || gc.includes(q);
+      })
+      .slice(0, 40);
+  }, [bidsList, bidLinkSearch]);
 
   const manufacturers = ['ALL', ...Array.from(new Set(books.map((b) => b.manufacturer)))];
 
@@ -1030,32 +1045,92 @@ export default function PricingPage() {
                 </div>
               )}
 
-              {/* Link to Job / Bid */}
-              <div>
-                <label className="block text-[10px] font-bold uppercase text-slate-500 mb-1">
+              {/* Link to Job / Bid (Searchable by Bid # or Name) */}
+              <div className="space-y-1.5">
+                <label className="block text-[10px] font-bold uppercase text-slate-500">
                   Link to Bid / Job (Printing marks bid as Quoted)
                 </label>
-                <select
-                  value={linkedBidId}
-                  onChange={(e) => {
-                    const id = e.target.value;
-                    setLinkedBidId(id);
-                    const b = bidsList.find((x) => x.id === id);
-                    if (b) {
-                      setCartTitle(b.project_name || b.email_subject || 'Job Material Quote');
-                    }
-                  }}
-                  className="w-full px-2.5 py-1.5 rounded-lg border border-slate-300 bg-white font-semibold"
-                >
-                  <option value="">Unlinked Draft Quote</option>
-                  {bidsList.map((b) => (
-                    <option key={b.id} value={b.id}>
-                      {b.bid_number ? `[${b.bid_number}] ` : ''}
-                      {b.project_name || b.email_subject}
-                      {b.client_company ? ` — ${b.client_company}` : ''}
-                    </option>
-                  ))}
-                </select>
+
+                {linkedBid ? (
+                  <div className="p-2.5 rounded-xl bg-blue-50 border border-blue-300 flex items-center justify-between gap-2">
+                    <div className="min-w-0">
+                      <div className="font-bold text-blue-900 truncate">
+                        {linkedBid.bid_number ? `[${linkedBid.bid_number}] ` : ''}
+                        {linkedBid.project_name || linkedBid.email_subject}
+                      </div>
+                      {linkedBid.client_company && (
+                        <div className="text-[11px] text-blue-700 truncate">
+                          {linkedBid.client_company}
+                        </div>
+                      )}
+                    </div>
+                    <button
+                      type="button"
+                      onClick={() => {
+                        setLinkedBidId('');
+                        setBidLinkSearch('');
+                      }}
+                      className="px-2 py-1 rounded-lg bg-white border border-blue-200 text-[11px] font-bold text-blue-800 hover:bg-blue-100 flex-shrink-0"
+                    >
+                      Change
+                    </button>
+                  </div>
+                ) : (
+                  <div className="space-y-1.5">
+                    <div className="relative">
+                      <Search className="w-3.5 h-3.5 text-slate-400 absolute left-2.5 top-1/2 -translate-y-1/2" />
+                      <input
+                        type="text"
+                        value={bidLinkSearch}
+                        onChange={(e) => setBidLinkSearch(e.target.value)}
+                        placeholder="Search by Bid # (e.g. 2026-001) or bid/project name..."
+                        className="w-full pl-8 pr-7 py-1.5 rounded-lg border border-slate-300 bg-white text-xs focus:outline-none focus:ring-2 focus:ring-blue-500"
+                      />
+                      {bidLinkSearch && (
+                        <button
+                          type="button"
+                          onClick={() => setBidLinkSearch('')}
+                          className="absolute right-2 top-1/2 -translate-y-1/2 text-slate-400 hover:text-slate-600"
+                        >
+                          <X className="w-3.5 h-3.5" />
+                        </button>
+                      )}
+                    </div>
+
+                    <div className="max-h-36 overflow-y-auto rounded-lg border border-slate-200 bg-white divide-y divide-slate-100">
+                      {filteredBidsForLink.length === 0 ? (
+                        <div className="p-2.5 text-center text-[11px] text-slate-400">
+                          No matching bids found.
+                        </div>
+                      ) : (
+                        filteredBidsForLink.map((b) => (
+                          <button
+                            key={b.id}
+                            type="button"
+                            onClick={() => {
+                              setLinkedBidId(b.id);
+                              setCartTitle(b.project_name || b.email_subject || 'Job Material Quote');
+                              setBidLinkSearch('');
+                            }}
+                            className="w-full text-left px-2.5 py-1.5 hover:bg-blue-50 transition-colors"
+                          >
+                            <div className="font-semibold text-slate-900 truncate">
+                              {b.bid_number ? (
+                                <span className="font-mono text-blue-700 mr-1.5">[{b.bid_number}]</span>
+                              ) : null}
+                              {b.project_name || b.email_subject}
+                            </div>
+                            {b.client_company && (
+                              <div className="text-[10px] text-slate-500 truncate">
+                                {b.client_company}
+                              </div>
+                            )}
+                          </button>
+                        ))
+                      )}
+                    </div>
+                  </div>
+                )}
               </div>
 
               <div className="grid grid-cols-3 gap-2">
