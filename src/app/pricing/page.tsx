@@ -1,6 +1,6 @@
 'use client';
 
-import React, { useCallback, useEffect, useState } from 'react';
+import React, { useCallback, useEffect, useMemo, useState } from 'react';
 import Link from 'next/link';
 import {
   ArrowLeft,
@@ -13,10 +13,20 @@ import {
   Tag,
   TrendingDown,
   FileSpreadsheet,
-  AlertCircle,
-  RefreshCw,
   Sparkles,
+  ShoppingCart,
+  Plus,
+  Minus,
+  Printer,
+  Save,
+  X,
 } from 'lucide-react';
+import {
+  PARENT_CATEGORIES,
+  getParentCategoryId,
+  getSubCategoryShortLabel,
+} from '@/lib/pricing/category-hierarchy';
+import QuotePrintModal, { QuoteCartItem } from '@/components/QuotePrintModal';
 
 interface PriceBook {
   id: string;
@@ -89,10 +99,25 @@ export default function PricingPage() {
   const [editingEquivItemId, setEditingEquivItemId] = useState<string | null>(null);
   const [equivInput, setEquivInput] = useState('');
 
-  // Auto-tagging & category groups
+  // Auto-tagging & staggered category groups
   const [equivGroups, setEquivGroups] = useState<Array<{ group: string; count: number }>>([]);
   const [untaggedCount, setUntaggedCount] = useState<number>(0);
   const [isAutoTagging, setIsAutoTagging] = useState(false);
+  const [selectedParentCat, setSelectedParentCat] = useState<string>('ALL');
+
+  // Quote Cart & Job Linking
+  const [showCartDrawer, setShowCartDrawer] = useState(false);
+  const [cartId, setCartId] = useState<string | null>(null);
+  const [cartItems, setCartItems] = useState<QuoteCartItem[]>([]);
+  const [linkedBidId, setLinkedBidId] = useState<string>('');
+  const [cartTitle, setCartTitle] = useState('Job Material Quote');
+  const [cartMarkup, setCartMarkup] = useState<string>('0');
+  const [cartNotes, setCartNotes] = useState<string>('');
+  const [isSavingCart, setIsSavingCart] = useState(false);
+  const [bidsList, setBidsList] = useState<Array<{ id: string; bid_number: string | null; project_name: string | null; email_subject: string; client_company: string | null; estimator_status: string | null }>>([]);
+  const [savedCarts, setSavedCarts] = useState<any[]>([]);
+  const [showPrintModal, setShowPrintModal] = useState(false);
+  const [bidSwitchedToQuoted, setBidSwitchedToQuoted] = useState(false);
 
   const fetchBooks = useCallback(async () => {
     const res = await fetch('/api/pricing/books');
@@ -107,13 +132,24 @@ export default function PricingPage() {
     if (typeof data.untaggedCount === 'number') setUntaggedCount(data.untaggedCount);
   }, []);
 
-  const fetchItems = useCallback(async (q: string, mfg: string, equiv: string) => {
+  const fetchItems = useCallback(async (q: string, mfg: string, equiv: string, parentCatId: string) => {
     setIsSearching(true);
     try {
       const params = new URLSearchParams();
       if (q.trim()) params.set('q', q.trim());
       if (mfg && mfg !== 'ALL') params.set('manufacturer', mfg);
-      if (equiv) params.set('equivalentGroup', equiv);
+      if (equiv) {
+        params.set('equivalentGroup', equiv);
+      } else if (parentCatId === 'untagged') {
+        params.set('equivalentGroup', '__UNTAGGED__');
+      } else if (parentCatId !== 'ALL') {
+        const matchingGroups = equivGroups
+          .filter((g) => getParentCategoryId(g.group) === parentCatId)
+          .map((g) => g.group);
+        if (matchingGroups.length > 0) {
+          params.set('equivalentGroups', matchingGroups.join('||'));
+        }
+      }
       params.set('limit', '120');
 
       const res = await fetch(`/api/pricing/search?${params.toString()}`);
@@ -122,19 +158,59 @@ export default function PricingPage() {
     } finally {
       setIsSearching(false);
     }
+  }, [equivGroups]);
+
+  const fetchBidsAndCarts = useCallback(async () => {
+    try {
+      const [bidsRes, cartsRes] = await Promise.all([
+        fetch('/api/bid-requests?summary=1'),
+        fetch('/api/pricing/cart'),
+      ]);
+      const bidsData = await bidsRes.json();
+      if (bidsData.bidRequests) {
+        setBidsList(
+          bidsData.bidRequests
+            .filter((b: any) => b.filter_status !== 'auto_filtered' && b.filter_status !== 'duplicate_folder')
+            .slice(0, 250)
+        );
+      }
+      const cartsData = await cartsRes.json();
+      if (cartsData.carts) setSavedCarts(cartsData.carts);
+    } catch (err) {
+      console.error('Failed to load bids/carts:', err);
+    }
   }, []);
 
   useEffect(() => {
     fetchBooks();
     fetchGroups();
-  }, [fetchBooks, fetchGroups]);
+    fetchBidsAndCarts();
+    if (typeof window !== 'undefined') {
+      const bidIdParam = new URLSearchParams(window.location.search).get('bidId');
+      if (bidIdParam) {
+        setLinkedBidId(bidIdParam);
+        setShowCartDrawer(true);
+        fetch(`/api/pricing/cart?bidId=${encodeURIComponent(bidIdParam)}`)
+          .then((r) => r.json())
+          .then((d) => {
+            if (d.cart) {
+              setCartId(d.cart.id);
+              setCartTitle(d.cart.title || 'Job Material Quote');
+              setCartMarkup(String(d.cart.markup_percent ?? 0));
+              setCartNotes(d.cart.notes || '');
+              setCartItems(Array.isArray(d.cart.items) ? d.cart.items : []);
+            }
+          });
+      }
+    }
+  }, [fetchBooks, fetchGroups, fetchBidsAndCarts]);
 
   useEffect(() => {
     const t = setTimeout(() => {
-      fetchItems(searchQuery, selectedMfg, selectedEquivGroup);
+      fetchItems(searchQuery, selectedMfg, selectedEquivGroup, selectedParentCat);
     }, 200);
     return () => clearTimeout(t);
-  }, [searchQuery, selectedMfg, selectedEquivGroup, fetchItems]);
+  }, [searchQuery, selectedMfg, selectedEquivGroup, selectedParentCat, fetchItems]);
 
   const handleUpload = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -169,7 +245,7 @@ export default function PricingPage() {
       setShowUpload(false);
       await fetchBooks();
       await fetchGroups();
-      await fetchItems(searchQuery, selectedMfg, selectedEquivGroup);
+      await fetchItems(searchQuery, selectedMfg, selectedEquivGroup, selectedParentCat);
     } finally {
       setIsUploading(false);
     }
@@ -187,7 +263,7 @@ export default function PricingPage() {
     if (res.ok) {
       setStatusMessage(`Updated multiplier to ${val} and recalculated net prices.`);
       await fetchBooks();
-      await fetchItems(searchQuery, selectedMfg, selectedEquivGroup);
+      await fetchItems(searchQuery, selectedMfg, selectedEquivGroup, selectedParentCat);
     }
   };
 
@@ -202,7 +278,7 @@ export default function PricingPage() {
       setStatusMessage(`Removed ${book.book_name}.`);
       await fetchBooks();
       await fetchGroups();
-      await fetchItems(searchQuery, selectedMfg, selectedEquivGroup);
+      await fetchItems(searchQuery, selectedMfg, selectedEquivGroup, selectedParentCat);
     }
   };
 
@@ -224,7 +300,7 @@ export default function PricingPage() {
         `Preliminary tagging complete: ${data.ruleTaggedCount} rule-tagged, ${data.aiTaggedCount} AI-tagged (${data.remainingUntaggedCount} untagged remaining).`
       );
       await fetchGroups();
-      await fetchItems(searchQuery, selectedMfg, selectedEquivGroup);
+      await fetchItems(searchQuery, selectedMfg, selectedEquivGroup, selectedParentCat);
     } finally {
       setIsAutoTagging(false);
     }
@@ -240,9 +316,108 @@ export default function PricingPage() {
       setEditingEquivItemId(null);
       setEquivInput('');
       await fetchGroups();
-      await fetchItems(searchQuery, selectedMfg, selectedEquivGroup);
+      await fetchItems(searchQuery, selectedMfg, selectedEquivGroup, selectedParentCat);
     }
   };
+
+  // Cart Helpers
+  const addToCart = (item: PriceItem) => {
+    const unitCost = Number(item.effective_net_price ?? item.list_price ?? 0);
+    setCartItems((prev) => {
+      const idx = prev.findIndex((c) => c.priceItemId === item.id);
+      if (idx !== -1) {
+        const next = [...prev];
+        next[idx] = { ...next[idx], quantity: next[idx].quantity + 1 };
+        return next;
+      }
+      return [
+        ...prev,
+        {
+          priceItemId: item.id,
+          manufacturer: item.manufacturer,
+          sku: item.sku,
+          description: item.description,
+          quantity: 1,
+          unitCost,
+        },
+      ];
+    });
+  };
+
+  const updateCartQty = (priceItemId: string, qty: number) => {
+    if (qty <= 0) {
+      setCartItems((prev) => prev.filter((c) => c.priceItemId !== priceItemId));
+      return;
+    }
+    setCartItems((prev) =>
+      prev.map((c) => (c.priceItemId === priceItemId ? { ...c, quantity: qty } : c))
+    );
+  };
+
+  const saveOrPrintCart = async (mode: 'draft' | 'quoted') => {
+    if (cartItems.length === 0) return;
+    setIsSavingCart(true);
+    setBidSwitchedToQuoted(false);
+    try {
+      const res = await fetch('/api/pricing/cart', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          id: cartId,
+          bidRequestId: linkedBidId || null,
+          title: cartTitle,
+          markupPercent: Number(cartMarkup) || 0,
+          notes: cartNotes,
+          items: cartItems,
+          status: mode,
+        }),
+      });
+      const data = await res.json();
+      if (!res.ok) {
+        setStatusMessage(`Error: ${data.error || 'Failed to save quote cart'}`);
+        return;
+      }
+      if (data.cart?.id) setCartId(data.cart.id);
+      await fetchBidsAndCarts();
+      if (mode === 'draft') {
+        setStatusMessage('Quote cart saved for later.');
+      } else {
+        setBidSwitchedToQuoted(Boolean(linkedBidId));
+        setShowPrintModal(true);
+      }
+    } finally {
+      setIsSavingCart(false);
+    }
+  };
+
+  const parentCategoryCounts = useMemo(() => {
+    const counts: Record<string, number> = {};
+    for (const g of equivGroups) {
+      const pid = getParentCategoryId(g.group);
+      counts[pid] = (counts[pid] || 0) + g.count;
+    }
+    return counts;
+  }, [equivGroups]);
+
+  const activeSubGroups = useMemo(() => {
+    if (selectedParentCat === 'ALL' || selectedParentCat === 'untagged') return [];
+    return equivGroups.filter((g) => getParentCategoryId(g.group) === selectedParentCat);
+  }, [equivGroups, selectedParentCat]);
+
+  const totalCartQty = useMemo(
+    () => cartItems.reduce((sum, it) => sum + it.quantity, 0),
+    [cartItems]
+  );
+
+  const cartSubtotalCost = useMemo(
+    () => cartItems.reduce((sum, it) => sum + it.unitCost * it.quantity, 0),
+    [cartItems]
+  );
+
+  const linkedBid = useMemo(
+    () => bidsList.find((b) => b.id === linkedBidId) || null,
+    [bidsList, linkedBidId]
+  );
 
   const manufacturers = ['ALL', ...Array.from(new Set(books.map((b) => b.manufacturer)))];
 
@@ -286,6 +461,14 @@ export default function PricingPage() {
             >
               {isAutoTagging ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <Sparkles className="w-3.5 h-3.5" />}
               <span>{isAutoTagging ? 'Tagging...' : `AI Auto-Tag (${untaggedCount})`}</span>
+            </button>
+            <button
+              type="button"
+              onClick={() => setShowCartDrawer(true)}
+              className="px-3.5 py-1.5 rounded-xl bg-blue-600 hover:bg-blue-500 text-white text-xs font-bold flex items-center gap-1.5 shadow-sm"
+            >
+              <ShoppingCart className="w-3.5 h-3.5" />
+              <span>Quote Cart ({totalCartQty})</span>
             </button>
             <button
               type="button"
@@ -512,48 +695,103 @@ export default function PricingPage() {
             </div>
           </div>
 
-          {/* Granular Category / Equivalent Group Picker */}
-          {(equivGroups.length > 0 || untaggedCount > 0) && (
-            <div className="flex items-center gap-2 flex-wrap pt-1 border-t border-slate-100">
-              <span className="text-[11px] font-bold text-slate-500 uppercase tracking-wider">
-                Category Group:
+          {/* Staggered 2-Level Store Category Filter */}
+          <div className="space-y-2 pt-2 border-t border-slate-100">
+            {/* Level 1: Broad Category Pills */}
+            <div className="flex items-center gap-1.5 flex-wrap">
+              <span className="text-[11px] font-bold text-slate-500 uppercase tracking-wider mr-1">
+                Category:
               </span>
-              <select
-                value={selectedEquivGroup}
-                onChange={(e) => setSelectedEquivGroup(e.target.value)}
-                className="px-2.5 py-1 rounded-lg border border-slate-300 bg-slate-50 text-xs font-semibold text-slate-800 max-w-xs"
+              <button
+                type="button"
+                onClick={() => {
+                  setSelectedParentCat('ALL');
+                  setSelectedEquivGroup('');
+                }}
+                className={`px-2.5 py-1 rounded-lg text-xs font-bold border transition-colors ${
+                  selectedParentCat === 'ALL' && !selectedEquivGroup
+                    ? 'bg-slate-900 text-white border-slate-900'
+                    : 'bg-slate-50 text-slate-700 border-slate-200 hover:bg-slate-100'
+                }`}
               >
-                <option value="">All Categories</option>
-                {untaggedCount > 0 && (
-                  <option value="__UNTAGGED__">Untagged Only ({untaggedCount})</option>
-                )}
-                {equivGroups.map((g) => (
-                  <option key={g.group} value={g.group}>
-                    {g.group} ({g.count})
-                  </option>
-                ))}
-              </select>
+                All Categories
+              </button>
+              {PARENT_CATEGORIES.map((cat) => {
+                const cnt = parentCategoryCounts[cat.id] || 0;
+                if (cnt === 0) return null;
+                const isSelected = selectedParentCat === cat.id;
+                return (
+                  <button
+                    key={cat.id}
+                    type="button"
+                    onClick={() => {
+                      setSelectedParentCat(isSelected ? 'ALL' : cat.id);
+                      setSelectedEquivGroup('');
+                    }}
+                    className={`px-2.5 py-1 rounded-lg text-xs font-bold border transition-colors ${
+                      isSelected
+                        ? 'bg-blue-600 text-white border-blue-600 shadow-2xs'
+                        : 'bg-slate-50 text-slate-700 border-slate-200 hover:bg-slate-100'
+                    }`}
+                  >
+                    {cat.label} ({cnt})
+                  </button>
+                );
+              })}
+              {untaggedCount > 0 && (
+                <button
+                  type="button"
+                  onClick={() => {
+                    setSelectedParentCat(selectedParentCat === 'untagged' ? 'ALL' : 'untagged');
+                    setSelectedEquivGroup('');
+                  }}
+                  className={`px-2.5 py-1 rounded-lg text-xs font-bold border transition-colors ${
+                    selectedParentCat === 'untagged'
+                      ? 'bg-amber-600 text-white border-amber-600'
+                      : 'bg-amber-50 text-amber-800 border-amber-200 hover:bg-amber-100'
+                  }`}
+                >
+                  Untagged ({untaggedCount})
+                </button>
+              )}
+            </div>
 
-              <div className="flex items-center gap-1 flex-wrap">
-                {equivGroups.slice(0, 8).map((g) => (
+            {/* Level 2: Staggered Sub-Category Facets */}
+            {activeSubGroups.length > 0 && (
+              <div className="flex items-center gap-1.5 flex-wrap pl-3 border-l-2 border-blue-300 bg-blue-50/40 p-2 rounded-r-xl">
+                <span className="text-[10px] font-bold text-blue-800 uppercase tracking-wider mr-1">
+                  Narrow Down:
+                </span>
+                <button
+                  type="button"
+                  onClick={() => setSelectedEquivGroup('')}
+                  className={`px-2 py-0.5 rounded-full text-[11px] font-bold border transition-colors ${
+                    !selectedEquivGroup
+                      ? 'bg-blue-600 text-white border-blue-600'
+                      : 'bg-white text-blue-800 border-blue-200 hover:bg-blue-100'
+                  }`}
+                >
+                  All in Category
+                </button>
+                {activeSubGroups.map((g) => (
                   <button
                     key={g.group}
                     type="button"
                     onClick={() =>
                       setSelectedEquivGroup(selectedEquivGroup === g.group ? '' : g.group)
                     }
-                    className={`px-2 py-0.5 rounded-full text-[10px] font-bold border transition-colors ${
+                    className={`px-2 py-0.5 rounded-full text-[11px] font-bold border transition-colors ${
                       selectedEquivGroup === g.group
                         ? 'bg-indigo-600 text-white border-indigo-600'
-                        : 'bg-indigo-50 text-indigo-700 border-indigo-200 hover:bg-indigo-100'
+                        : 'bg-white text-indigo-800 border-indigo-200 hover:bg-indigo-100'
                     }`}
                   >
-                    {g.group} ({g.count})
+                    {getSubCategoryShortLabel(g.group)} ({g.count})
                   </button>
                 ))}
               </div>
-            </div>
-          )}
+            )}
+          </div>
 
           <div className="flex items-center justify-between text-[11px] text-slate-500">
             <span className="flex items-center gap-1 font-medium">
@@ -580,12 +818,13 @@ export default function PricingPage() {
                   <th className="py-2.5 px-3 text-right">Net Cost</th>
                   <th className="py-2.5 px-3 text-right">MAP / Ship</th>
                   <th className="py-2.5 px-3">Equivalent Group</th>
+                  <th className="py-2.5 px-3 text-right">Quote Cart</th>
                 </tr>
               </thead>
               <tbody className="divide-y divide-slate-100">
                 {items.length === 0 ? (
                   <tr>
-                    <td colSpan={8} className="py-10 text-center text-slate-400">
+                    <td colSpan={9} className="py-10 text-center text-slate-400">
                       {books.length === 0
                         ? 'Upload a price sheet to start comparing prices.'
                         : 'No matching items found. Try another SKU or keyword.'}
@@ -708,6 +947,25 @@ export default function PricingPage() {
                             </button>
                           )}
                         </td>
+                        <td className="py-2.5 px-3 text-right whitespace-nowrap">
+                          {(() => {
+                            const inCart = cartItems.find((c) => c.priceItemId === item.id);
+                            return (
+                              <button
+                                type="button"
+                                onClick={() => addToCart(item)}
+                                className={`px-2.5 py-1 rounded-lg text-[11px] font-bold border transition-colors inline-flex items-center gap-1 ${
+                                  inCart
+                                    ? 'bg-emerald-50 text-emerald-800 border-emerald-300 hover:bg-emerald-100'
+                                    : 'bg-blue-600 text-white border-blue-600 hover:bg-blue-500'
+                                }`}
+                              >
+                                <Plus className="w-3 h-3" />
+                                <span>{inCart ? `In Cart (${inCart.quantity})` : 'Add'}</span>
+                              </button>
+                            );
+                          })()}
+                        </td>
                       </tr>
                     );
                   })
@@ -717,6 +975,236 @@ export default function PricingPage() {
           </div>
         </section>
       </main>
+
+      {/* Slide-Over Job Quote Cart Drawer */}
+      {showCartDrawer && (
+        <div className="fixed inset-0 z-40 bg-slate-900/50 backdrop-blur-xs flex justify-end">
+          <div className="w-full max-w-lg bg-white h-full shadow-2xl flex flex-col border-l border-slate-200">
+            <div className="px-5 py-4 bg-slate-900 text-white flex items-center justify-between">
+              <div className="flex items-center gap-2">
+                <ShoppingCart className="w-5 h-5 text-emerald-400" />
+                <div>
+                  <h2 className="text-sm font-bold">Job Quote Cart ({totalCartQty} items)</h2>
+                  <p className="text-[11px] text-slate-400">
+                    Link to a job, save draft, or print PDF quote
+                  </p>
+                </div>
+              </div>
+              <button
+                type="button"
+                onClick={() => setShowCartDrawer(false)}
+                className="p-1.5 rounded-lg text-slate-400 hover:text-white hover:bg-slate-800"
+              >
+                <X className="w-4 h-4" />
+              </button>
+            </div>
+
+            <div className="flex-1 overflow-y-auto p-5 space-y-4 text-xs">
+              {/* Load Saved Cart */}
+              {savedCarts.length > 0 && (
+                <div>
+                  <label className="block text-[10px] font-bold uppercase text-slate-500 mb-1">
+                    Load Saved Quote Cart
+                  </label>
+                  <select
+                    value={cartId || ''}
+                    onChange={(e) => {
+                      const found = savedCarts.find((c) => c.id === e.target.value);
+                      if (!found) return;
+                      setCartId(found.id);
+                      setLinkedBidId(found.bid_request_id || '');
+                      setCartTitle(found.title || 'Job Material Quote');
+                      setCartMarkup(String(found.markup_percent ?? 0));
+                      setCartNotes(found.notes || '');
+                      setCartItems(Array.isArray(found.items) ? found.items : []);
+                    }}
+                    className="w-full px-2.5 py-1.5 rounded-lg border border-slate-300 bg-slate-50 font-semibold"
+                  >
+                    <option value="">-- Current / New Cart --</option>
+                    {savedCarts.map((c) => (
+                      <option key={c.id} value={c.id}>
+                        {c.title} ({Array.isArray(c.items) ? c.items.length : 0} lines • {c.status})
+                      </option>
+                    ))}
+                  </select>
+                </div>
+              )}
+
+              {/* Link to Job / Bid */}
+              <div>
+                <label className="block text-[10px] font-bold uppercase text-slate-500 mb-1">
+                  Link to Bid / Job (Printing marks bid as Quoted)
+                </label>
+                <select
+                  value={linkedBidId}
+                  onChange={(e) => {
+                    const id = e.target.value;
+                    setLinkedBidId(id);
+                    const b = bidsList.find((x) => x.id === id);
+                    if (b) {
+                      setCartTitle(b.project_name || b.email_subject || 'Job Material Quote');
+                    }
+                  }}
+                  className="w-full px-2.5 py-1.5 rounded-lg border border-slate-300 bg-white font-semibold"
+                >
+                  <option value="">Unlinked Draft Quote</option>
+                  {bidsList.map((b) => (
+                    <option key={b.id} value={b.id}>
+                      {b.bid_number ? `[${b.bid_number}] ` : ''}
+                      {b.project_name || b.email_subject}
+                      {b.client_company ? ` — ${b.client_company}` : ''}
+                    </option>
+                  ))}
+                </select>
+              </div>
+
+              <div className="grid grid-cols-3 gap-2">
+                <div className="col-span-2">
+                  <label className="block text-[10px] font-bold uppercase text-slate-500 mb-1">
+                    Quote Title
+                  </label>
+                  <input
+                    type="text"
+                    value={cartTitle}
+                    onChange={(e) => setCartTitle(e.target.value)}
+                    className="w-full px-2.5 py-1.5 rounded-lg border border-slate-300"
+                  />
+                </div>
+                <div>
+                  <label className="block text-[10px] font-bold uppercase text-slate-500 mb-1">
+                    Markup %
+                  </label>
+                  <input
+                    type="number"
+                    step="0.5"
+                    value={cartMarkup}
+                    onChange={(e) => setCartMarkup(e.target.value)}
+                    className="w-full px-2.5 py-1.5 rounded-lg border border-slate-300 text-right font-mono"
+                  />
+                </div>
+              </div>
+
+              {/* Cart Items */}
+              <div className="space-y-2">
+                <div className="text-[10px] font-bold uppercase text-slate-500">
+                  Items in Quote ({cartItems.length} lines)
+                </div>
+                {cartItems.length === 0 ? (
+                  <div className="p-6 text-center text-slate-400 border border-dashed border-slate-300 rounded-xl">
+                    Click <strong>+ Add</strong> on any product in the price book to build this job&apos;s quote.
+                  </div>
+                ) : (
+                  cartItems.map((it) => {
+                    const sellUnit = it.unitCost * (1 + (Number(cartMarkup) || 0) / 100);
+                    return (
+                      <div
+                        key={it.priceItemId}
+                        className="p-2.5 rounded-xl border border-slate-200 bg-slate-50 flex items-center justify-between gap-2"
+                      >
+                        <div className="min-w-0 flex-1">
+                          <div className="font-bold text-slate-900">
+                            {it.manufacturer} • <span className="font-mono">{it.sku}</span>
+                          </div>
+                          <div className="text-[11px] text-slate-600 truncate">{it.description}</div>
+                          <div className="text-[11px] text-slate-500 mt-0.5">
+                            Net: {formatCurrency(it.unitCost)} → Quote: <strong>{formatCurrency(sellUnit)}</strong>
+                          </div>
+                        </div>
+                        <div className="flex items-center gap-1 flex-shrink-0">
+                          <button
+                            type="button"
+                            onClick={() => updateCartQty(it.priceItemId, it.quantity - 1)}
+                            className="p-1 rounded bg-white border border-slate-300 hover:bg-slate-100"
+                          >
+                            <Minus className="w-3 h-3" />
+                          </button>
+                          <input
+                            type="number"
+                            min={1}
+                            value={it.quantity}
+                            onChange={(e) => updateCartQty(it.priceItemId, Number(e.target.value) || 1)}
+                            className="w-11 text-center font-bold py-0.5 border border-slate-300 rounded bg-white"
+                          />
+                          <button
+                            type="button"
+                            onClick={() => updateCartQty(it.priceItemId, it.quantity + 1)}
+                            className="p-1 rounded bg-white border border-slate-300 hover:bg-slate-100"
+                          >
+                            <Plus className="w-3 h-3" />
+                          </button>
+                          <button
+                            type="button"
+                            onClick={() => updateCartQty(it.priceItemId, 0)}
+                            className="p-1 text-slate-400 hover:text-rose-600 ml-1"
+                          >
+                            <Trash2 className="w-3.5 h-3.5" />
+                          </button>
+                        </div>
+                      </div>
+                    );
+                  })
+                )}
+              </div>
+
+              <div>
+                <label className="block text-[10px] font-bold uppercase text-slate-500 mb-1">
+                  Quote Notes / Clarifications
+                </label>
+                <textarea
+                  rows={2}
+                  value={cartNotes}
+                  onChange={(e) => setCartNotes(e.target.value)}
+                  placeholder="e.g. Furnish Only — Freight Included, Lead time 2-3 weeks..."
+                  className="w-full px-2.5 py-1.5 rounded-lg border border-slate-300"
+                />
+              </div>
+            </div>
+
+            {/* Cart Footer */}
+            <div className="p-4 border-t border-slate-200 bg-slate-50 space-y-3">
+              <div className="flex items-center justify-between text-xs">
+                <span className="text-slate-600">Material Cost: {formatCurrency(cartSubtotalCost)}</span>
+                <span className="text-sm font-black text-slate-900">
+                  Quote Total: {formatCurrency(cartSubtotalCost * (1 + (Number(cartMarkup) || 0) / 100))}
+                </span>
+              </div>
+              <div className="grid grid-cols-2 gap-2">
+                <button
+                  type="button"
+                  disabled={isSavingCart || cartItems.length === 0}
+                  onClick={() => saveOrPrintCart('draft')}
+                  className="px-3 py-2 rounded-xl bg-white hover:bg-slate-100 border border-slate-300 text-slate-800 text-xs font-bold flex items-center justify-center gap-1.5 disabled:opacity-50"
+                >
+                  <Save className="w-3.5 h-3.5" />
+                  <span>Save for Later</span>
+                </button>
+                <button
+                  type="button"
+                  disabled={isSavingCart || cartItems.length === 0}
+                  onClick={() => saveOrPrintCart('quoted')}
+                  className="px-3 py-2 rounded-xl bg-emerald-600 hover:bg-emerald-500 text-white text-xs font-bold flex items-center justify-center gap-1.5 disabled:opacity-50"
+                >
+                  <Printer className="w-3.5 h-3.5" />
+                  <span>Print / PDF Quote</span>
+                </button>
+              </div>
+            </div>
+          </div>
+        </div>
+      )}
+
+      <QuotePrintModal
+        isOpen={showPrintModal}
+        onClose={() => setShowPrintModal(false)}
+        quoteTitle={cartTitle}
+        projectName={linkedBid?.project_name || linkedBid?.email_subject}
+        contractorName={linkedBid?.client_company}
+        bidNumber={linkedBid?.bid_number}
+        markupPercent={Number(cartMarkup) || 0}
+        notes={cartNotes}
+        items={cartItems}
+        bidSwitchedToQuoted={bidSwitchedToQuoted}
+      />
     </div>
   );
 }

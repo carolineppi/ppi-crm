@@ -19,6 +19,7 @@ export type EstimatorStatus =
   | 'accepted'
   | 'declined'
   | 'in_progress'
+  | 'quoted'
   | 'bid_submitted'
   | 'won'
   | 'lost'

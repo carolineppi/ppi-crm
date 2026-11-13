@@ -51,7 +51,7 @@ interface JobItem {
   projectAddress?: string | null;
   jobCode?: string | null;
   assignedEstimator?: string | null;
-  estimatorStatus: 'unassigned' | 'assigned' | 'declined' | 'in_progress' | 'bid_submitted' | 'won' | 'lost' | 'no_bid';
+  estimatorStatus: 'unassigned' | 'assigned' | 'declined' | 'in_progress' | 'quoted' | 'bid_submitted' | 'won' | 'lost' | 'no_bid';
   bidDueDate?: string | null;
   bidDueTime?: string | null;
   googleDriveFolderUrl?: string | null;
@@ -578,6 +578,7 @@ export default function EstimatorWorkspacePage() {
 
             let cardStatusBorder = 'border-l-blue-600';
             if (job.estimatorStatus === 'in_progress') cardStatusBorder = 'border-l-amber-500';
+            else if (job.estimatorStatus === 'quoted') cardStatusBorder = 'border-l-indigo-600';
             else if (job.estimatorStatus === 'bid_submitted') cardStatusBorder = 'border-l-purple-600';
             else if (job.estimatorStatus === 'won') cardStatusBorder = 'border-l-emerald-600';
             else if (job.estimatorStatus === 'lost') cardStatusBorder = 'border-l-rose-500';
@@ -672,6 +673,7 @@ export default function EstimatorWorkspacePage() {
                   >
                     <option value="assigned">🔵 Assigned</option>
                     <option value="in_progress">🟡 In Progress</option>
+                    <option value="quoted">🟣 Quoted</option>
                     <option value="bid_submitted">🟣 Bid Submitted</option>
                     <option value="won">🟢 Won / Awarded</option>
                     <option value="lost">🔴 Lost</option>

@@ -12,7 +12,7 @@ interface UpdatePayload {
   assignedEstimatorId?: string | null;
   bidDueDate?: string | null;
   triageStatus?: string | null;
-  estimatorStatus?: 'unassigned' | 'assigned' | 'declined' | 'in_progress' | 'bid_submitted' | 'won' | 'lost' | 'no_bid' | null;
+  estimatorStatus?: 'unassigned' | 'assigned' | 'declined' | 'in_progress' | 'quoted' | 'bid_submitted' | 'won' | 'lost' | 'no_bid' | null;
   estimatorNotes?: string | null;
   duplicateResolution?: string | null;
   filterStatus?: string | null;

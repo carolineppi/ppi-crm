@@ -212,6 +212,15 @@ export default function EstimatorJobModal({
           </div>
 
           <div className="flex items-center gap-2">
+            {bidId && (
+              <a
+                href={`/pricing?bidId=${bidId}`}
+                className="px-3 py-1.5 rounded-lg bg-emerald-600 hover:bg-emerald-500 text-white text-xs font-bold transition-colors flex items-center gap-1.5"
+                title="Open Price Book & Quote Cart linked to this job"
+              >
+                <span>🛒 Build Quote</span>
+              </a>
+            )}
             <button
               onClick={onClose}
               className="p-2 rounded-lg text-slate-400 hover:text-white hover:bg-slate-800 transition-colors"
@@ -286,6 +295,7 @@ export default function EstimatorJobModal({
                 >
                   <option value="assigned">🔵 Assigned (Needs Takeoff)</option>
                   <option value="in_progress">🟡 In Progress (Takeoff Underway)</option>
+                  <option value="quoted">🟣 Quoted (PDF Generated)</option>
                   <option value="bid_submitted">🟣 Bid Submitted to GC</option>
                   <option value="won">🟢 Won / Awarded</option>
                   <option value="lost">🔴 Lost to Competitor</option>

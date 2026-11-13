@@ -6,6 +6,7 @@ export async function GET(request: NextRequest) {
     const q = (request.nextUrl.searchParams.get('q') || '').trim();
     const manufacturer = (request.nextUrl.searchParams.get('manufacturer') || '').trim();
     const equivalentGroup = (request.nextUrl.searchParams.get('equivalentGroup') || '').trim();
+    const equivalentGroupsParam = (request.nextUrl.searchParams.get('equivalentGroups') || '').trim();
     const limit = Math.min(200, Math.max(10, Number(request.nextUrl.searchParams.get('limit') || '100')));
 
     const supabase = createServerSupabaseClient();
@@ -23,6 +24,11 @@ export async function GET(request: NextRequest) {
       query = query.is('equivalent_group', null);
     } else if (equivalentGroup) {
       query = query.eq('equivalent_group', equivalentGroup);
+    } else if (equivalentGroupsParam) {
+      const list = equivalentGroupsParam.split('||').map((s) => s.trim()).filter(Boolean);
+      if (list.length > 0) {
+        query = query.in('equivalent_group', list);
+      }
     }
 
     if (q) {
