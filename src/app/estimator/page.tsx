@@ -74,6 +74,7 @@ interface JobItem {
     status: string;
     itemCount: number;
     quoteTotal: number;
+    scopeCount: number;
   } | null;
   sticker: 'ITB' | 'Addendum' | 'Won' | 'Lost' | 'Spam' | 'Date Reminder' | string;
   isForwarded?: boolean;
@@ -116,29 +117,52 @@ export default function EstimatorWorkspacePage() {
       ]);
       const data = await res.json();
       const cartsData = await cartsRes.json().catch(() => ({ carts: [] }));
-      const cartsByBidId: Record<string, any> = {};
+      const cartsByBidId: Record<string, any[]> = {};
       if (Array.isArray(cartsData.carts)) {
         cartsData.carts.forEach((c: any) => {
-          if (c.bid_request_id && !cartsByBidId[c.bid_request_id]) {
-            cartsByBidId[c.bid_request_id] = c;
+          if (c.bid_request_id) {
+            if (!cartsByBidId[c.bid_request_id]) cartsByBidId[c.bid_request_id] = [];
+            cartsByBidId[c.bid_request_id].push(c);
           }
         });
       }
       if (data.bidRequests && Array.isArray(data.bidRequests)) {
-        // Group child addendums / duplicates count by duplicate_group_id
+        // Group child addendums / duplicates count & quote carts by duplicate_group_id
         const groupCounts: Record<string, number> = {};
-        const cartsByGroupId: Record<string, any> = {};
+        const cartsByGroupId: Record<string, any[]> = {};
+        const bestRepByGroup: Record<string, any> = {};
+
+        const scoreRecord = (r: any) => {
+          let score = 0;
+          if (r.bid_number) score += 100;
+          if (r.filter_status !== 'auto_filtered' && r.filter_status !== 'duplicate_folder') score += 50;
+          if (!r.is_flagged_duplicate) score += 25;
+          if (r.email_intent === 'invitation_to_bid') score += 10;
+          return score;
+        };
+
         data.bidRequests.forEach((r: any) => {
           if (r.duplicate_group_id) {
             groupCounts[r.duplicate_group_id] = (groupCounts[r.duplicate_group_id] || 0) + 1;
-            if (cartsByBidId[r.id] && !cartsByGroupId[r.duplicate_group_id]) {
-              cartsByGroupId[r.duplicate_group_id] = cartsByBidId[r.id];
+            if (cartsByBidId[r.id]?.length) {
+              if (!cartsByGroupId[r.duplicate_group_id]) cartsByGroupId[r.duplicate_group_id] = [];
+              cartsByGroupId[r.duplicate_group_id].push(...cartsByBidId[r.id]);
+            }
+            const existing = bestRepByGroup[r.duplicate_group_id];
+            if (!existing || scoreRecord(r) > scoreRecord(existing)) {
+              bestRepByGroup[r.duplicate_group_id] = r;
             }
           }
         });
 
+        // Deduplicate by duplicate_group_id so each bid only appears ONCE on the Estimator Portal
+        const dedupedRows = data.bidRequests.filter((r: any) => {
+          if (!r.duplicate_group_id) return true;
+          return bestRepByGroup[r.duplicate_group_id]?.id === r.id;
+        });
+
         // Filter: Keep anything assigned to an estimator, in an active/submitted/won workflow state, or primary ITB records
-        const mapped: JobItem[] = data.bidRequests
+        const mapped: JobItem[] = dedupedRows
           .filter((r: any) => {
             const activeStatuses = new Set(['in_progress', 'quoted', 'bid_submitted', 'won', 'lost', 'declined']);
             if (r.estimator_status && activeStatuses.has(r.estimator_status)) {
@@ -241,8 +265,13 @@ export default function EstimatorWorkspacePage() {
               attachmentsCount: rawAtts.length,
               duplicateCount: Math.max(0, totalInGroup - 1),
               quoteSummary: (() => {
-                const c = cartsByBidId[r.id] || (r.duplicate_group_id ? cartsByGroupId[r.duplicate_group_id] : null);
-                if (!c || !Array.isArray(c.items) || c.items.length === 0) return null;
+                const list =
+                  (r.duplicate_group_id ? cartsByGroupId[r.duplicate_group_id] : null) ||
+                  cartsByBidId[r.id] ||
+                  [];
+                const validCarts = list.filter((c: any) => Array.isArray(c.items) && c.items.length > 0);
+                if (validCarts.length === 0) return null;
+                const c = validCarts[0];
                 const subtotal = c.items.reduce(
                   (s: number, it: any) => s + (Number(it.unitCost) || 0) * (Number(it.quantity) || 0),
                   0
@@ -252,6 +281,7 @@ export default function EstimatorWorkspacePage() {
                   status: c.status,
                   itemCount: c.items.length,
                   quoteTotal: subtotal * mult,
+                  scopeCount: validCarts.length,
                 };
               })(),
               sticker: sticker as any,
@@ -750,7 +780,7 @@ export default function EstimatorWorkspacePage() {
                             : 'bg-purple-50 text-purple-800 border-purple-200'
                         }`}
                       >
-                        💰 Quote: $
+                        💰 {job.quoteSummary.scopeCount > 1 ? `${job.quoteSummary.scopeCount} Scopes • Latest: ` : 'Quote: '}$
                         {job.quoteSummary.quoteTotal.toLocaleString('en-US', {
                           minimumFractionDigits: 2,
                           maximumFractionDigits: 2,

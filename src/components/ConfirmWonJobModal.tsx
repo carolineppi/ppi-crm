@@ -560,11 +560,22 @@ export default function ConfirmWonJobModal({
                         0
                       );
                       const dateLabel = c.quoted_at
-                        ? new Date(c.quoted_at).toLocaleDateString()
+                        ? new Date(c.quoted_at).toLocaleString([], {
+                            month: 'numeric',
+                            day: 'numeric',
+                            hour: 'numeric',
+                            minute: '2-digit',
+                          })
                         : 'Draft';
+                      const previewSkus = itemsArr
+                        .slice(0, 2)
+                        .map((it: any) => [it.manufacturer, it.sku].filter(Boolean).join(' ') || it.description)
+                        .filter(Boolean)
+                        .join(', ');
                       return (
                         <option key={c.id} value={`quote:${c.id}`}>
-                          📄 {c.title}.pdf — {itemsArr.length} line item(s) • $
+                          📄 {c.title}.pdf — {itemsArr.length} item(s)
+                          {previewSkus ? ` [${previewSkus}${itemsArr.length > 2 ? ', ...' : ''}]` : ''} • $
                           {tot.toLocaleString('en-US', {
                             minimumFractionDigits: 2,
                             maximumFractionDigits: 2,
