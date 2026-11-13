@@ -43,6 +43,8 @@ export async function GET(request: NextRequest) {
       match_reason,
       match_status,
       estimator_status,
+      estimator_notes:raw_payload->>estimator_notes,
+      refused_by:raw_payload->>refused_by,
       is_human_labeled,
       human_label,
       human_labeled_at,

@@ -289,7 +289,8 @@ export default function EstimatorJobModal({
                   <option value="bid_submitted">🟣 Bid Submitted to GC</option>
                   <option value="won">🟢 Won / Awarded</option>
                   <option value="lost">🔴 Lost to Competitor</option>
-                  <option value="no_bid">⚪ No Bid (Declined)</option>
+                  <option value="declined">🚫 Refuse Bid (Needs Reassignment)</option>
+                  <option value="no_bid">⚪ No Bid (Company Not Bidding)</option>
                 </select>
 
                 <button

@@ -51,10 +51,14 @@ import {
   Eye,
   CheckCircle2,
   Split,
+  BookOpen,
 } from 'lucide-react';
 import EmailDocumentViewer from '@/components/EmailDocumentViewer';
 import CalendarScheduleView from '@/components/CalendarScheduleView';
 import BidDocumentManager from '@/components/BidDocumentManager';
+import AssignmentRulesModal from '@/components/AssignmentRulesModal';
+import AssignmentRuleOverlay from '@/components/AssignmentRuleOverlay';
+import { AssignmentRule, matchAssignmentRules } from '@/lib/assignment-rules';
 import {
   normalizeDateToYyyyMmDd,
   formatFriendlyDate,
@@ -81,6 +85,9 @@ interface DisplayBidRequest {
   triageStatus: 'pending_triage' | 'in_triage' | 'ready_for_assignment' | 'assigned' | 'archived';
   priority: 'low' | 'normal' | 'high' | 'urgent';
   assignedEstimator: string | null;
+  estimatorStatus?: string | null;
+  estimatorNotes?: string | null;
+  refusedBy?: string | null;
   bidDueDate?: string | null;
   bidDueTime?: string | null;
   rawAiDueDate?: string | null;
@@ -190,6 +197,8 @@ export default function DispatchDashboard() {
   const [expandedGroups, setExpandedGroups] = useState<Record<string, boolean>>({});
   const [expandedEmails, setExpandedEmails] = useState<Record<string, boolean>>({});
   const [toastMessage, setToastMessage] = useState<string | null>(null);
+  const [assignmentRules, setAssignmentRules] = useState<AssignmentRule[]>([]);
+  const [showRulesModal, setShowRulesModal] = useState(false);
 
   // Pagination & Search States
   const [currentPage, setCurrentPage] = useState(1);
@@ -343,6 +352,9 @@ export default function DispatchDashboard() {
             triageStatus: r.triage_status || 'pending_triage',
             priority: r.priority || 'normal',
             assignedEstimator: assignedName,
+            estimatorStatus: r.estimator_status || 'unassigned',
+            estimatorNotes: r.estimator_notes || r.raw_payload?.estimator_notes || null,
+            refusedBy: r.refused_by || r.raw_payload?.refused_by || null,
             bidDueDate,
             bidDueTime: r.bid_due_time || r.raw_payload?.bid_due_time || null,
             rawAiDueDate,
@@ -390,15 +402,28 @@ export default function DispatchDashboard() {
     }
   };
 
+  const fetchAssignmentRules = useCallback(async () => {
+    try {
+      const res = await fetch('/api/assignment-rules');
+      const data = await res.json();
+      if (data.rules && Array.isArray(data.rules)) {
+        setAssignmentRules(data.rules);
+      }
+    } catch (err) {
+      console.error('Error fetching assignment rules:', err);
+    }
+  }, []);
+
   useEffect(() => {
     fetchLiveBids();
+    fetchAssignmentRules();
     if (typeof window !== 'undefined') {
       const params = new URLSearchParams(window.location.search);
       if (params.get('view') === 'calendar') {
         setViewMode('calendar');
       }
     }
-  }, []);
+  }, [fetchAssignmentRules]);
 
   // Auto-refresh live inbox every 60 seconds when enabled
   useEffect(() => {
@@ -1616,19 +1641,27 @@ export default function DispatchDashboard() {
               </select>
             </div>
 
-            {/* Estimator Assignment Picker */}
+              {/* Estimator Assignment Picker */}
             <div className="flex items-center gap-1">
               <span className="text-[11px] text-slate-500 font-bold hidden sm:inline">
-                Estimator:
+                {selectedBid.estimatorStatus === 'declined' ? '🚫 Refused — Reassign:' : 'Estimator:'}
               </span>
               <select
-                value={selectedBid.assignedEstimator || ''}
+                value={selectedBid.estimatorStatus === 'declined' ? '' : (selectedBid.assignedEstimator || '')}
                 onChange={(e) =>
                   handleAssignEstimatorAndDate(selectedBid.id, e.target.value || null, undefined)
                 }
-                className="text-xs font-medium border border-slate-300 rounded-lg px-2 py-1 bg-white text-slate-800 shadow-2xs focus:ring-2 focus:ring-blue-500"
+                className={`text-xs font-medium border rounded-lg px-2 py-1 shadow-2xs focus:ring-2 focus:ring-blue-500 ${
+                  selectedBid.estimatorStatus === 'declined'
+                    ? 'bg-rose-50 text-rose-800 border-rose-300 font-bold'
+                    : 'bg-white text-slate-800 border-slate-300'
+                }`}
               >
-                <option value="">Unassigned...</option>
+                <option value="">
+                  {selectedBid.estimatorStatus === 'declined'
+                    ? `🔄 Reassign (Refused by ${selectedBid.refusedBy || selectedBid.assignedEstimator || 'Estimator'})...`
+                    : 'Unassigned...'}
+                </option>
                 {ESTIMATORS.map((est) => (
                   <option key={est} value={est}>
                     {est}
@@ -1714,6 +1747,33 @@ export default function DispatchDashboard() {
 
         {/* Scrollable Reading Content */}
         <div className="flex-1 overflow-y-auto p-4 sm:p-6 space-y-5">
+          {(() => {
+            const matched = matchAssignmentRules(assignmentRules, {
+              estimatorName: selectedBid.assignedEstimator,
+              contractorName: selectedBid.clientCompany,
+              senderName: selectedBid.senderName,
+              originalSenderName: selectedBid.originalSenderName,
+              subject: selectedBid.subject,
+              projectName: selectedBid.projectName,
+            });
+            if (matched.length === 0 && selectedBid.estimatorStatus !== 'declined') return null;
+            return (
+              <div className="space-y-2">
+                {selectedBid.estimatorStatus === 'declined' && (
+                  <div className="p-3 rounded-xl bg-rose-50 border border-rose-300 text-xs text-rose-900">
+                    <span className="font-bold">
+                      🚫 Refused by {selectedBid.refusedBy || selectedBid.assignedEstimator || 'Estimator'} — Reassignment Needed
+                    </span>
+                    {selectedBid.estimatorNotes && (
+                      <p className="mt-1 text-rose-800">{selectedBid.estimatorNotes}</p>
+                    )}
+                  </div>
+                )}
+                <AssignmentRuleOverlay rules={matched} />
+              </div>
+            );
+          })()}
+
           {/* TOP AI INTELLIGENCE & TRIAGE BANNER */}
           <div className="bg-gradient-to-r from-slate-900 via-indigo-950 to-slate-900 text-white rounded-2xl p-5 border border-slate-700/80 shadow-md space-y-4">
             {/* Title & Status Badges */}
@@ -2443,6 +2503,8 @@ export default function DispatchDashboard() {
         <CalendarScheduleView
           bids={bids}
           estimators={ESTIMATORS}
+          assignmentRules={assignmentRules}
+          onOpenRulesModal={() => setShowRulesModal(true)}
           onSelectBid={openReviewModal}
           onAssignBid={handleAssignEstimatorAndDate}
           onBidsChanged={fetchLiveBids}
@@ -2638,8 +2700,18 @@ export default function DispatchDashboard() {
               </button>
             </div>
 
-            {/* Historical Toggle + In-Feed Search Input */}
-            <div className="flex items-center gap-2 flex-shrink-0">
+            {/* Historical Toggle + Rules + In-Feed Search Input */}
+            <div className="flex items-center gap-2 flex-shrink-0 flex-wrap">
+              <button
+                type="button"
+                onClick={() => setShowRulesModal(true)}
+                className="px-2.5 py-1.5 rounded-lg text-xs font-bold border bg-amber-50 hover:bg-amber-100 text-amber-900 border-amber-300 transition-all flex items-center gap-1.5"
+                title="Manage estimator & contractor assignment rules/notes"
+              >
+                <BookOpen className="w-3.5 h-3.5 text-amber-700" />
+                <span>Rules ({assignmentRules.filter((r) => r.is_active).length})</span>
+              </button>
+
               {activeFilter !== 'Historical' && countHistorical > 0 && (
                 <button
                   type="button"
@@ -3746,6 +3818,15 @@ export default function DispatchDashboard() {
           </div>
         </div>
       )}
+      {/* Assignment Rules & Manager Notes Modal */}
+      <AssignmentRulesModal
+        isOpen={showRulesModal}
+        onClose={() => setShowRulesModal(false)}
+        rules={assignmentRules}
+        estimators={ESTIMATORS}
+        onRulesChanged={fetchAssignmentRules}
+        onNotify={showToast}
+      />
     </div>
   );
 }

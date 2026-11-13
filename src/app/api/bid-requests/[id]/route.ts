@@ -12,7 +12,7 @@ interface UpdatePayload {
   assignedEstimatorId?: string | null;
   bidDueDate?: string | null;
   triageStatus?: string | null;
-  estimatorStatus?: 'unassigned' | 'assigned' | 'in_progress' | 'bid_submitted' | 'won' | 'lost' | 'no_bid' | null;
+  estimatorStatus?: 'unassigned' | 'assigned' | 'declined' | 'in_progress' | 'bid_submitted' | 'won' | 'lost' | 'no_bid' | null;
   estimatorNotes?: string | null;
   duplicateResolution?: string | null;
   filterStatus?: string | null;
@@ -87,10 +87,11 @@ export async function PATCH(
       if (body.assignedEstimatorId) {
         updates.assigned_estimator_id = body.assignedEstimatorId;
       }
-      // Storing assigned estimator name in raw_payload
+      // Storing assigned estimator name in raw_payload (clear any prior refusal marker on reassignment)
       updates.raw_payload = {
         ...currentRecord.raw_payload,
         assigned_estimator_name: body.assignedEstimator,
+        refused_by: null,
       };
 
       if (body.assignedEstimator === 'Not Bidding' || body.assignedEstimator === 'No Bid') {
@@ -139,6 +140,12 @@ export async function PATCH(
       updates.estimator_status = body.estimatorStatus;
       if (body.estimatorStatus === 'won') {
         updates.priority = 'urgent';
+      }
+      if (body.estimatorStatus === 'declined') {
+        updates.raw_payload = {
+          ...(updates.raw_payload || currentRecord.raw_payload),
+          refused_by: currentRecord.raw_payload?.assigned_estimator_name || 'Estimator',
+        };
       }
     }
 

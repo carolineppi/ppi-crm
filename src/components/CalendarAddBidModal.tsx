@@ -1,12 +1,24 @@
 'use client';
 
-import React, { useState } from 'react';
-import { X, PlusCircle, Loader2, AlertCircle } from 'lucide-react';
+import React, { useMemo, useState } from 'react';
+import { X, PlusCircle, Loader2, AlertCircle, AlertTriangle } from 'lucide-react';
+import { AssignmentRule, matchAssignmentRules } from '@/lib/assignment-rules';
+import AssignmentRuleOverlay from './AssignmentRuleOverlay';
 
 interface CalendarAddBidModalProps {
   isOpen: boolean;
   estimators: string[];
   defaultDueDate?: string;
+  assignmentRules?: AssignmentRule[];
+  existingBids?: Array<{
+    id: string;
+    projectName?: string | null;
+    clientCompany?: string | null;
+    subject?: string;
+    bidDueDate?: string | null;
+    normalizedAiDueDate?: string | null;
+    assignedEstimator?: string | null;
+  }>;
   onClose: () => void;
   onCreated: (bidNumber: string | null) => void;
 }
@@ -15,6 +27,8 @@ export default function CalendarAddBidModal({
   isOpen,
   estimators,
   defaultDueDate,
+  assignmentRules = [],
+  existingBids = [],
   onClose,
   onCreated,
 }: CalendarAddBidModalProps) {
@@ -29,6 +43,31 @@ export default function CalendarAddBidModal({
   const [notes, setNotes] = useState('');
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [error, setError] = useState<string | null>(null);
+
+  const matchingRules = useMemo(
+    () =>
+      matchAssignmentRules(assignmentRules, {
+        estimatorName: assignedEstimator,
+        contractorName: clientCompany,
+        projectName,
+      }),
+    [assignmentRules, assignedEstimator, clientCompany, projectName]
+  );
+
+  const potentialDuplicates = useMemo(() => {
+    const proj = projectName.trim().toLowerCase();
+    const client = clientCompany.trim().toLowerCase();
+    if (!bidDueDate || (!proj && !client) || (proj.length < 4 && client.length < 4)) return [];
+    return existingBids.filter((b) => {
+      const bDate = b.bidDueDate || b.normalizedAiDueDate;
+      if (bDate !== bidDueDate) return false;
+      const bProj = (b.projectName || b.subject || '').toLowerCase();
+      const bClient = (b.clientCompany || '').toLowerCase();
+      const projMatch = proj.length >= 4 && bProj.includes(proj);
+      const clientMatch = client.length >= 4 && bClient.includes(client);
+      return projMatch || (clientMatch && (!proj || bProj.includes(proj)));
+    });
+  }, [existingBids, bidDueDate, projectName, clientCompany]);
 
   if (!isOpen) return null;
 
@@ -165,6 +204,24 @@ export default function CalendarAddBidModal({
               />
             </div>
           </div>
+
+          {potentialDuplicates.length > 0 && (
+            <div className="p-2.5 bg-amber-50 border border-amber-300 rounded-xl text-xs text-amber-900 flex items-start gap-2">
+              <AlertTriangle className="w-4 h-4 flex-shrink-0 mt-0.5 text-amber-700" />
+              <div>
+                <p className="font-bold">Possible Duplicate Job on {bidDueDate}:</p>
+                {potentialDuplicates.slice(0, 2).map((d) => (
+                  <p key={d.id} className="text-[11px]">
+                    • {d.projectName || d.subject}
+                    {d.clientCompany ? ` (${d.clientCompany})` : ''}
+                    {d.assignedEstimator ? ` — Assigned to ${d.assignedEstimator}` : ''}
+                  </p>
+                ))}
+              </div>
+            </div>
+          )}
+
+          <AssignmentRuleOverlay rules={matchingRules} />
 
           <div>
             <label className="font-bold text-slate-700 block mb-1">Assign Estimator</label>

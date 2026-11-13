@@ -22,9 +22,12 @@ import {
   ExternalLink,
   Upload,
   PlusCircle,
+  BookOpen,
 } from 'lucide-react';
 import CalendarImportModal from './CalendarImportModal';
 import CalendarAddBidModal from './CalendarAddBidModal';
+import AssignmentRuleOverlay from './AssignmentRuleOverlay';
+import { AssignmentRule, matchAssignmentRules } from '@/lib/assignment-rules';
 import {
   formatFriendlyDate,
   getDueDateStatus,
@@ -56,6 +59,8 @@ export interface CalendarBidItem {
 interface CalendarScheduleViewProps {
   bids: any[];
   estimators: string[];
+  assignmentRules?: AssignmentRule[];
+  onOpenRulesModal?: () => void;
   onSelectBid: (bid: any) => void;
   onAssignBid: (bidId: string, estimator: string, dueDate: string | null) => Promise<void>;
   onBidsChanged?: () => void;
@@ -78,6 +83,8 @@ function getMondayOfWeek(d: Date): Date {
 export default function CalendarScheduleView({
   bids,
   estimators,
+  assignmentRules = [],
+  onOpenRulesModal,
   onSelectBid,
   onAssignBid,
   onBidsChanged,
@@ -92,6 +99,16 @@ export default function CalendarScheduleView({
       return true;
     });
   }, [bids]);
+
+  const refusedBids = useMemo(
+    () => itbBids.filter((b) => b.estimatorStatus === 'declined'),
+    [itbBids]
+  );
+
+  const activeRulesCount = useMemo(
+    () => assignmentRules.filter((r) => r.is_active).length,
+    [assignmentRules]
+  );
 
   // Start on current week
   const [currentDate, setCurrentDate] = useState<Date>(() => new Date());
@@ -355,6 +372,19 @@ export default function CalendarScheduleView({
             <span>Unscheduled ({unscheduledBids.length})</span>
           </button>
 
+          {/* Assignment Rules & Notes */}
+          {onOpenRulesModal && (
+            <button
+              type="button"
+              onClick={onOpenRulesModal}
+              className="px-3 py-1.5 rounded-xl text-xs font-bold flex items-center gap-1.5 bg-amber-50 hover:bg-amber-100 text-amber-900 border border-amber-300 shadow-2xs transition-colors"
+              title="Manage estimator & contractor assignment rules/notes"
+            >
+              <BookOpen className="w-3.5 h-3.5 text-amber-700" />
+              <span>Rules ({activeRulesCount})</span>
+            </button>
+          )}
+
           {/* Import Google Calendar (.ics) */}
           <button
             type="button"
@@ -378,6 +408,40 @@ export default function CalendarScheduleView({
           </button>
         </div>
       </div>
+
+      {/* Refused Bids Reassignment Banner */}
+      {refusedBids.length > 0 && (
+        <div className="bg-rose-50 border border-rose-300 rounded-2xl p-3 flex flex-col sm:flex-row sm:items-center justify-between gap-2.5 text-xs">
+          <div className="flex items-center gap-2 text-rose-900">
+            <AlertCircle className="w-4 h-4 text-rose-600 flex-shrink-0" />
+            <div>
+              <span className="font-bold">
+                {refusedBids.length} Refused Bid{refusedBids.length === 1 ? '' : 's'} Waiting for Reassignment:
+              </span>{' '}
+              <span className="text-rose-800">
+                {refusedBids
+                  .slice(0, 3)
+                  .map((b) => `${b.projectName || b.subject} (${b.refusedBy || b.assignedEstimator || 'Estimator'})`)
+                  .join(' • ')}
+                {refusedBids.length > 3 ? ` +${refusedBids.length - 3} more` : ''}
+              </span>
+            </div>
+          </div>
+          <div className="flex items-center gap-2 flex-shrink-0">
+            <button
+              type="button"
+              onClick={() => setFilterEstimator(filterEstimator === 'REFUSED' ? 'ALL' : 'REFUSED')}
+              className={`px-3 py-1 rounded-lg font-bold border transition-colors ${
+                filterEstimator === 'REFUSED'
+                  ? 'bg-rose-700 text-white border-rose-700'
+                  : 'bg-white text-rose-800 border-rose-300 hover:bg-rose-100'
+              }`}
+            >
+              {filterEstimator === 'REFUSED' ? 'Show All Bids' : `Filter Refused (${refusedBids.length})`}
+            </button>
+          </div>
+        </div>
+      )}
 
       {/* Estimator Workload Balance Bar for This Week */}
       <div className="bg-white p-3 rounded-2xl border border-slate-200 shadow-xs grid grid-cols-2 sm:grid-cols-5 lg:grid-cols-10 gap-2 text-xs">
@@ -524,6 +588,9 @@ export default function CalendarScheduleView({
               const dayBids = allDayBids
                 .filter((b) => {
                   if (filterEstimator === 'ALL') return true;
+                  if (filterEstimator === 'REFUSED') {
+                    return b.estimatorStatus === 'declined';
+                  }
                   if (filterEstimator === 'Unassigned') {
                     return (!b.assignedEstimator || b.assignedEstimator === '') && b.estimatorStatus !== 'no_bid';
                   }
@@ -615,8 +682,17 @@ export default function CalendarScheduleView({
                           bid.assignedEstimator === 'Not Bidding' ||
                           bid.assignedEstimator === 'No Bid' ||
                           bid.estimatorStatus === 'no_bid';
+                        const isRefused = bid.estimatorStatus === 'declined';
                         const estColor = getEstimatorColor(isNotBidding ? 'Not Bidding' : bid.assignedEstimator);
                         const isAssigningThis = isAssigningInline[bid.id];
+                        const matchingRules = matchAssignmentRules(assignmentRules, {
+                          estimatorName: bid.assignedEstimator,
+                          contractorName: bid.clientCompany,
+                          senderName: bid.senderName,
+                          originalSenderName: bid.originalSenderName,
+                          subject: bid.subject,
+                          projectName: bid.projectName,
+                        });
 
                         return (
                           <div
@@ -762,15 +838,33 @@ export default function CalendarScheduleView({
                               )}
                             </div>
 
+                            {/* Refused Status & Assignment Rules Overlay */}
+                            {isRefused && (
+                              <div className="mt-2 px-2 py-1 rounded-lg bg-rose-50 border border-rose-300 text-[10px] text-rose-900 space-y-0.5">
+                                <div className="font-bold">
+                                  🚫 Refused by {bid.refusedBy || bid.assignedEstimator || 'Estimator'} — Reassign Needed
+                                </div>
+                                {bid.estimatorNotes && (
+                                  <div className="text-rose-800 line-clamp-2">{bid.estimatorNotes}</div>
+                                )}
+                              </div>
+                            )}
+
+                            {matchingRules.length > 0 && (
+                              <div className="mt-2">
+                                <AssignmentRuleOverlay rules={matchingRules} compact />
+                              </div>
+                            )}
+
                             {/* Estimator Assignment & Inline Selector */}
                             <div className="pt-2 border-t border-slate-100 flex items-center justify-between gap-1 text-[10px]">
                               <div className="flex-1 min-w-0">
                                 <select
-                                  value={isNotBidding ? 'Not Bidding' : (bid.assignedEstimator || '')}
+                                  value={isRefused ? '' : isNotBidding ? 'Not Bidding' : (bid.assignedEstimator || '')}
                                   onChange={(e) => handleInlineAssign(e, bid)}
                                   disabled={isAssigningThis}
                                   style={
-                                    bid.assignedEstimator || isNotBidding
+                                    !isRefused && (bid.assignedEstimator || isNotBidding)
                                       ? {
                                           backgroundColor: estColor.bgTint,
                                           borderColor: estColor.borderColor,
@@ -779,13 +873,15 @@ export default function CalendarScheduleView({
                                       : undefined
                                   }
                                   className={`w-full text-[11px] font-bold py-1 px-1.5 rounded-lg border focus:outline-none focus:ring-1 focus:ring-blue-500 cursor-pointer shadow-2xs ${
-                                    !bid.assignedEstimator && !isNotBidding
+                                    isRefused || (!bid.assignedEstimator && !isNotBidding)
                                       ? 'bg-rose-50 text-rose-800 border-rose-300'
                                       : ''
                                   }`}
                                   title="Quick assign estimator or mark as Not Bidding"
                                 >
-                                  <option value="">⚠️ Assign Estimator...</option>
+                                  <option value="">
+                                    {isRefused ? '🔄 Reassign Estimator...' : '⚠️ Assign Estimator...'}
+                                  </option>
                                   {estimators.map((est) => (
                                     <option key={est} value={est}>
                                       {est}
@@ -932,6 +1028,8 @@ export default function CalendarScheduleView({
         isOpen={showAddBidModal}
         estimators={estimators}
         defaultDueDate={todayYmd}
+        assignmentRules={assignmentRules}
+        existingBids={itbBids}
         onClose={() => setShowAddBidModal(false)}
         onCreated={(bidNumber) => {
           if (onNotify) {
