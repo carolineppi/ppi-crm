@@ -114,10 +114,23 @@ export default function PricingPage() {
   const [cartMarkup, setCartMarkup] = useState<string>('0');
   const [cartNotes, setCartNotes] = useState<string>('');
   const [isSavingCart, setIsSavingCart] = useState(false);
+  const [cartHydrated, setCartHydrated] = useState(false);
+  const [cartTab, setCartTab] = useState<'active' | 'saved'>('active');
+  const [isParsingPdf, setIsParsingPdf] = useState(false);
   const [bidsList, setBidsList] = useState<Array<{ id: string; bid_number: string | null; project_name: string | null; email_subject: string; client_company: string | null; estimator_status: string | null }>>([]);
   const [savedCarts, setSavedCarts] = useState<any[]>([]);
   const [showPrintModal, setShowPrintModal] = useState(false);
   const [bidSwitchedToQuoted, setBidSwitchedToQuoted] = useState(false);
+  const [printSnapshot, setPrintSnapshot] = useState<{
+    quoteTitle: string;
+    projectName?: string | null;
+    contractorName?: string | null;
+    bidNumber?: string | null;
+    markupPercent: number;
+    notes?: string;
+    items: QuoteCartItem[];
+    bidSwitchedToQuoted: boolean;
+  } | null>(null);
   const [bidLinkSearch, setBidLinkSearch] = useState('');
 
   const fetchBooks = useCallback(async () => {
@@ -201,10 +214,48 @@ export default function PricingPage() {
               setCartNotes(d.cart.notes || '');
               setCartItems(Array.isArray(d.cart.items) ? d.cart.items : []);
             }
-          });
+          })
+          .finally(() => setCartHydrated(true));
+      } else {
+        try {
+          const raw = localStorage.getItem('ppi_active_quote_cart_v1');
+          if (raw) {
+            const parsed = JSON.parse(raw);
+            if (parsed && typeof parsed === 'object') {
+              if (parsed.cartId) setCartId(parsed.cartId);
+              if (parsed.linkedBidId) setLinkedBidId(parsed.linkedBidId);
+              if (parsed.cartTitle) setCartTitle(parsed.cartTitle);
+              if (parsed.cartMarkup !== undefined) setCartMarkup(String(parsed.cartMarkup));
+              if (parsed.cartNotes !== undefined) setCartNotes(parsed.cartNotes);
+              if (Array.isArray(parsed.cartItems)) setCartItems(parsed.cartItems);
+            }
+          }
+        } catch {
+          // ignore corrupted localStorage
+        }
+        setCartHydrated(true);
       }
     }
   }, [fetchBooks, fetchGroups, fetchBidsAndCarts]);
+
+  useEffect(() => {
+    if (!cartHydrated || typeof window === 'undefined') return;
+    try {
+      localStorage.setItem(
+        'ppi_active_quote_cart_v1',
+        JSON.stringify({
+          cartId,
+          linkedBidId,
+          cartTitle,
+          cartMarkup,
+          cartNotes,
+          cartItems,
+        })
+      );
+    } catch {
+      // ignore storage quota errors
+    }
+  }, [cartHydrated, cartId, linkedBidId, cartTitle, cartMarkup, cartNotes, cartItems]);
 
   useEffect(() => {
     const t = setTimeout(() => {
@@ -355,8 +406,40 @@ export default function PricingPage() {
     );
   };
 
-  const saveOrPrintCart = async (mode: 'draft' | 'quoted') => {
-    if (cartItems.length === 0) return;
+  const draftCarts = savedCarts.filter((c) => c.status === 'draft');
+
+  const clearActiveCart = () => {
+    setCartId(null);
+    setCartItems([]);
+    setLinkedBidId('');
+    setCartTitle('Job Material Quote');
+    setCartMarkup('0');
+    setCartNotes('');
+    setBidLinkSearch('');
+    if (typeof window !== 'undefined') {
+      try {
+        localStorage.removeItem('ppi_active_quote_cart_v1');
+      } catch {
+        // ignore
+      }
+    }
+  };
+
+  const saveOrPrintCart = async (mode: 'draft' | 'quoted', overrideCart?: any) => {
+    const targetItems: QuoteCartItem[] = overrideCart
+      ? Array.isArray(overrideCart.items)
+        ? overrideCart.items
+        : []
+      : cartItems;
+    if (targetItems.length === 0) return;
+
+    const targetId = overrideCart ? overrideCart.id : cartId;
+    const targetBidId = overrideCart ? overrideCart.bid_request_id || '' : linkedBidId;
+    const targetTitle = overrideCart ? overrideCart.title || 'Job Material Quote' : cartTitle;
+    const targetMarkup = overrideCart ? Number(overrideCart.markup_percent ?? 0) : Number(cartMarkup) || 0;
+    const targetNotes = overrideCart ? overrideCart.notes || '' : cartNotes;
+    const targetBid = bidsList.find((b) => b.id === targetBidId);
+
     setIsSavingCart(true);
     setBidSwitchedToQuoted(false);
     try {
@@ -364,12 +447,12 @@ export default function PricingPage() {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
-          id: cartId,
-          bidRequestId: linkedBidId || null,
-          title: cartTitle,
-          markupPercent: Number(cartMarkup) || 0,
-          notes: cartNotes,
-          items: cartItems,
+          id: targetId,
+          bidRequestId: targetBidId || null,
+          title: targetTitle,
+          markupPercent: targetMarkup,
+          notes: targetNotes,
+          items: targetItems,
           status: mode,
         }),
       });
@@ -378,16 +461,67 @@ export default function PricingPage() {
         setStatusMessage(`Error: ${data.error || 'Failed to save quote cart'}`);
         return;
       }
-      if (data.cart?.id) setCartId(data.cart.id);
-      await fetchBidsAndCarts();
-      if (mode === 'draft') {
-        setStatusMessage('Quote cart saved for later.');
-      } else {
-        setBidSwitchedToQuoted(Boolean(linkedBidId));
+
+      if (mode === 'quoted') {
+        const switched = Boolean(targetBidId);
+        setBidSwitchedToQuoted(switched);
+        setPrintSnapshot({
+          quoteTitle: targetTitle,
+          projectName: targetBid?.project_name || targetBid?.email_subject,
+          contractorName: targetBid?.client_company,
+          bidNumber: targetBid?.bid_number,
+          markupPercent: targetMarkup,
+          notes: targetNotes,
+          items: targetItems,
+          bidSwitchedToQuoted: switched,
+        });
         setShowPrintModal(true);
+      } else {
+        setStatusMessage('Bid saved to Saved Bids and active cart cleared.');
       }
+
+      if (!overrideCart || overrideCart.id === cartId) {
+        clearActiveCart();
+      }
+      await fetchBidsAndCarts();
     } finally {
       setIsSavingCart(false);
+    }
+  };
+
+  const handleUploadRevisionPdf = async (file: File) => {
+    setIsParsingPdf(true);
+    try {
+      const fd = new FormData();
+      fd.append('file', file);
+      const res = await fetch('/api/pricing/parse-quote-pdf', {
+        method: 'POST',
+        body: fd,
+      });
+      const data = await res.json();
+      if (!res.ok) {
+        setStatusMessage(`Error: ${data.error || 'Failed to read PDF quote'}`);
+        return;
+      }
+      const parsedItems: QuoteCartItem[] = Array.isArray(data.items) ? data.items : [];
+      if (parsedItems.length === 0) {
+        setStatusMessage('No line items were detected in that PDF quote.');
+        return;
+      }
+      setCartId(null);
+      setCartTitle(data.title || file.name.replace(/\.pdf$/i, '') || 'Revised Quote');
+      setCartNotes(data.notes || '');
+      setCartItems(parsedItems);
+      if (data.bidNumber) {
+        const matchedBid = bidsList.find(
+          (b) => b.bid_number && b.bid_number.toLowerCase() === String(data.bidNumber).toLowerCase()
+        );
+        if (matchedBid) setLinkedBidId(matchedBid.id);
+      }
+      setCartTab('active');
+      setStatusMessage(`Loaded ${parsedItems.length} line item(s) from PDF into the active cart for revision.`);
+    } finally {
+      setIsParsingPdf(false);
     }
   };
 
@@ -1015,35 +1149,122 @@ export default function PricingPage() {
             </div>
 
             <div className="flex-1 overflow-y-auto p-5 space-y-4 text-xs">
-              {/* Load Saved Cart */}
-              {savedCarts.length > 0 && (
-                <div>
-                  <label className="block text-[10px] font-bold uppercase text-slate-500 mb-1">
-                    Load Saved Quote Cart
-                  </label>
-                  <select
-                    value={cartId || ''}
-                    onChange={(e) => {
-                      const found = savedCarts.find((c) => c.id === e.target.value);
-                      if (!found) return;
-                      setCartId(found.id);
-                      setLinkedBidId(found.bid_request_id || '');
-                      setCartTitle(found.title || 'Job Material Quote');
-                      setCartMarkup(String(found.markup_percent ?? 0));
-                      setCartNotes(found.notes || '');
-                      setCartItems(Array.isArray(found.items) ? found.items : []);
-                    }}
-                    className="w-full px-2.5 py-1.5 rounded-lg border border-slate-300 bg-slate-50 font-semibold"
+              {/* Active Cart vs Saved Bids Tabs & PDF Revision Upload */}
+              <div className="flex items-center justify-between gap-2 pb-2 border-b border-slate-200">
+                <div className="flex items-center gap-1 bg-slate-100 p-1 rounded-lg">
+                  <button
+                    type="button"
+                    onClick={() => setCartTab('active')}
+                    className={`px-2.5 py-1 rounded-md text-[11px] font-bold transition ${
+                      cartTab === 'active'
+                        ? 'bg-white text-slate-900 shadow-sm'
+                        : 'text-slate-600 hover:text-slate-900'
+                    }`}
                   >
-                    <option value="">-- Current / New Cart --</option>
-                    {savedCarts.map((c) => (
-                      <option key={c.id} value={c.id}>
-                        {c.title} ({Array.isArray(c.items) ? c.items.length : 0} lines • {c.status})
-                      </option>
-                    ))}
-                  </select>
+                    Active Cart ({cartItems.reduce((sum, it) => sum + it.quantity, 0)})
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => setCartTab('saved')}
+                    className={`px-2.5 py-1 rounded-md text-[11px] font-bold transition ${
+                      cartTab === 'saved'
+                        ? 'bg-white text-slate-900 shadow-sm'
+                        : 'text-slate-600 hover:text-slate-900'
+                    }`}
+                  >
+                    Saved Bids ({draftCarts.length})
+                  </button>
                 </div>
-              )}
+                {cartTab === 'active' && (cartItems.length > 0 || cartId || linkedBidId) && (
+                  <button
+                    type="button"
+                    onClick={clearActiveCart}
+                    className="text-[11px] font-semibold text-rose-600 hover:text-rose-700"
+                  >
+                    Clear Cart
+                  </button>
+                )}
+              </div>
+
+              <label className="flex items-center justify-center gap-2 px-3 py-2 rounded-xl border border-dashed border-slate-300 bg-slate-50 hover:bg-slate-100 text-slate-700 font-semibold cursor-pointer transition">
+                <Upload className="w-3.5 h-3.5 text-slate-500" />
+                <span>{isParsingPdf ? 'Reading Printed PDF Quote...' : 'Upload Printed PDF Bid for Revision'}</span>
+                <input
+                  type="file"
+                  accept=".pdf,application/pdf"
+                  disabled={isParsingPdf}
+                  className="hidden"
+                  onChange={(e) => {
+                    const file = e.target.files?.[0];
+                    e.target.value = '';
+                    if (file) handleUploadRevisionPdf(file);
+                  }}
+                />
+              </label>
+
+              {cartTab === 'saved' ? (
+                <div className="space-y-2.5">
+                  {draftCarts.length === 0 ? (
+                    <div className="p-6 text-center text-slate-400 border border-dashed border-slate-300 rounded-xl">
+                      No saved draft bids yet. Save an active cart to hold it here, or print a saved bid to mark it quoted and remove it from this list.
+                    </div>
+                  ) : (
+                    draftCarts.map((c) => {
+                      const itemsArr: QuoteCartItem[] = Array.isArray(c.items) ? c.items : [];
+                      const bidObj = bidsList.find((b) => b.id === c.bid_request_id);
+                      const costSum = itemsArr.reduce((sum, it) => sum + it.unitCost * it.quantity, 0);
+                      const quoteSum = costSum * (1 + (Number(c.markup_percent ?? 0) || 0) / 100);
+                      return (
+                        <div
+                          key={c.id}
+                          className="p-3 rounded-xl border border-slate-200 bg-slate-50 space-y-2"
+                        >
+                          <div className="flex items-start justify-between gap-2">
+                            <div className="min-w-0">
+                              <div className="font-bold text-slate-900 truncate">{c.title}</div>
+                              <div className="text-[11px] text-slate-500">
+                                {itemsArr.length} lines • Quote Total: <strong>{formatCurrency(quoteSum)}</strong>
+                              </div>
+                              {bidObj && (
+                                <div className="text-[11px] text-emerald-700 font-semibold truncate mt-0.5">
+                                  Bid {bidObj.bid_number ? `#${bidObj.bid_number}` : ''} — {bidObj.project_name || bidObj.email_subject}
+                                </div>
+                              )}
+                            </div>
+                          </div>
+                          <div className="grid grid-cols-2 gap-2">
+                            <button
+                              type="button"
+                              onClick={() => {
+                                setCartId(c.id);
+                                setLinkedBidId(c.bid_request_id || '');
+                                setCartTitle(c.title || 'Job Material Quote');
+                                setCartMarkup(String(c.markup_percent ?? 0));
+                                setCartNotes(c.notes || '');
+                                setCartItems(itemsArr);
+                                setCartTab('active');
+                              }}
+                              className="px-2.5 py-1.5 rounded-lg bg-white hover:bg-slate-100 border border-slate-300 text-slate-800 text-[11px] font-bold"
+                            >
+                              Load into Cart
+                            </button>
+                            <button
+                              type="button"
+                              disabled={isSavingCart || itemsArr.length === 0}
+                              onClick={() => saveOrPrintCart('quoted', c)}
+                              className="px-2.5 py-1.5 rounded-lg bg-emerald-600 hover:bg-emerald-500 text-white text-[11px] font-bold flex items-center justify-center gap-1 disabled:opacity-50"
+                            >
+                              <Printer className="w-3 h-3" />
+                              <span>Print / PDF</span>
+                            </button>
+                          </div>
+                        </div>
+                      );
+                    })
+                  )}
+                </div>
+              ) : (
+                <>
 
               {/* Link to Job / Bid (Searchable by Bid # or Name) */}
               <div className="space-y-1.5">
@@ -1233,37 +1454,41 @@ export default function PricingPage() {
                   className="w-full px-2.5 py-1.5 rounded-lg border border-slate-300"
                 />
               </div>
+                </>
+              )}
             </div>
 
             {/* Cart Footer */}
-            <div className="p-4 border-t border-slate-200 bg-slate-50 space-y-3">
-              <div className="flex items-center justify-between text-xs">
-                <span className="text-slate-600">Material Cost: {formatCurrency(cartSubtotalCost)}</span>
-                <span className="text-sm font-black text-slate-900">
-                  Quote Total: {formatCurrency(cartSubtotalCost * (1 + (Number(cartMarkup) || 0) / 100))}
-                </span>
+            {cartTab === 'active' && (
+              <div className="p-4 border-t border-slate-200 bg-slate-50 space-y-3">
+                <div className="flex items-center justify-between text-xs">
+                  <span className="text-slate-600">Material Cost: {formatCurrency(cartSubtotalCost)}</span>
+                  <span className="text-sm font-black text-slate-900">
+                    Quote Total: {formatCurrency(cartSubtotalCost * (1 + (Number(cartMarkup) || 0) / 100))}
+                  </span>
+                </div>
+                <div className="grid grid-cols-2 gap-2">
+                  <button
+                    type="button"
+                    disabled={isSavingCart || cartItems.length === 0}
+                    onClick={() => saveOrPrintCart('draft')}
+                    className="px-3 py-2 rounded-xl bg-white hover:bg-slate-100 border border-slate-300 text-slate-800 text-xs font-bold flex items-center justify-center gap-1.5 disabled:opacity-50"
+                  >
+                    <Save className="w-3.5 h-3.5" />
+                    <span>Save for Later</span>
+                  </button>
+                  <button
+                    type="button"
+                    disabled={isSavingCart || cartItems.length === 0}
+                    onClick={() => saveOrPrintCart('quoted')}
+                    className="px-3 py-2 rounded-xl bg-emerald-600 hover:bg-emerald-500 text-white text-xs font-bold flex items-center justify-center gap-1.5 disabled:opacity-50"
+                  >
+                    <Printer className="w-3.5 h-3.5" />
+                    <span>Print / PDF Quote</span>
+                  </button>
+                </div>
               </div>
-              <div className="grid grid-cols-2 gap-2">
-                <button
-                  type="button"
-                  disabled={isSavingCart || cartItems.length === 0}
-                  onClick={() => saveOrPrintCart('draft')}
-                  className="px-3 py-2 rounded-xl bg-white hover:bg-slate-100 border border-slate-300 text-slate-800 text-xs font-bold flex items-center justify-center gap-1.5 disabled:opacity-50"
-                >
-                  <Save className="w-3.5 h-3.5" />
-                  <span>Save for Later</span>
-                </button>
-                <button
-                  type="button"
-                  disabled={isSavingCart || cartItems.length === 0}
-                  onClick={() => saveOrPrintCart('quoted')}
-                  className="px-3 py-2 rounded-xl bg-emerald-600 hover:bg-emerald-500 text-white text-xs font-bold flex items-center justify-center gap-1.5 disabled:opacity-50"
-                >
-                  <Printer className="w-3.5 h-3.5" />
-                  <span>Print / PDF Quote</span>
-                </button>
-              </div>
-            </div>
+            )}
           </div>
         </div>
       )}
@@ -1271,14 +1496,14 @@ export default function PricingPage() {
       <QuotePrintModal
         isOpen={showPrintModal}
         onClose={() => setShowPrintModal(false)}
-        quoteTitle={cartTitle}
-        projectName={linkedBid?.project_name || linkedBid?.email_subject}
-        contractorName={linkedBid?.client_company}
-        bidNumber={linkedBid?.bid_number}
-        markupPercent={Number(cartMarkup) || 0}
-        notes={cartNotes}
-        items={cartItems}
-        bidSwitchedToQuoted={bidSwitchedToQuoted}
+        quoteTitle={printSnapshot?.quoteTitle ?? cartTitle}
+        projectName={printSnapshot?.projectName ?? (linkedBid?.project_name || linkedBid?.email_subject)}
+        contractorName={printSnapshot?.contractorName ?? linkedBid?.client_company}
+        bidNumber={printSnapshot?.bidNumber ?? linkedBid?.bid_number}
+        markupPercent={printSnapshot?.markupPercent ?? (Number(cartMarkup) || 0)}
+        notes={printSnapshot?.notes ?? cartNotes}
+        items={printSnapshot?.items ?? cartItems}
+        bidSwitchedToQuoted={printSnapshot?.bidSwitchedToQuoted ?? bidSwitchedToQuoted}
       />
     </div>
   );
