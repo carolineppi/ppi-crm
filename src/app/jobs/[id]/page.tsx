@@ -22,7 +22,13 @@ import {
   Trash2,
   MessageSquarePlus,
   StickyNote,
+  AlertTriangle,
+  Sun,
+  Moon,
 } from 'lucide-react';
+import InstallCalendarMicroView, {
+  CalendarDaySummary,
+} from '@/components/InstallCalendarMicroView';
 
 export default function JobViewerPage() {
   const params = useParams<{ id: string }>();
@@ -37,8 +43,18 @@ export default function JobViewerPage() {
   const [siteAvailableRange, setSiteAvailableRange] = useState('');
   const [requestedInstallDate, setRequestedInstallDate] = useState('');
   const [installAvailabilityNotes, setInstallAvailabilityNotes] = useState('');
+  const [siteOpenDays, setSiteOpenDays] = useState<string[]>(['Mon', 'Tue', 'Wed', 'Thu', 'Fri']);
+  const [workShift, setWorkShift] = useState<'Day' | 'Night' | 'Flexible'>('Day');
+  const [isPriority, setIsPriority] = useState(false);
+  const [priorityReason, setPriorityReason] = useState('');
+  const [estimatedDurationDays, setEstimatedDurationDays] = useState('1');
+  const [crewSizeNeeded, setCrewSizeNeeded] = useState('');
+  const [installTickets, setInstallTickets] = useState<any[]>([]);
+  const [calendarSummary, setCalendarSummary] = useState<Record<string, CalendarDaySummary>>({});
+  const [defaultDailyLimit, setDefaultDailyLimit] = useState<number>(3);
   const [isSavingSchedule, setIsSavingSchedule] = useState(false);
   const [scheduleSavedMsg, setScheduleSavedMsg] = useState<string | null>(null);
+  const [scheduleErrorMsg, setScheduleErrorMsg] = useState<string | null>(null);
 
   // Contacts state
   type JobContact = {
@@ -233,34 +249,108 @@ export default function JobViewerPage() {
     }
   };
 
+  const loadInstallCalendar = async () => {
+    try {
+      const res = await fetch('/api/install-tickets');
+      const data = await res.json();
+      if (res.ok) {
+        setCalendarSummary(data.calendarSummary || {});
+        setDefaultDailyLimit(data.defaultDailyLimit ?? 3);
+        const jobTickets = (data.tickets || []).filter((t: any) => t.job_id === jobId);
+        setInstallTickets(jobTickets);
+      }
+    } catch {
+      // ignore
+    }
+  };
+
   useEffect(() => {
     loadJob();
+    if (jobId) loadInstallCalendar();
   }, [jobId]);
+
+  const toggleOpenDay = (day: string) => {
+    setSiteOpenDays((prev) =>
+      prev.includes(day) ? prev.filter((d) => d !== day) : [...prev, day]
+    );
+  };
+
+  const selectedDayInfo = requestedInstallDate
+    ? calendarSummary[requestedInstallDate]
+    : undefined;
+  const selectedDayConfirmed = selectedDayInfo?.confirmedCount ?? 0;
+  const selectedDayLimit = selectedDayInfo?.limit ?? defaultDailyLimit;
+  const isRequestedDayFull =
+    Boolean(requestedInstallDate) && selectedDayConfirmed >= selectedDayLimit;
 
   const handleSaveSchedule = async (requestInstall: boolean) => {
     if (!jobId) return;
-    setIsSavingSchedule(true);
     setScheduleSavedMsg(null);
-    try {
-      const res = await fetch(`/api/jobs/${jobId}`, {
-        method: 'PATCH',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          materialEta: materialEta || null,
-          siteAvailableRange: siteAvailableRange || null,
-          requestedInstallDate: requestedInstallDate || null,
-          installAvailabilityNotes: installAvailabilityNotes || null,
-          installRequestStatus: requestInstall ? 'requested' : job?.install_request_status,
-        }),
-      });
-      const data = await res.json();
-      if (res.ok && data.job) {
-        setJob(data.job);
-        setScheduleSavedMsg(
-          requestInstall
-            ? 'Install scheduling request saved for the Installation Department!'
-            : 'Material ETA & site availability notes saved.'
+    setScheduleErrorMsg(null);
+
+    if (requestInstall) {
+      if (!requestedInstallDate) {
+        setScheduleErrorMsg('Please select a Requested Install Date on the calendar.');
+        return;
+      }
+      if ((isPriority || isRequestedDayFull) && !priorityReason.trim()) {
+        setScheduleErrorMsg(
+          isRequestedDayFull
+            ? 'This day is at capacity. Please explain why this job must be scheduled on this day.'
+            : 'Please provide a reason when flagging this ticket as Important / Priority.'
         );
+        return;
+      }
+    }
+
+    setIsSavingSchedule(true);
+    try {
+      if (!requestInstall) {
+        const res = await fetch(`/api/jobs/${jobId}`, {
+          method: 'PATCH',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            materialEta: materialEta || null,
+            siteAvailableRange: siteAvailableRange || null,
+            requestedInstallDate: requestedInstallDate || null,
+            installAvailabilityNotes: installAvailabilityNotes || null,
+          }),
+        });
+        const data = await res.json();
+        if (res.ok && data.job) {
+          setJob(data.job);
+          setScheduleSavedMsg('Material ETA & site availability notes saved.');
+        }
+      } else {
+        const res = await fetch('/api/install-tickets', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            jobId,
+            materialEta: materialEta || null,
+            siteAvailableRange: siteAvailableRange || null,
+            siteOpenDays,
+            workShift,
+            requestedInstallDate,
+            isPriority: isPriority || isRequestedDayFull,
+            priorityReason: priorityReason.trim() || null,
+            siteAccessNotes: installAvailabilityNotes || null,
+            estimatedDurationDays: Number(estimatedDurationDays) || 1,
+            crewSizeNeeded: crewSizeNeeded ? Number(crewSizeNeeded) : null,
+            submittedBy: job?.project_manager || 'PM',
+          }),
+        });
+        const data = await res.json();
+        if (!res.ok) {
+          setScheduleErrorMsg(data.error || 'Failed to submit install ticket.');
+          return;
+        }
+        setScheduleSavedMsg(
+          'Installation ticket sent to the Install Department Dashboard!'
+        );
+        setPriorityReason('');
+        setIsPriority(false);
+        await Promise.all([loadJob(), loadInstallCalendar()]);
       }
     } finally {
       setIsSavingSchedule(false);
@@ -560,24 +650,73 @@ export default function JobViewerPage() {
           </div>
 
           {/* Install Department Coordination */}
-          <div className="bg-white rounded-2xl border border-slate-200 p-5 shadow-sm space-y-3 text-xs">
-            <div className="flex items-center justify-between">
+          <div className="bg-white rounded-2xl border border-slate-200 p-5 shadow-sm space-y-3.5 text-xs">
+            <div className="flex items-center justify-between gap-2">
               <h2 className="text-sm font-black text-slate-900 flex items-center gap-1.5">
                 <CalendarClock className="w-4 h-4 text-blue-600" />
-                <span>Install Dept. Scheduling</span>
+                <span>Install Dept. Ticket</span>
               </h2>
-              <span
-                className={`px-2 py-0.5 rounded-full text-[10px] font-bold uppercase ${
-                  job.install_request_status === 'scheduled'
-                    ? 'bg-emerald-100 text-emerald-800'
-                    : job.install_request_status === 'requested'
-                    ? 'bg-amber-100 text-amber-800'
-                    : 'bg-slate-100 text-slate-600'
-                }`}
-              >
-                {job.install_request_status.replace('_', ' ')}
-              </span>
+              <div className="flex items-center gap-2">
+                <span
+                  className={`px-2 py-0.5 rounded-full text-[10px] font-bold uppercase ${
+                    job.install_request_status === 'confirmed' ||
+                    job.install_request_status === 'scheduled'
+                      ? 'bg-emerald-100 text-emerald-800'
+                      : job.install_request_status === 'requested'
+                      ? 'bg-amber-100 text-amber-800'
+                      : 'bg-slate-100 text-slate-600'
+                  }`}
+                >
+                  {job.install_request_status.replace('_', ' ')}
+                </span>
+                <Link
+                  href="/install"
+                  className="text-[11px] font-bold text-indigo-700 hover:underline"
+                >
+                  Install Board →
+                </Link>
+              </div>
             </div>
+
+            {/* Active / Latest Ticket Summary */}
+            {installTickets.length > 0 && (
+              <div className="space-y-2">
+                {installTickets.slice(0, 2).map((t) => (
+                  <div
+                    key={t.id}
+                    className={`p-2.5 rounded-xl border text-[11px] space-y-1 ${
+                      t.status === 'confirmed'
+                        ? 'bg-emerald-50 border-emerald-200 text-emerald-900'
+                        : 'bg-amber-50 border-amber-200 text-amber-900'
+                    }`}
+                  >
+                    <div className="flex items-center justify-between font-bold">
+                      <span>
+                        {t.status === 'confirmed'
+                          ? `Confirmed: ${t.confirmed_install_date || t.requested_install_date}`
+                          : `Requested: ${t.requested_install_date}`}
+                      </span>
+                      <span className="uppercase text-[10px]">
+                        {t.work_shift} • {t.status}
+                      </span>
+                    </div>
+                    {t.assigned_crew && (
+                      <div>
+                        Crew: <strong>{t.assigned_crew}</strong>
+                      </div>
+                    )}
+                    {t.install_dept_notes && (
+                      <div className="italic">Install Dept: {t.install_dept_notes}</div>
+                    )}
+                    {t.is_priority && t.priority_reason && (
+                      <div className="text-rose-800 font-semibold">
+                        Priority Note: {t.priority_reason}
+                      </div>
+                    )}
+                  </div>
+                ))}
+              </div>
+            )}
 
             {scheduleSavedMsg && (
               <div className="p-2.5 rounded-lg bg-emerald-50 border border-emerald-200 text-emerald-800 font-semibold flex items-center gap-1.5">
@@ -586,41 +725,169 @@ export default function JobViewerPage() {
               </div>
             )}
 
-            <div>
-              <label className="block text-[10px] font-bold uppercase text-slate-500 mb-1">
-                Products Expected By (Material ETA)
-              </label>
-              <input
-                type="date"
-                value={materialEta}
-                onChange={(e) => setMaterialEta(e.target.value)}
-                className="w-full px-2.5 py-1.5 rounded-lg border border-slate-300"
-              />
+            {scheduleErrorMsg && (
+              <div className="p-2.5 rounded-lg bg-rose-50 border border-rose-200 text-rose-800 font-semibold flex items-center gap-1.5">
+                <AlertTriangle className="w-4 h-4 flex-shrink-0" />
+                <span>{scheduleErrorMsg}</span>
+              </div>
+            )}
+
+            {/* Micro-View of Install Calendar */}
+            <InstallCalendarMicroView
+              calendarSummary={calendarSummary}
+              defaultDailyLimit={defaultDailyLimit}
+              selectedDate={requestedInstallDate}
+              onSelectDate={(d) => setRequestedInstallDate(d)}
+              compact={true}
+            />
+
+            <div className="grid grid-cols-2 gap-2">
+              <div>
+                <label className="block text-[10px] font-bold uppercase text-slate-500 mb-1">
+                  Material ETA
+                </label>
+                <input
+                  type="date"
+                  value={materialEta}
+                  onChange={(e) => setMaterialEta(e.target.value)}
+                  className="w-full px-2.5 py-1.5 rounded-lg border border-slate-300"
+                />
+              </div>
+              <div>
+                <label className="block text-[10px] font-bold uppercase text-slate-500 mb-1">
+                  Desired Install Date
+                </label>
+                <input
+                  type="date"
+                  value={requestedInstallDate}
+                  onChange={(e) => setRequestedInstallDate(e.target.value)}
+                  className="w-full px-2.5 py-1.5 rounded-lg border border-slate-300"
+                />
+              </div>
             </div>
 
+            {/* Day or Night Work */}
             <div>
               <label className="block text-[10px] font-bold uppercase text-slate-500 mb-1">
-                Job Site Available Date Range
+                Work Shift
               </label>
-              <input
-                type="text"
-                placeholder="e.g. 11/24 - 12/05"
-                value={siteAvailableRange}
-                onChange={(e) => setSiteAvailableRange(e.target.value)}
-                className="w-full px-2.5 py-1.5 rounded-lg border border-slate-300"
-              />
+              <div className="grid grid-cols-3 gap-1.5">
+                {(['Day', 'Night', 'Flexible'] as const).map((shift) => (
+                  <button
+                    key={shift}
+                    type="button"
+                    onClick={() => setWorkShift(shift)}
+                    className={`py-1.5 px-2 rounded-lg border font-bold flex items-center justify-center gap-1 transition ${
+                      workShift === shift
+                        ? shift === 'Night'
+                          ? 'bg-indigo-900 text-white border-indigo-900'
+                          : 'bg-blue-600 text-white border-blue-600'
+                        : 'bg-white text-slate-700 border-slate-300 hover:bg-slate-50'
+                    }`}
+                  >
+                    {shift === 'Day' && <Sun className="w-3 h-3" />}
+                    {shift === 'Night' && <Moon className="w-3 h-3" />}
+                    <span>{shift}</span>
+                  </button>
+                ))}
+              </div>
             </div>
 
+            {/* Site Open Days */}
             <div>
               <label className="block text-[10px] font-bold uppercase text-slate-500 mb-1">
-                Requested Install Date (Install Dept Makes Final Call)
+                Days Site Is Open
               </label>
-              <input
-                type="date"
-                value={requestedInstallDate}
-                onChange={(e) => setRequestedInstallDate(e.target.value)}
-                className="w-full px-2.5 py-1.5 rounded-lg border border-slate-300"
-              />
+              <div className="flex flex-wrap gap-1">
+                {['Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat', 'Sun'].map((d) => {
+                  const active = siteOpenDays.includes(d);
+                  return (
+                    <button
+                      key={d}
+                      type="button"
+                      onClick={() => toggleOpenDay(d)}
+                      className={`px-2 py-1 rounded-md border text-[11px] font-bold transition ${
+                        active
+                          ? 'bg-teal-600 text-white border-teal-600'
+                          : 'bg-white text-slate-500 border-slate-300 hover:bg-slate-50'
+                      }`}
+                    >
+                      {d}
+                    </button>
+                  );
+                })}
+              </div>
+            </div>
+
+            <div className="grid grid-cols-3 gap-2">
+              <div className="col-span-1">
+                <label className="block text-[10px] font-bold uppercase text-slate-500 mb-1">
+                  Est. Days
+                </label>
+                <input
+                  type="number"
+                  min={1}
+                  max={30}
+                  value={estimatedDurationDays}
+                  onChange={(e) => setEstimatedDurationDays(e.target.value)}
+                  className="w-full px-2 py-1.5 rounded-lg border border-slate-300"
+                />
+              </div>
+              <div className="col-span-2">
+                <label className="block text-[10px] font-bold uppercase text-slate-500 mb-1">
+                  Site Available Window
+                </label>
+                <input
+                  type="text"
+                  placeholder="e.g. 11/24 - 12/05"
+                  value={siteAvailableRange}
+                  onChange={(e) => setSiteAvailableRange(e.target.value)}
+                  className="w-full px-2.5 py-1.5 rounded-lg border border-slate-300"
+                />
+              </div>
+            </div>
+
+            {/* Priority / Important Flag */}
+            <div
+              className={`p-2.5 rounded-xl border space-y-2 ${
+                isPriority || isRequestedDayFull
+                  ? 'bg-rose-50 border-rose-200'
+                  : 'bg-slate-50 border-slate-200'
+              }`}
+            >
+              <label className="flex items-start gap-2 cursor-pointer">
+                <input
+                  type="checkbox"
+                  checked={isPriority || isRequestedDayFull}
+                  disabled={isRequestedDayFull}
+                  onChange={(e) => setIsPriority(e.target.checked)}
+                  className="mt-0.5"
+                />
+                <span className="font-bold text-slate-800 leading-tight">
+                  Flag as Important / Priority Request
+                  {isRequestedDayFull && (
+                    <span className="block text-[10px] text-rose-700 font-semibold mt-0.5">
+                      Selected day is full ({selectedDayConfirmed}/{selectedDayLimit}). A reason is
+                      required so Install Dept can consider moving things around.
+                    </span>
+                  )}
+                </span>
+              </label>
+
+              {(isPriority || isRequestedDayFull) && (
+                <div>
+                  <label className="block text-[10px] font-bold uppercase text-rose-700 mb-1">
+                    Why Must Job Be Scheduled This Day? *
+                  </label>
+                  <textarea
+                    rows={2}
+                    placeholder="Explain deadline, GC penalty, inspection date, or site constraint..."
+                    value={priorityReason}
+                    onChange={(e) => setPriorityReason(e.target.value)}
+                    className="w-full px-2.5 py-1.5 rounded-lg border border-rose-300 bg-white"
+                  />
+                </div>
+              )}
             </div>
 
             <div>
@@ -629,7 +896,7 @@ export default function JobViewerPage() {
               </label>
               <textarea
                 rows={2}
-                placeholder="e.g. Site only available Tue/Thu; GC requires 48hr notice..."
+                placeholder="e.g. GC requires 48hr notice, badge check-in at loading dock..."
                 value={installAvailabilityNotes}
                 onChange={(e) => setInstallAvailabilityNotes(e.target.value)}
                 className="w-full px-2.5 py-1.5 rounded-lg border border-slate-300"
@@ -643,16 +910,20 @@ export default function JobViewerPage() {
                 onClick={() => handleSaveSchedule(false)}
                 className="px-3 py-2 rounded-xl border border-slate-300 bg-white hover:bg-slate-50 font-bold text-slate-700"
               >
-                Save Notes
+                Save Draft
               </button>
               <button
                 type="button"
                 disabled={isSavingSchedule}
                 onClick={() => handleSaveSchedule(true)}
-                className="px-3 py-2 rounded-xl bg-blue-600 hover:bg-blue-500 text-white font-bold flex items-center justify-center gap-1"
+                className={`px-3 py-2 rounded-xl text-white font-bold flex items-center justify-center gap-1 ${
+                  isPriority || isRequestedDayFull
+                    ? 'bg-rose-600 hover:bg-rose-500'
+                    : 'bg-blue-600 hover:bg-blue-500'
+                }`}
               >
                 <Send className="w-3.5 h-3.5" />
-                <span>Request Install</span>
+                <span>Send Install Ticket</span>
               </button>
             </div>
           </div>
