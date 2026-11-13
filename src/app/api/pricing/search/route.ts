@@ -19,7 +19,9 @@ export async function GET(request: NextRequest) {
       query = query.eq('manufacturer', manufacturer);
     }
 
-    if (equivalentGroup) {
+    if (equivalentGroup === '__UNTAGGED__') {
+      query = query.is('equivalent_group', null);
+    } else if (equivalentGroup) {
       query = query.eq('equivalent_group', equivalentGroup);
     }
 

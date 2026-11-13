@@ -4,6 +4,7 @@ import {
   parseExcelPriceBook,
   parsePdfPriceBook,
 } from '@/lib/pricing/price-book-parser';
+import { classifyPreliminaryGroup } from '@/lib/pricing/auto-tagger';
 
 export async function POST(request: NextRequest) {
   try {
@@ -74,6 +75,7 @@ export async function POST(request: NextRequest) {
       shipping_flat_rate: item.shippingFlatRate ?? null,
       availability: item.availability || null,
       effective_date: effectiveDate,
+      equivalent_group: classifyPreliminaryGroup(item),
     }));
 
     const chunkSize = 500;

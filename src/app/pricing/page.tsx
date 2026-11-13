@@ -15,6 +15,7 @@ import {
   FileSpreadsheet,
   AlertCircle,
   RefreshCw,
+  Sparkles,
 } from 'lucide-react';
 
 interface PriceBook {
@@ -88,10 +89,22 @@ export default function PricingPage() {
   const [editingEquivItemId, setEditingEquivItemId] = useState<string | null>(null);
   const [equivInput, setEquivInput] = useState('');
 
+  // Auto-tagging & category groups
+  const [equivGroups, setEquivGroups] = useState<Array<{ group: string; count: number }>>([]);
+  const [untaggedCount, setUntaggedCount] = useState<number>(0);
+  const [isAutoTagging, setIsAutoTagging] = useState(false);
+
   const fetchBooks = useCallback(async () => {
     const res = await fetch('/api/pricing/books');
     const data = await res.json();
     if (data.books) setBooks(data.books);
+  }, []);
+
+  const fetchGroups = useCallback(async () => {
+    const res = await fetch('/api/pricing/auto-tag');
+    const data = await res.json();
+    if (data.groups) setEquivGroups(data.groups);
+    if (typeof data.untaggedCount === 'number') setUntaggedCount(data.untaggedCount);
   }, []);
 
   const fetchItems = useCallback(async (q: string, mfg: string, equiv: string) => {
@@ -113,7 +126,8 @@ export default function PricingPage() {
 
   useEffect(() => {
     fetchBooks();
-  }, [fetchBooks]);
+    fetchGroups();
+  }, [fetchBooks, fetchGroups]);
 
   useEffect(() => {
     const t = setTimeout(() => {
@@ -154,6 +168,7 @@ export default function PricingPage() {
       setUploadMultiplier('1.0');
       setShowUpload(false);
       await fetchBooks();
+      await fetchGroups();
       await fetchItems(searchQuery, selectedMfg, selectedEquivGroup);
     } finally {
       setIsUploading(false);
@@ -186,7 +201,32 @@ export default function PricingPage() {
     if (res.ok) {
       setStatusMessage(`Removed ${book.book_name}.`);
       await fetchBooks();
+      await fetchGroups();
       await fetchItems(searchQuery, selectedMfg, selectedEquivGroup);
+    }
+  };
+
+  const handleAutoTag = async () => {
+    setIsAutoTagging(true);
+    setStatusMessage(null);
+    try {
+      const res = await fetch('/api/pricing/auto-tag', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ useAi: true, aiLimit: 120 }),
+      });
+      const data = await res.json();
+      if (!res.ok) {
+        setStatusMessage(`Error: ${data.error || 'Auto-tagging failed'}`);
+        return;
+      }
+      setStatusMessage(
+        `Preliminary tagging complete: ${data.ruleTaggedCount} rule-tagged, ${data.aiTaggedCount} AI-tagged (${data.remainingUntaggedCount} untagged remaining).`
+      );
+      await fetchGroups();
+      await fetchItems(searchQuery, selectedMfg, selectedEquivGroup);
+    } finally {
+      setIsAutoTagging(false);
     }
   };
 
@@ -199,6 +239,7 @@ export default function PricingPage() {
     if (res.ok) {
       setEditingEquivItemId(null);
       setEquivInput('');
+      await fetchGroups();
       await fetchItems(searchQuery, selectedMfg, selectedEquivGroup);
     }
   };
@@ -236,6 +277,16 @@ export default function PricingPage() {
             >
               Estimator Portal
             </Link>
+            <button
+              type="button"
+              onClick={handleAutoTag}
+              disabled={isAutoTagging}
+              className="px-3.5 py-1.5 rounded-xl bg-indigo-600 hover:bg-indigo-500 disabled:opacity-50 text-white text-xs font-bold flex items-center gap-1.5 shadow-sm"
+              title="Run AI-assisted granular preliminary tagging on untagged items"
+            >
+              {isAutoTagging ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <Sparkles className="w-3.5 h-3.5" />}
+              <span>{isAutoTagging ? 'Tagging...' : `AI Auto-Tag (${untaggedCount})`}</span>
+            </button>
             <button
               type="button"
               onClick={() => setShowUpload((prev) => !prev)}
@@ -455,11 +506,54 @@ export default function PricingPage() {
                   onClick={() => setSelectedEquivGroup('')}
                   className="px-2.5 py-1.5 rounded-lg text-xs font-bold bg-indigo-100 text-indigo-800 border border-indigo-300"
                 >
-                  Group: {selectedEquivGroup} ✕
+                  Group: {selectedEquivGroup === '__UNTAGGED__' ? 'Untagged' : selectedEquivGroup} ✕
                 </button>
               )}
             </div>
           </div>
+
+          {/* Granular Category / Equivalent Group Picker */}
+          {(equivGroups.length > 0 || untaggedCount > 0) && (
+            <div className="flex items-center gap-2 flex-wrap pt-1 border-t border-slate-100">
+              <span className="text-[11px] font-bold text-slate-500 uppercase tracking-wider">
+                Category Group:
+              </span>
+              <select
+                value={selectedEquivGroup}
+                onChange={(e) => setSelectedEquivGroup(e.target.value)}
+                className="px-2.5 py-1 rounded-lg border border-slate-300 bg-slate-50 text-xs font-semibold text-slate-800 max-w-xs"
+              >
+                <option value="">All Categories</option>
+                {untaggedCount > 0 && (
+                  <option value="__UNTAGGED__">Untagged Only ({untaggedCount})</option>
+                )}
+                {equivGroups.map((g) => (
+                  <option key={g.group} value={g.group}>
+                    {g.group} ({g.count})
+                  </option>
+                ))}
+              </select>
+
+              <div className="flex items-center gap-1 flex-wrap">
+                {equivGroups.slice(0, 8).map((g) => (
+                  <button
+                    key={g.group}
+                    type="button"
+                    onClick={() =>
+                      setSelectedEquivGroup(selectedEquivGroup === g.group ? '' : g.group)
+                    }
+                    className={`px-2 py-0.5 rounded-full text-[10px] font-bold border transition-colors ${
+                      selectedEquivGroup === g.group
+                        ? 'bg-indigo-600 text-white border-indigo-600'
+                        : 'bg-indigo-50 text-indigo-700 border-indigo-200 hover:bg-indigo-100'
+                    }`}
+                  >
+                    {g.group} ({g.count})
+                  </button>
+                ))}
+              </div>
+            </div>
+          )}
 
           <div className="flex items-center justify-between text-[11px] text-slate-500">
             <span className="flex items-center gap-1 font-medium">
