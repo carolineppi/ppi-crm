@@ -28,6 +28,9 @@ export async function PATCH(
       googleDriveFolderUrl: 'google_drive_folder_url',
       status: 'status',
       notes: 'notes',
+      scopePdfFilename: 'scope_pdf_filename',
+      scopePdfUrl: 'scope_pdf_url',
+      lineItems: 'line_items',
     };
 
     const updates: Record<string, any> = {

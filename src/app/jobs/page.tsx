@@ -15,6 +15,7 @@ import {
   Inbox,
   Users,
   DollarSign,
+  FileText,
 } from 'lucide-react';
 
 interface JobRecord {
@@ -37,6 +38,18 @@ interface JobRecord {
   notes: string | null;
   won_confirmed_by: string | null;
   won_confirmed_at: string | null;
+  scope_pdf_filename: string | null;
+  scope_pdf_url: string | null;
+  line_items: Array<{
+    id: string;
+    lineNumber: number;
+    manufacturer?: string;
+    sku?: string;
+    description: string;
+    quantity: number;
+    unit?: string;
+    unitPrice?: number;
+  }> | null;
   created_at: string;
 }
 
@@ -279,6 +292,61 @@ export default function JobsPage() {
 
                 {job.scope_of_work && (
                   <p className="text-xs text-slate-600 line-clamp-2">{job.scope_of_work}</p>
+                )}
+
+                {job.scope_pdf_filename && (
+                  <div className="flex items-center gap-2 text-xs">
+                    <FileText className="w-3.5 h-3.5 text-emerald-600 flex-shrink-0" />
+                    <span className="text-slate-500">Scope PDF:</span>
+                    {job.scope_pdf_url ? (
+                      <a
+                        href={job.scope_pdf_url}
+                        target="_blank"
+                        rel="noopener noreferrer"
+                        className="font-bold text-blue-700 hover:underline truncate"
+                      >
+                        {job.scope_pdf_filename}
+                      </a>
+                    ) : (
+                      <span className="font-bold text-slate-800 truncate">{job.scope_pdf_filename}</span>
+                    )}
+                  </div>
+                )}
+
+                {Array.isArray(job.line_items) && job.line_items.length > 0 && (
+                  <div className="rounded-xl border border-slate-200 overflow-hidden bg-slate-50/70">
+                    <div className="px-3 py-1.5 bg-slate-100 border-b border-slate-200 text-[10px] font-bold uppercase text-slate-600">
+                      Job Line Items ({job.line_items.length})
+                    </div>
+                    <div className="divide-y divide-slate-200/70 max-h-40 overflow-y-auto bg-white">
+                      {job.line_items.map((li, idx) => (
+                        <div
+                          key={li.id || idx}
+                          className="px-3 py-1.5 text-[11px] flex items-center justify-between gap-2"
+                        >
+                          <div className="min-w-0 flex items-center gap-2">
+                            <span className="font-bold text-slate-900 w-7 flex-shrink-0">
+                              {li.quantity}x
+                            </span>
+                            {(li.manufacturer || li.sku) && (
+                              <span className="font-mono text-[10px] px-1.5 py-0.5 rounded bg-slate-100 text-slate-700 flex-shrink-0">
+                                {[li.manufacturer, li.sku].filter(Boolean).join(' ')}
+                              </span>
+                            )}
+                            <span className="text-slate-700 truncate">{li.description}</span>
+                          </div>
+                          {li.unitPrice !== undefined && li.unitPrice !== null && (
+                            <span className="font-semibold text-slate-800 flex-shrink-0">
+                              ${Number(li.unitPrice).toLocaleString('en-US', {
+                                minimumFractionDigits: 2,
+                                maximumFractionDigits: 2,
+                              })}
+                            </span>
+                          )}
+                        </div>
+                      ))}
+                    </div>
+                  </div>
                 )}
 
                 <div className="flex flex-wrap items-center justify-between gap-2 text-[11px] text-slate-500 pt-2 border-t border-slate-100">

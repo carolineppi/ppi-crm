@@ -17,6 +17,9 @@ export interface JobOverrides {
   estimatedStartDate?: string | null;
   notes?: string | null;
   wonConfirmedBy?: string | null;
+  scopePdfFilename?: string | null;
+  scopePdfUrl?: string | null;
+  lineItems?: any[];
 }
 
 export async function createOrSyncJobFromBid(
@@ -114,6 +117,20 @@ export async function createOrSyncJobFromBid(
       existingJob?.won_confirmed_by ??
       assignedEstimator ??
       'Estimator',
+    scope_pdf_filename:
+      overrides.scopePdfFilename !== undefined
+        ? overrides.scopePdfFilename
+        : existingJob?.scope_pdf_filename ?? null,
+    scope_pdf_url:
+      overrides.scopePdfUrl !== undefined
+        ? overrides.scopePdfUrl
+        : existingJob?.scope_pdf_url ?? null,
+    line_items:
+      Array.isArray(overrides.lineItems)
+        ? overrides.lineItems
+        : Array.isArray(existingJob?.line_items)
+        ? existingJob.line_items
+        : [],
     won_confirmed_at: existingJob?.won_confirmed_at ?? now,
     updated_at: now,
   };
