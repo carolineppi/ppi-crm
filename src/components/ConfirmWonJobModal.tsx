@@ -182,6 +182,12 @@ export default function ConfirmWonJobModal({
     setLineItems(mapped);
     setQuoteAmount(Math.round(total * 100) / 100);
     setUploadedPdfName(`${cart.title || 'Quote'}.pdf`);
+    setScopeOfWork(
+      `${cart.title || 'Quote'} (${mapped.length} line item${mapped.length === 1 ? '' : 's'} — $${total.toLocaleString('en-US', {
+        minimumFractionDigits: 2,
+        maximumFractionDigits: 2,
+      })})`
+    );
   };
 
   useEffect(() => {
@@ -485,16 +491,16 @@ export default function ConfirmWonJobModal({
             </div>
           </div>
 
-          {/* Scope PDF Selection & Line Item Extraction */}
+          {/* Job Scope (Select Line-Item Set) */}
           <div className="space-y-3 pt-2 border-t border-slate-100">
             <div className="flex flex-wrap items-center justify-between gap-2">
               <div className="flex items-center gap-1.5 text-[11px] font-bold text-slate-700">
-                <FileText className="w-3.5 h-3.5 text-emerald-600" />
-                <span>Scope PDF &amp; Job Line Items ({lineItems.length})</span>
+                <Briefcase className="w-3.5 h-3.5 text-emerald-600" />
+                <span>Scope — Select Line-Item Set for Job ({lineItems.length} items)</span>
               </div>
               <label className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-lg border border-dashed border-slate-300 bg-slate-50 hover:bg-slate-100 text-[11px] font-semibold text-slate-700 cursor-pointer">
                 <Upload className="w-3 h-3 text-slate-500" />
-                <span>{uploadedPdfName ? `Uploaded: ${uploadedPdfName}` : 'Upload Scope PDF'}</span>
+                <span>{uploadedPdfName && !selectedQuoteId ? `Uploaded: ${uploadedPdfName}` : 'Upload Scope PDF'}</span>
                 <input
                   type="file"
                   accept=".pdf,application/pdf"
@@ -503,76 +509,88 @@ export default function ConfirmWonJobModal({
                   onChange={(e) => {
                     const file = e.target.files?.[0];
                     e.target.value = '';
-                    if (file) handleUploadScopePdf(file);
+                    if (file) {
+                      setSelectedQuoteId('');
+                      handleUploadScopePdf(file);
+                    }
                   }}
                 />
               </label>
             </div>
 
-            {quoteCarts.length > 0 && (
-              <div className="space-y-1">
-                <label className="block text-[10px] font-bold uppercase text-emerald-700">
-                  Printed Quote PDFs (Line Items Attached Automatically)
-                </label>
-                <select
-                  value={selectedQuoteId}
-                  onChange={(e) => {
-                    const id = e.target.value;
+            <div className="flex flex-col sm:flex-row gap-2">
+              <select
+                value={
+                  selectedQuoteId
+                    ? `quote:${selectedQuoteId}`
+                    : selectedPdfIdx !== ''
+                    ? `pdf:${selectedPdfIdx}`
+                    : 'custom'
+                }
+                onChange={(e) => {
+                  const val = e.target.value;
+                  if (val.startsWith('quote:')) {
+                    const id = val.slice(6);
                     setSelectedQuoteId(id);
+                    setSelectedPdfIdx('');
                     const found = quoteCarts.find((c) => c.id === id);
-                    if (found) {
-                      applyQuoteCartToJob(found);
-                      setSelectedPdfIdx('');
-                    }
-                  }}
-                  className="w-full px-2.5 py-1.5 rounded-lg border border-emerald-300 bg-emerald-50/50 font-semibold text-slate-900"
-                >
-                  {quoteCarts.map((c) => {
-                    const itemsArr = Array.isArray(c.items) ? c.items : [];
-                    const mult = 1 + (Number(c.markup_percent ?? 0) || 0) / 100;
-                    const tot = itemsArr.reduce(
-                      (s: number, it: any) =>
-                        s + (Number(it.unitCost) || 0) * mult * (Number(it.quantity) || 0),
-                      0
-                    );
-                    const dateLabel = c.quoted_at
-                      ? new Date(c.quoted_at).toLocaleDateString()
-                      : 'Draft';
-                    return (
-                      <option key={c.id} value={c.id}>
-                        📄 {c.title}.pdf — {itemsArr.length} line item(s) • $
-                        {tot.toLocaleString('en-US', {
-                          minimumFractionDigits: 2,
-                          maximumFractionDigits: 2,
-                        })}{' '}
-                        ({c.status === 'quoted' ? `Printed ${dateLabel}` : 'Draft'})
-                      </option>
-                    );
-                  })}
-                </select>
-              </div>
-            )}
-
-            {pdfAttachments.length > 0 && (
-              <div className="flex flex-col sm:flex-row gap-2">
-                <select
-                  value={selectedPdfIdx}
-                  onChange={(e) => {
-                    setSelectedPdfIdx(e.target.value);
+                    if (found) applyQuoteCartToJob(found);
+                  } else if (val.startsWith('pdf:')) {
+                    const idx = val.slice(4);
+                    setSelectedQuoteId('');
+                    setSelectedPdfIdx(idx);
                     setUploadedPdfName(null);
-                  }}
-                  className="flex-1 px-2.5 py-1.5 rounded-lg border border-slate-300 bg-white font-semibold"
-                >
-                  <option value="">-- Select Attached Scope PDF ({pdfAttachments.length} found) --</option>
-                  {pdfAttachments.map((att, idx) => (
-                    <option key={`${att.fromBidId}-${att.filename}-${idx}`} value={String(idx)}>
-                      {att.filename}
-                    </option>
-                  ))}
-                </select>
+                    setQuoteAmount(null);
+                  } else {
+                    setSelectedQuoteId('');
+                    setSelectedPdfIdx('');
+                    setUploadedPdfName(null);
+                  }
+                }}
+                className="flex-1 px-2.5 py-2 rounded-lg border border-emerald-300 bg-emerald-50/50 font-semibold text-slate-900"
+              >
+                {quoteCarts.length > 0 && (
+                  <optgroup label="Printed Quote PDFs (Line Items Attached)">
+                    {quoteCarts.map((c) => {
+                      const itemsArr = Array.isArray(c.items) ? c.items : [];
+                      const mult = 1 + (Number(c.markup_percent ?? 0) || 0) / 100;
+                      const tot = itemsArr.reduce(
+                        (s: number, it: any) =>
+                          s + (Number(it.unitCost) || 0) * mult * (Number(it.quantity) || 0),
+                        0
+                      );
+                      const dateLabel = c.quoted_at
+                        ? new Date(c.quoted_at).toLocaleDateString()
+                        : 'Draft';
+                      return (
+                        <option key={c.id} value={`quote:${c.id}`}>
+                          📄 {c.title}.pdf — {itemsArr.length} line item(s) • $
+                          {tot.toLocaleString('en-US', {
+                            minimumFractionDigits: 2,
+                            maximumFractionDigits: 2,
+                          })}{' '}
+                          ({c.status === 'quoted' ? `Printed ${dateLabel}` : 'Draft'})
+                        </option>
+                      );
+                    })}
+                  </optgroup>
+                )}
+                {pdfAttachments.length > 0 && (
+                  <optgroup label="Attached Bid PDFs">
+                    {pdfAttachments.map((att, idx) => (
+                      <option key={`${att.fromBidId}-${att.filename}-${idx}`} value={`pdf:${idx}`}>
+                        📎 {att.filename}
+                      </option>
+                    ))}
+                  </optgroup>
+                )}
+                <option value="custom">✏️ Custom / Manual Line Items</option>
+              </select>
+
+              {selectedPdfIdx !== '' && (
                 <button
                   type="button"
-                  disabled={isParsingScope || selectedPdfIdx === ''}
+                  disabled={isParsingScope}
                   onClick={() => {
                     const att = pdfAttachments[Number(selectedPdfIdx)];
                     if (att) parseAttachedPdf(att);
@@ -582,8 +600,8 @@ export default function ConfirmWonJobModal({
                   <Sparkles className="w-3.5 h-3.5 text-emerald-300" />
                   <span>{isParsingScope ? 'Extracting...' : 'Extract Line Items'}</span>
                 </button>
-              </div>
-            )}
+              )}
+            </div>
 
             {/* Editable Line Items Table */}
             <div className="rounded-xl border border-slate-200 overflow-hidden bg-slate-50/60">
@@ -675,19 +693,12 @@ export default function ConfirmWonJobModal({
             </div>
           </div>
 
-          {/* Scope & Notes */}
+          {/* Handoff Notes */}
           <div className="space-y-2 pt-1 border-t border-slate-100">
             <div className="flex items-center gap-1.5 text-[11px] font-bold text-slate-700">
-              <Briefcase className="w-3.5 h-3.5 text-slate-400" />
-              <span>Scope &amp; Notes</span>
+              <FileText className="w-3.5 h-3.5 text-slate-400" />
+              <span>Job Handoff Notes</span>
             </div>
-            <textarea
-              rows={2}
-              placeholder="Scope of work..."
-              value={scopeOfWork}
-              onChange={(e) => setScopeOfWork(e.target.value)}
-              className="w-full px-2.5 py-1.5 rounded-lg border border-slate-300"
-            />
             <textarea
               rows={2}
               placeholder="Job handoff notes..."
