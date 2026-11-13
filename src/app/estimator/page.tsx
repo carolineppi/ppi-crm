@@ -347,6 +347,13 @@ export default function EstimatorWorkspacePage() {
             <span>Calendar Schedule</span>
           </Link>
 
+          <Link
+            href="/pricing"
+            className="px-3.5 py-2 rounded-xl bg-emerald-500/20 hover:bg-emerald-500/30 text-emerald-200 text-xs font-bold transition-all flex items-center gap-1.5 border border-emerald-400/30"
+          >
+            <span>💰 Price Book</span>
+          </Link>
+
           <button
             onClick={fetchBids}
             disabled={isLoading}

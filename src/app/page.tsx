@@ -2382,6 +2382,14 @@ export default function DispatchDashboard() {
             </Link>
 
             <Link
+              href="/pricing"
+              className="px-3 py-2 rounded-lg text-xs font-bold transition-all flex items-center gap-1.5 bg-amber-500/20 hover:bg-amber-500/30 text-amber-200 border border-amber-400/30"
+              title="Manufacturer Price Book & Cheapest Cost Lookup"
+            >
+              <span>💰 Price Book</span>
+            </Link>
+
+            <Link
               href="/label"
               className="px-3 py-2 rounded-lg text-xs font-bold transition-all flex items-center gap-1.5 bg-purple-500/20 hover:bg-purple-500/30 text-purple-200 border border-purple-400/30"
               title="Mobile Data Labeling App"
