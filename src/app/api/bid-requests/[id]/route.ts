@@ -1,5 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { createServerSupabaseClient } from '@/lib/supabase/server';
+import { createOrSyncJobFromBid, JobOverrides } from '@/lib/jobs/createJobFromBid';
 
 interface UpdatePayload {
   newSticker?: string;
@@ -28,6 +29,8 @@ interface UpdatePayload {
   projectAddressCity?: string | null;
   projectAddressState?: string | null;
   bidDueTime?: string | null;
+  wonConfirmedBy?: string | null;
+  jobOverrides?: JobOverrides;
 }
 
 export async function GET(
@@ -512,7 +515,28 @@ export async function PATCH(
       }
     }
 
-    return NextResponse.json({ success: true, bidRequest: updated });
+    let createdJobResult: { job: any; created: boolean } | null = null;
+    if (body.estimatorStatus === 'won') {
+      try {
+        createdJobResult = await createOrSyncJobFromBid(supabase, updated, {
+          ...(body.jobOverrides || {}),
+          wonConfirmedBy:
+            body.wonConfirmedBy ??
+            body.jobOverrides?.wonConfirmedBy ??
+            updated.raw_payload?.assigned_estimator_name ??
+            'Estimator',
+        });
+      } catch (jobErr) {
+        console.error('Failed to auto-create job from won bid:', jobErr);
+      }
+    }
+
+    return NextResponse.json({
+      success: true,
+      bidRequest: updated,
+      job: createdJobResult?.job ?? null,
+      jobCreated: createdJobResult?.created ?? false,
+    });
   } catch (err) {
     console.error('Unhandled error in PATCH /api/bid-requests/[id]:', err);
     return NextResponse.json(

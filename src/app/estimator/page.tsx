@@ -26,6 +26,7 @@ import {
   XCircle,
 } from 'lucide-react';
 import EstimatorJobModal from '@/components/EstimatorJobModal';
+import ConfirmWonJobModal, { WonBidSeed } from '@/components/ConfirmWonJobModal';
 import {
   formatFriendlyDate,
   getDueDateStatus,
@@ -48,6 +49,13 @@ interface JobItem {
   bidNumber?: string | null;
   projectName: string;
   clientCompany: string;
+  clientName?: string | null;
+  clientPhone?: string | null;
+  addressStreet?: string | null;
+  addressCity?: string | null;
+  addressState?: string | null;
+  addressZip?: string | null;
+  estimatorNotes?: string | null;
   projectAddress?: string | null;
   jobCode?: string | null;
   assignedEstimator?: string | null;
@@ -182,6 +190,13 @@ export default function EstimatorWorkspacePage() {
               bidNumber: r.bid_number || null,
               projectName: r.project_name || r.ai_analysis?.projectName || r.email_subject || 'Untitled Project',
               clientCompany: r.client_company || r.ai_analysis?.clientCompany || 'Direct Client',
+              clientName: r.client_name || null,
+              clientPhone: r.client_phone || null,
+              addressStreet: r.project_address_street || null,
+              addressCity: r.project_address_city || null,
+              addressState: r.project_address_state || null,
+              addressZip: r.project_address_zip || null,
+              estimatorNotes: r.raw_payload?.estimator_notes || null,
               projectAddress: [r.project_address_city, r.project_address_state].filter(Boolean).join(', ') || null,
               jobCode: r.job_code,
               assignedEstimator: assignedName,
@@ -221,7 +236,31 @@ export default function EstimatorWorkspacePage() {
     fetchBids();
   }, []);
 
+  const [pendingWonBid, setPendingWonBid] = useState<WonBidSeed | null>(null);
+
   const handleUpdateStatus = async (jobId: string, newStatus: string) => {
+    if (newStatus === 'won') {
+      const target = bids.find((b) => b.id === jobId);
+      if (target) {
+        setPendingWonBid({
+          id: target.id,
+          bidNumber: target.bidNumber,
+          projectName: target.projectName,
+          clientName: target.clientName,
+          clientCompany: target.clientCompany,
+          clientPhone: target.clientPhone,
+          clientEmail: target.senderEmail,
+          addressStreet: target.addressStreet,
+          addressCity: target.addressCity,
+          addressState: target.addressState,
+          addressZip: target.addressZip,
+          scopeOfWork: target.scopeSummary,
+          estimatorName: target.assignedEstimator,
+          notes: target.estimatorNotes,
+        });
+      }
+      return;
+    }
     try {
       const res = await fetch(`/api/bid-requests/${jobId}`, {
         method: 'PATCH',
@@ -352,6 +391,14 @@ export default function EstimatorWorkspacePage() {
             className="px-3.5 py-2 rounded-xl bg-emerald-500/20 hover:bg-emerald-500/30 text-emerald-200 text-xs font-bold transition-all flex items-center gap-1.5 border border-emerald-400/30"
           >
             <span>💰 Price Book</span>
+          </Link>
+
+          <Link
+            href="/jobs"
+            className="px-3.5 py-2 rounded-xl bg-amber-500/20 hover:bg-amber-500/30 text-amber-200 text-xs font-bold transition-all flex items-center gap-1.5 border border-amber-400/30"
+          >
+            <Briefcase className="w-3.5 h-3.5" />
+            <span>Active Jobs</span>
           </Link>
 
           <button
@@ -703,6 +750,21 @@ export default function EstimatorWorkspacePage() {
           setActiveJobId(null);
         }}
         onJobUpdated={fetchBids}
+      />
+
+      {/* Estimator Confirmation Modal before Converting Won Bid -> Job */}
+      <ConfirmWonJobModal
+        isOpen={Boolean(pendingWonBid)}
+        bid={pendingWonBid}
+        onClose={() => setPendingWonBid(null)}
+        onConfirmed={() => {
+          if (pendingWonBid) {
+            setBids((prev) =>
+              prev.map((b) => (b.id === pendingWonBid.id ? { ...b, estimatorStatus: 'won' } : b))
+            );
+          }
+          setPendingWonBid(null);
+        }}
       />
     </div>
   );

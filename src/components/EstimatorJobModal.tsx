@@ -26,6 +26,7 @@ import {
 } from 'lucide-react';
 import EmailDocumentViewer from './EmailDocumentViewer';
 import BidDocumentManager from './BidDocumentManager';
+import ConfirmWonJobModal from './ConfirmWonJobModal';
 import {
   formatFriendlyDate,
   getDueDateStatus,
@@ -114,6 +115,7 @@ export default function EstimatorJobModal({
   const [notes, setNotes] = useState<string>('');
   const [isSaving, setIsSaving] = useState(false);
   const [saveSuccess, setSaveSuccess] = useState(false);
+  const [showConfirmWon, setShowConfirmWon] = useState(false);
 
   useEffect(() => {
     if (!isOpen || !bidId) return;
@@ -152,6 +154,10 @@ export default function EstimatorJobModal({
 
   const handleSaveStatusAndNotes = async () => {
     if (!bidId) return;
+    if (status === 'won' && job?.estimatorStatus !== 'won') {
+      setShowConfirmWon(true);
+      return;
+    }
     setIsSaving(true);
     setSaveSuccess(false);
 
@@ -739,6 +745,33 @@ export default function EstimatorJobModal({
           </>
         )}
       </div>
+
+      <ConfirmWonJobModal
+        isOpen={showConfirmWon}
+        bid={
+          job
+            ? {
+                id: job.id,
+                bidNumber: job.bidNumber || null,
+                projectName: job.projectName || null,
+                clientCompany: job.clientCompany || null,
+                clientEmail: emails[0]?.senderEmail || null,
+                addressStreet: job.projectAddress || null,
+                scopeOfWork: job.scopeSummary || null,
+                estimatorName: job.assignedEstimator || null,
+                notes: notes || job.estimatorNotes || null,
+              }
+            : null
+        }
+        onClose={() => setShowConfirmWon(false)}
+        onConfirmed={() => {
+          setShowConfirmWon(false);
+          setJob((prev: any) => (prev ? { ...prev, estimatorStatus: 'won' } : prev));
+          setSaveSuccess(true);
+          setTimeout(() => setSaveSuccess(false), 2500);
+          if (onJobUpdated) onJobUpdated();
+        }}
+      />
     </div>
   );
 }
