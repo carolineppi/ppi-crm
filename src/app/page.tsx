@@ -2390,6 +2390,14 @@ export default function DispatchDashboard() {
             </Link>
 
             <Link
+              href="/jobs"
+              className="px-3 py-2 rounded-lg text-xs font-bold transition-all flex items-center gap-1.5 bg-teal-500/20 hover:bg-teal-500/30 text-teal-200 border border-teal-400/30"
+              title="View Active Jobs & Assign Project Managers"
+            >
+              <span>🏗️ Jobs &amp; PM</span>
+            </Link>
+
+            <Link
               href="/label"
               className="px-3 py-2 rounded-lg text-xs font-bold transition-all flex items-center gap-1.5 bg-purple-500/20 hover:bg-purple-500/30 text-purple-200 border border-purple-400/30"
               title="Mobile Data Labeling App"

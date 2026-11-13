@@ -601,6 +601,12 @@ export default function PricingPage() {
             >
               Estimator Portal
             </Link>
+            <Link
+              href="/jobs"
+              className="px-3 py-1.5 rounded-xl bg-slate-800 hover:bg-slate-700 text-xs font-bold text-emerald-300 border border-slate-700"
+            >
+              Jobs &amp; PM
+            </Link>
             <button
               type="button"
               onClick={handleAutoTag}

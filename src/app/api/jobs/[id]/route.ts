@@ -31,6 +31,7 @@ export async function PATCH(
       scopePdfFilename: 'scope_pdf_filename',
       scopePdfUrl: 'scope_pdf_url',
       lineItems: 'line_items',
+      projectManager: 'project_manager',
     };
 
     const updates: Record<string, any> = {
@@ -41,6 +42,10 @@ export async function PATCH(
       if (body[camel] !== undefined) {
         updates[snake] = body[camel];
       }
+    }
+
+    if (body.projectManager !== undefined) {
+      updates.pm_assigned_at = body.projectManager ? new Date().toISOString() : null;
     }
 
     const { data, error } = await supabase
