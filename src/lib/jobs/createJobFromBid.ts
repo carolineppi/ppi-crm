@@ -131,6 +131,33 @@ export async function createOrSyncJobFromBid(
         : Array.isArray(existingJob?.line_items)
         ? existingJob.line_items
         : [],
+    contacts:
+      Array.isArray(existingJob?.contacts) && existingJob.contacts.length > 0
+        ? existingJob.contacts
+        : overrides.clientName ||
+          overrides.clientPhone ||
+          overrides.clientEmail ||
+          bid.client_name ||
+          bid.client_phone ||
+          bid.sender_email
+        ? [
+            {
+              id: 'primary-init',
+              name:
+                overrides.clientName ??
+                bid.client_name ??
+                bid.sender_name ??
+                overrides.clientCompany ??
+                bid.client_company ??
+                'Primary Contact',
+              role: 'Primary POC',
+              company: overrides.clientCompany ?? bid.client_company ?? null,
+              phone: overrides.clientPhone ?? bid.client_phone ?? null,
+              email: overrides.clientEmail ?? bid.sender_email ?? null,
+              isPrimary: true,
+            },
+          ]
+        : [],
     won_confirmed_at: existingJob?.won_confirmed_at ?? now,
     updated_at: now,
   };

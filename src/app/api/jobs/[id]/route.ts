@@ -76,6 +76,8 @@ export async function PATCH(
       requestedInstallDate: 'requested_install_date',
       installAvailabilityNotes: 'install_availability_notes',
       installRequestStatus: 'install_request_status',
+      contacts: 'contacts',
+      pmNotesLog: 'pm_notes_log',
     };
 
     const updates: Record<string, any> = {
@@ -90,6 +92,21 @@ export async function PATCH(
 
     if (body.projectManager !== undefined) {
       updates.pm_assigned_at = body.projectManager ? new Date().toISOString() : null;
+    }
+
+    // Keep top-level client_name / client_phone / client_email synced with Primary Contact
+    if (Array.isArray(body.contacts)) {
+      const primary =
+        body.contacts.find((c: any) => c?.isPrimary) || body.contacts[0] || null;
+      if (primary) {
+        updates.client_name = primary.name || null;
+        updates.client_phone = primary.phone || null;
+        updates.client_email = primary.email || null;
+      } else {
+        updates.client_name = null;
+        updates.client_phone = null;
+        updates.client_email = null;
+      }
     }
 
     const { data, error } = await supabase
