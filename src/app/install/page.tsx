@@ -20,10 +20,16 @@ import {
   Briefcase,
   SlidersHorizontal,
   ExternalLink,
+  CalendarDays,
 } from 'lucide-react';
 import InstallCalendarMicroView, {
   CalendarDaySummary,
 } from '@/components/InstallCalendarMicroView';
+import {
+  InstallerRecord,
+  getInstallerAvailabilityForDate,
+  shiftMatches,
+} from '@/lib/installers/availability';
 
 interface InstallTicketRow {
   id: string;
@@ -46,6 +52,7 @@ interface InstallTicketRow {
   confirmed_at: string | null;
   install_dept_notes: string | null;
   assigned_crew: string | null;
+  assigned_installer_ids?: string[] | null;
   job?: {
     id: string;
     job_number: string | null;
@@ -64,6 +71,7 @@ interface InstallTicketRow {
 
 export default function InstallDepartmentDashboardPage() {
   const [tickets, setTickets] = useState<InstallTicketRow[]>([]);
+  const [installers, setInstallers] = useState<InstallerRecord[]>([]);
   const [calendarSummary, setCalendarSummary] = useState<
     Record<string, CalendarDaySummary>
   >({});
@@ -92,6 +100,7 @@ export default function InstallDepartmentDashboardPage() {
         confirmedDate: string;
         assignedCrew: string;
         installDeptNotes: string;
+        assignedInstallerIds: string[];
       }
     >
   >({});
@@ -101,9 +110,18 @@ export default function InstallDepartmentDashboardPage() {
   const loadData = async () => {
     setIsLoading(true);
     try {
-      const res = await fetch('/api/install-tickets');
-      const data = await res.json();
-      if (res.ok) {
+      const [ticketsRes, installersRes] = await Promise.all([
+        fetch('/api/install-tickets'),
+        fetch('/api/installers'),
+      ]);
+      const data = await ticketsRes.json();
+      const instData = await installersRes.json();
+
+      if (installersRes.ok) {
+        setInstallers(instData.installers || []);
+      }
+
+      if (ticketsRes.ok) {
         const list: InstallTicketRow[] = data.tickets || [];
         setTickets(list);
         setCalendarSummary(data.calendarSummary || {});
@@ -114,13 +132,21 @@ export default function InstallDepartmentDashboardPage() {
         // Seed drafts
         const nextDrafts: Record<
           string,
-          { confirmedDate: string; assignedCrew: string; installDeptNotes: string }
+          {
+            confirmedDate: string;
+            assignedCrew: string;
+            installDeptNotes: string;
+            assignedInstallerIds: string[];
+          }
         > = {};
         for (const t of list) {
           nextDrafts[t.id] = {
             confirmedDate: t.confirmed_install_date || t.requested_install_date || '',
             assignedCrew: t.assigned_crew || '',
             installDeptNotes: t.install_dept_notes || '',
+            assignedInstallerIds: Array.isArray(t.assigned_installer_ids)
+              ? t.assigned_installer_ids
+              : [],
           };
         }
         setDrafts(nextDrafts);
@@ -203,6 +229,7 @@ export default function InstallDepartmentDashboardPage() {
               ? draft?.confirmedDate || null
               : null,
           assignedCrew: draft?.assignedCrew || null,
+          assignedInstallerIds: draft?.assignedInstallerIds || [],
           installDeptNotes: draft?.installDeptNotes || null,
           confirmedBy: nextStatus === 'confirmed' ? 'Install Dept' : undefined,
         }),
@@ -309,6 +336,13 @@ export default function InstallDepartmentDashboardPage() {
           >
             <Briefcase className="w-3.5 h-3.5" />
             <span>PM Portal</span>
+          </Link>
+          <Link
+            href="/installers"
+            className="px-3 py-2 rounded-xl bg-emerald-500/20 hover:bg-emerald-500/30 text-emerald-200 text-xs font-bold transition flex items-center gap-1.5 border border-emerald-400/30"
+          >
+            <CalendarDays className="w-3.5 h-3.5" />
+            <span>Installer Calendar</span>
           </Link>
           <button
             type="button"
@@ -447,6 +481,74 @@ export default function InstallDepartmentDashboardPage() {
                 </div>
               </div>
             )}
+
+            {/* Installer Availability for Selected Calendar Day */}
+            {selectedCalDate && (
+              <div className="p-3 rounded-xl border border-slate-200 bg-white space-y-2 text-xs">
+                <div className="flex items-center justify-between">
+                  <span className="font-bold text-slate-800 flex items-center gap-1.5">
+                    <CalendarDays className="w-3.5 h-3.5 text-teal-600" />
+                    Installers on {selectedCalDate}
+                  </span>
+                  <Link
+                    href="/installers"
+                    className="text-[11px] font-bold text-teal-700 hover:underline"
+                  >
+                    Manage →
+                  </Link>
+                </div>
+                {installers.length === 0 ? (
+                  <div className="text-[11px] text-slate-500 italic">
+                    No installers added yet.{' '}
+                    <Link href="/installers" className="text-teal-700 underline font-semibold">
+                      Add installers
+                    </Link>
+                  </div>
+                ) : (
+                  <div className="space-y-1.5 max-h-60 overflow-y-auto pr-1">
+                    {installers.map((inst) => {
+                      const avail = getInstallerAvailabilityForDate(inst, selectedCalDate);
+                      const bookedJobs = (inst.assignments || []).filter(
+                        (a) => a.date === selectedCalDate
+                      );
+                      return (
+                        <div
+                          key={inst.id}
+                          className={`p-2 rounded-lg border flex items-center justify-between gap-2 text-[11px] ${
+                            bookedJobs.length > 0
+                              ? 'bg-blue-50 border-blue-200'
+                              : avail.available
+                              ? 'bg-emerald-50/70 border-emerald-200'
+                              : 'bg-slate-50 border-slate-200 text-slate-400'
+                          }`}
+                        >
+                          <div className="min-w-0">
+                            <div className="font-bold text-slate-900 truncate">
+                              {inst.name}{' '}
+                              <span className="text-[9px] font-semibold uppercase px-1 py-0.2 rounded bg-white/80 border border-slate-200 text-slate-600">
+                                {inst.employment_type === 'subcontractor' ? 'Sub' : 'Emp'}
+                              </span>
+                            </div>
+                            {bookedJobs.length > 0 ? (
+                              <div className="text-[10px] text-blue-800 truncate">
+                                Assigned: {bookedJobs.map((b) => b.jobNumber || b.projectName).join(', ')}
+                              </div>
+                            ) : avail.available ? (
+                              <div className="text-[10px] text-emerald-800">
+                                {avail.shift} Shift
+                                {avail.start && avail.end ? ` (${avail.start}-${avail.end})` : ''}
+                              </div>
+                            ) : (
+                              <div className="text-[10px]">Off / Unavailable</div>
+                            )}
+                          </div>
+                        </div>
+                      );
+                    })}
+                  </div>
+                )}
+              </div>
+            )}
           </div>
         </div>
 
@@ -507,6 +609,9 @@ export default function InstallDepartmentDashboardPage() {
                     ticket.confirmed_install_date || ticket.requested_install_date || '',
                   assignedCrew: ticket.assigned_crew || '',
                   installDeptNotes: ticket.install_dept_notes || '',
+                  assignedInstallerIds: Array.isArray(ticket.assigned_installer_ids)
+                    ? ticket.assigned_installer_ids
+                    : [],
                 };
 
                 const targetDayInfo = draft.confirmedDate
@@ -675,6 +780,94 @@ export default function InstallDepartmentDashboardPage() {
                           {ticket.site_access_notes || 'None'}
                         </div>
                       </div>
+                    </div>
+
+                    {/* Assign Installers from Installer Calendar */}
+                    <div className="p-3 rounded-xl border border-slate-200 bg-slate-50/70 space-y-2 text-xs">
+                      <div className="flex items-center justify-between gap-2">
+                        <span className="text-[10px] font-bold uppercase text-slate-600 flex items-center gap-1">
+                          <Users className="w-3.5 h-3.5 text-teal-600" />
+                          Assign Installers for {draft.confirmedDate || 'Selected Date'} (
+                          {ticket.work_shift} Shift)
+                        </span>
+                        <Link
+                          href="/installers"
+                          className="text-[10px] font-bold text-teal-700 hover:underline"
+                        >
+                          Open Installer Calendar →
+                        </Link>
+                      </div>
+
+                      {installers.length === 0 ? (
+                        <div className="text-[11px] text-slate-500 italic">
+                          No installers configured yet.{' '}
+                          <Link href="/installers" className="text-teal-700 underline font-semibold">
+                            Add employees or subcontractors
+                          </Link>
+                          .
+                        </div>
+                      ) : (
+                        <div className="flex flex-wrap gap-1.5">
+                          {installers.map((inst) => {
+                            const isChecked = draft.assignedInstallerIds.includes(inst.id);
+                            const avail = draft.confirmedDate
+                              ? getInstallerAvailabilityForDate(inst, draft.confirmedDate)
+                              : { available: true, shift: 'Both' as const };
+                            const otherBookings = (inst.assignments || []).filter(
+                              (a) =>
+                                a.date === draft.confirmedDate && a.ticketId !== ticket.id
+                            );
+                            const isShiftOk =
+                              avail.available && shiftMatches(avail.shift, ticket.work_shift);
+
+                            let chipClass =
+                              'bg-slate-100 border-slate-200 text-slate-500 hover:bg-slate-200/70';
+                            let statusHint = 'Off / Shift mismatch';
+
+                            if (isChecked) {
+                              chipClass =
+                                'bg-indigo-600 border-indigo-600 text-white shadow-xs';
+                              statusHint =
+                                otherBookings.length > 0
+                                  ? `Also on ${otherBookings[0].jobNumber || otherBookings[0].projectName}`
+                                  : isShiftOk
+                                  ? `${avail.shift} Avail`
+                                  : 'Manual Override';
+                            } else if (otherBookings.length > 0) {
+                              chipClass =
+                                'bg-amber-50 border-amber-300 text-amber-900 hover:bg-amber-100';
+                              statusHint = `Booked: ${otherBookings[0].jobNumber || otherBookings[0].projectName}`;
+                            } else if (isShiftOk) {
+                              chipClass =
+                                'bg-emerald-50 border-emerald-300 text-emerald-900 hover:bg-emerald-100';
+                              statusHint = 'Available';
+                            }
+
+                            return (
+                              <button
+                                key={inst.id}
+                                type="button"
+                                onClick={() => {
+                                  const nextIds = isChecked
+                                    ? draft.assignedInstallerIds.filter((id) => id !== inst.id)
+                                    : [...draft.assignedInstallerIds, inst.id];
+                                  setDrafts((prev) => ({
+                                    ...prev,
+                                    [ticket.id]: { ...draft, assignedInstallerIds: nextIds },
+                                  }));
+                                }}
+                                className={`px-2.5 py-1.5 rounded-lg border text-left transition flex items-center gap-1.5 ${chipClass}`}
+                              >
+                                <span className="font-bold">{inst.name}</span>
+                                <span className="text-[9px] uppercase opacity-80">
+                                  ({inst.employment_type === 'subcontractor' ? 'Sub' : 'Emp'})
+                                </span>
+                                <span className="text-[9px] opacity-80">• {statusHint}</span>
+                              </button>
+                            );
+                          })}
+                        </div>
+                      )}
                     </div>
 
                     {/* Install Dept Confirmation Controls */}

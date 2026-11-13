@@ -26,6 +26,7 @@ export async function PATCH(
       confirmedBy: 'confirmed_by',
       installDeptNotes: 'install_dept_notes',
       assignedCrew: 'assigned_crew',
+      assignedInstallerIds: 'assigned_installer_ids',
     };
 
     const updates: Record<string, any> = {
@@ -35,6 +36,26 @@ export async function PATCH(
     for (const [camel, snake] of Object.entries(allowedFields)) {
       if (body[camel] !== undefined) {
         updates[snake] = body[camel];
+      }
+    }
+
+    if (Array.isArray(body.assignedInstallerIds)) {
+      if (body.assignedInstallerIds.length > 0) {
+        const { data: instRows } = await supabase
+          .from('installers')
+          .select('id, name, employment_type, company_name')
+          .in('id', body.assignedInstallerIds);
+
+        if (instRows && instRows.length > 0) {
+          const names = instRows.map((i) =>
+            i.employment_type === 'subcontractor' && i.company_name
+              ? `${i.name} (${i.company_name})`
+              : i.name
+          );
+          updates.assigned_crew = names.join(', ');
+        }
+      } else if (!body.assignedCrew) {
+        updates.assigned_crew = null;
       }
     }
 
