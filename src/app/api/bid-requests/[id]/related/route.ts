@@ -184,6 +184,18 @@ export async function GET(
       return (b.size || 0) - (a.size || 0);
     });
 
+    // 5. Fetch any linked quote carts for this bid or its group siblings
+    const relatedRecordIds = records.map((r: any) => r.id).filter(Boolean);
+    let quoteCarts: any[] = [];
+    if (relatedRecordIds.length > 0) {
+      const { data: carts } = await supabase
+        .from('job_quote_carts')
+        .select('*')
+        .in('bid_request_id', relatedRecordIds)
+        .order('updated_at', { ascending: false });
+      quoteCarts = carts || [];
+    }
+
     return NextResponse.json({
       primaryBid: {
         id: primary.id,
@@ -203,6 +215,7 @@ export async function GET(
       },
       emails,
       allAttachments,
+      quoteCarts,
     });
   } catch (err: any) {
     return NextResponse.json(

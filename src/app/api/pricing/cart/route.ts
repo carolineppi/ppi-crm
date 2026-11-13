@@ -126,15 +126,23 @@ export async function POST(request: NextRequest) {
       savedCart = data;
     }
 
-    // If "quoted" (printed), switch the linked bid to "bid_submitted" status!
+    // If "quoted" (printed), switch the linked bid (and its duplicate group siblings) to "bid_submitted" status!
     if (status === 'quoted' && bidRequestId) {
-      const { error: bidErr } = await supabase
+      const { data: targetBid, error: bidErr } = await supabase
         .from('bid_requests')
         .update({ estimator_status: 'bid_submitted' })
-        .eq('id', bidRequestId);
+        .eq('id', bidRequestId)
+        .select('id, duplicate_group_id')
+        .single();
 
       if (bidErr) {
         console.error('Failed to update bid estimator_status to bid_submitted:', bidErr);
+      } else if (targetBid?.duplicate_group_id) {
+        await supabase
+          .from('bid_requests')
+          .update({ estimator_status: 'bid_submitted' })
+          .eq('duplicate_group_id', targetBid.duplicate_group_id)
+          .not('estimator_status', 'in', '("won","lost")');
       }
     }
 

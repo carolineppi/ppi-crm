@@ -23,10 +23,13 @@ import {
   FileArchive,
   RefreshCw,
   FolderArchive,
+  Printer,
+  ShoppingCart,
 } from 'lucide-react';
 import EmailDocumentViewer from './EmailDocumentViewer';
 import BidDocumentManager from './BidDocumentManager';
 import ConfirmWonJobModal from './ConfirmWonJobModal';
+import QuotePrintModal from './QuotePrintModal';
 import {
   formatFriendlyDate,
   getDueDateStatus,
@@ -108,7 +111,9 @@ export default function EstimatorJobModal({
   const [job, setJob] = useState<PrimaryJobDetails | null>(null);
   const [emails, setEmails] = useState<RelatedEmail[]>([]);
   const [attachments, setAttachments] = useState<AggregatedAttachment[]>([]);
-  const [activeTab, setActiveTab] = useState<'attachments' | 'emails' | 'scope'>('attachments');
+  const [quoteCarts, setQuoteCarts] = useState<any[]>([]);
+  const [activePrintCart, setActivePrintCart] = useState<any | null>(null);
+  const [activeTab, setActiveTab] = useState<'attachments' | 'emails' | 'scope' | 'quote'>('attachments');
   const [attachmentCategory, setAttachmentCategory] = useState<string>('ALL');
   const [expandedEmailId, setExpandedEmailId] = useState<string | null>(null);
   const [status, setStatus] = useState<string>('assigned');
@@ -134,6 +139,7 @@ export default function EstimatorJobModal({
         }
         setEmails(data.emails || []);
         setAttachments(data.allAttachments || []);
+        setQuoteCarts(Array.isArray(data.quoteCarts) ? data.quoteCarts : []);
         // Automatically expand the primary email or latest addendum
         if (data.emails && data.emails.length > 0) {
           setExpandedEmailId(data.emails[0].id);
@@ -372,11 +378,153 @@ export default function EstimatorJobModal({
                   <Sparkles className="w-3.5 h-3.5" />
                   <span>Scope & Estimator Notes</span>
                 </button>
+
+                <button
+                  onClick={() => setActiveTab('quote')}
+                  className={`py-3 px-3 text-xs font-bold border-b-2 flex items-center gap-2 transition-all ${
+                    activeTab === 'quote'
+                      ? 'border-emerald-600 text-emerald-700'
+                      : 'border-transparent text-slate-500 hover:text-slate-900'
+                  }`}
+                >
+                  <ShoppingCart className="w-3.5 h-3.5" />
+                  <span>Material Quote / Cart</span>
+                  <span
+                    className={`px-1.5 py-0.2 rounded-full text-[10px] font-mono ${
+                      quoteCarts.length > 0
+                        ? 'bg-emerald-100 text-emerald-800'
+                        : 'bg-slate-100 text-slate-700'
+                    }`}
+                  >
+                    {quoteCarts.length}
+                  </span>
+                </button>
               </div>
             </div>
 
             {/* Main Content Area */}
             <div className="p-6 overflow-y-auto flex-1 bg-slate-50/60">
+              {/* TAB 4: LINKED MATERIAL QUOTE / CART */}
+              {activeTab === 'quote' && (
+                <div className="space-y-4">
+                  <div className="flex items-center justify-between bg-white p-3.5 rounded-xl border border-slate-200">
+                    <div>
+                      <h3 className="text-xs font-extrabold text-slate-900">
+                        Attached Material Quotes &amp; Carts
+                      </h3>
+                      <p className="text-[11px] text-slate-500">
+                        Quotes created or printed from the Price Book linked to this bid.
+                      </p>
+                    </div>
+                    <a
+                      href={`/pricing?bidId=${job?.id}`}
+                      className="px-3 py-1.5 rounded-lg bg-emerald-600 hover:bg-emerald-500 text-white text-xs font-bold transition"
+                    >
+                      Open / Build Quote in Price Book
+                    </a>
+                  </div>
+
+                  {quoteCarts.length === 0 ? (
+                    <div className="p-10 text-center bg-white rounded-xl border border-dashed border-slate-300 text-slate-500 text-xs">
+                      No material quote cart is attached to this bid yet. Click{' '}
+                      <strong>Open / Build Quote in Price Book</strong> to add items and print a PDF quote.
+                    </div>
+                  ) : (
+                    quoteCarts.map((qc) => {
+                      const itemsArr = Array.isArray(qc.items) ? qc.items : [];
+                      const mult = 1 + (Number(qc.markup_percent ?? 0) || 0) / 100;
+                      const costSum = itemsArr.reduce(
+                        (s: number, it: any) => s + (Number(it.unitCost) || 0) * (Number(it.quantity) || 0),
+                        0
+                      );
+                      const sellSum = costSum * mult;
+                      return (
+                        <div
+                          key={qc.id}
+                          className="bg-white rounded-xl border border-slate-200 shadow-2xs overflow-hidden"
+                        >
+                          <div className="p-4 bg-slate-50 border-b border-slate-200 flex flex-wrap items-center justify-between gap-3">
+                            <div>
+                              <div className="flex items-center gap-2">
+                                <span className="text-sm font-black text-slate-900">{qc.title}</span>
+                                <span
+                                  className={`px-2 py-0.5 rounded-full text-[10px] font-bold uppercase ${
+                                    qc.status === 'quoted'
+                                      ? 'bg-purple-100 text-purple-800 border border-purple-200'
+                                      : 'bg-amber-100 text-amber-800 border border-amber-200'
+                                  }`}
+                                >
+                                  {qc.status === 'quoted' ? 'Bid Submitted (PDF Printed)' : 'Saved Draft'}
+                                </span>
+                              </div>
+                              <div className="text-[11px] text-slate-500 mt-0.5">
+                                {itemsArr.length} line item(s) • Markup: {qc.markup_percent ?? 0}% • Quote Total:{' '}
+                                <strong className="text-slate-900">
+                                  ${sellSum.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
+                                </strong>
+                                {qc.quoted_at ? ` • Printed ${new Date(qc.quoted_at).toLocaleString()}` : ''}
+                              </div>
+                            </div>
+
+                            <button
+                              type="button"
+                              onClick={() => setActivePrintCart(qc)}
+                              className="px-3 py-1.5 rounded-lg bg-slate-900 hover:bg-slate-800 text-white text-xs font-bold flex items-center gap-1.5"
+                            >
+                              <Printer className="w-3.5 h-3.5" />
+                              <span>View / Print PDF Quote</span>
+                            </button>
+                          </div>
+
+                          {itemsArr.length > 0 && (
+                            <div className="overflow-x-auto">
+                              <table className="w-full text-xs text-left">
+                                <thead className="bg-slate-50 text-[10px] uppercase text-slate-500 border-b border-slate-200">
+                                  <tr>
+                                    <th className="py-2 px-3">Qty</th>
+                                    <th className="py-2 px-3">Manufacturer / SKU</th>
+                                    <th className="py-2 px-3">Description</th>
+                                    <th className="py-2 px-3 text-right">Unit Quote</th>
+                                    <th className="py-2 px-3 text-right">Extended</th>
+                                  </tr>
+                                </thead>
+                                <tbody className="divide-y divide-slate-100">
+                                  {itemsArr.map((it: any, idx: number) => {
+                                    const unitSell = (Number(it.unitCost) || 0) * mult;
+                                    const extSell = unitSell * (Number(it.quantity) || 0);
+                                    return (
+                                      <tr key={it.priceItemId || idx}>
+                                        <td className="py-2 px-3 font-bold">{it.quantity}</td>
+                                        <td className="py-2 px-3 font-mono text-[11px]">
+                                          {it.manufacturer} • {it.sku}
+                                        </td>
+                                        <td className="py-2 px-3 text-slate-600">{it.description}</td>
+                                        <td className="py-2 px-3 text-right">
+                                          ${unitSell.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
+                                        </td>
+                                        <td className="py-2 px-3 text-right font-bold">
+                                          ${extSell.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
+                                        </td>
+                                      </tr>
+                                    );
+                                  })}
+                                </tbody>
+                              </table>
+                            </div>
+                          )}
+
+                          {qc.notes && (
+                            <div className="px-4 py-2.5 bg-slate-50 border-t border-slate-200 text-[11px] text-slate-600">
+                              <strong>Quote Notes:</strong> {qc.notes}
+                            </div>
+                          )}
+                        </div>
+                      );
+                    })
+                  )}
+                </div>
+              )}
+
               {/* TAB 1: ALL DRAWINGS & ATTACHMENTS (PLAN ROOM) */}
               {activeTab === 'attachments' && (
                 <div className="space-y-4">
@@ -771,6 +919,17 @@ export default function EstimatorJobModal({
           setTimeout(() => setSaveSuccess(false), 2500);
           if (onJobUpdated) onJobUpdated();
         }}
+      />
+      <QuotePrintModal
+        isOpen={Boolean(activePrintCart)}
+        onClose={() => setActivePrintCart(null)}
+        quoteTitle={activePrintCart?.title || 'Material Quote'}
+        projectName={job?.projectName}
+        contractorName={job?.clientCompany}
+        bidNumber={job?.bidNumber}
+        markupPercent={Number(activePrintCart?.markup_percent ?? 0)}
+        notes={activePrintCart?.notes}
+        items={Array.isArray(activePrintCart?.items) ? activePrintCart.items : []}
       />
     </div>
   );

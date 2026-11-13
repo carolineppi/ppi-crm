@@ -70,6 +70,11 @@ interface JobItem {
   senderName: string;
   attachmentsCount: number;
   duplicateCount: number;
+  quoteSummary?: {
+    status: string;
+    itemCount: number;
+    quoteTotal: number;
+  } | null;
   sticker: 'ITB' | 'Addendum' | 'Won' | 'Lost' | 'Spam' | 'Date Reminder' | string;
   isForwarded?: boolean;
   forwardedBy?: string | null;
@@ -105,14 +110,30 @@ export default function EstimatorWorkspacePage() {
   const fetchBids = async () => {
     setIsLoading(true);
     try {
-      const res = await fetch('/api/bid-requests');
+      const [res, cartsRes] = await Promise.all([
+        fetch('/api/bid-requests'),
+        fetch('/api/pricing/cart'),
+      ]);
       const data = await res.json();
+      const cartsData = await cartsRes.json().catch(() => ({ carts: [] }));
+      const cartsByBidId: Record<string, any> = {};
+      if (Array.isArray(cartsData.carts)) {
+        cartsData.carts.forEach((c: any) => {
+          if (c.bid_request_id && !cartsByBidId[c.bid_request_id]) {
+            cartsByBidId[c.bid_request_id] = c;
+          }
+        });
+      }
       if (data.bidRequests && Array.isArray(data.bidRequests)) {
         // Group child addendums / duplicates count by duplicate_group_id
         const groupCounts: Record<string, number> = {};
+        const cartsByGroupId: Record<string, any> = {};
         data.bidRequests.forEach((r: any) => {
           if (r.duplicate_group_id) {
             groupCounts[r.duplicate_group_id] = (groupCounts[r.duplicate_group_id] || 0) + 1;
+            if (cartsByBidId[r.id] && !cartsByGroupId[r.duplicate_group_id]) {
+              cartsByGroupId[r.duplicate_group_id] = cartsByBidId[r.id];
+            }
           }
         });
 
@@ -219,6 +240,20 @@ export default function EstimatorWorkspacePage() {
               senderName: r.sender_name || r.sender_email?.split('@')[0] || 'Unknown Sender',
               attachmentsCount: rawAtts.length,
               duplicateCount: Math.max(0, totalInGroup - 1),
+              quoteSummary: (() => {
+                const c = cartsByBidId[r.id] || (r.duplicate_group_id ? cartsByGroupId[r.duplicate_group_id] : null);
+                if (!c || !Array.isArray(c.items) || c.items.length === 0) return null;
+                const subtotal = c.items.reduce(
+                  (s: number, it: any) => s + (Number(it.unitCost) || 0) * (Number(it.quantity) || 0),
+                  0
+                );
+                const mult = 1 + (Number(c.markup_percent ?? 0) || 0) / 100;
+                return {
+                  status: c.status,
+                  itemCount: c.items.length,
+                  quoteTotal: subtotal * mult,
+                };
+              })(),
               sticker: sticker as any,
               isForwarded: Boolean(r.is_forwarded),
               forwardedBy: r.forwarded_by,
@@ -704,6 +739,23 @@ export default function EstimatorWorkspacePage() {
                       <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-md bg-amber-50 text-amber-800 border border-amber-200 font-semibold">
                         <Layers className="w-3 h-3 text-amber-600" />
                         {job.duplicateCount} Update{job.duplicateCount > 1 ? 's' : ''} / Addenda
+                      </span>
+                    )}
+
+                    {job.quoteSummary && (
+                      <span
+                        className={`inline-flex items-center gap-1 px-2 py-0.5 rounded-md border font-bold ${
+                          job.quoteSummary.status === 'quoted'
+                            ? 'bg-emerald-50 text-emerald-800 border-emerald-200'
+                            : 'bg-purple-50 text-purple-800 border-purple-200'
+                        }`}
+                      >
+                        💰 Quote: $
+                        {job.quoteSummary.quoteTotal.toLocaleString('en-US', {
+                          minimumFractionDigits: 2,
+                          maximumFractionDigits: 2,
+                        })}{' '}
+                        ({job.quoteSummary.itemCount} items)
                       </span>
                     )}
 

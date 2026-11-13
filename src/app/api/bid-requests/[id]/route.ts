@@ -101,7 +101,10 @@ export async function PATCH(
         updates.estimator_status = 'no_bid';
         updates.assigned_estimator_id = null;
       } else {
-        updates.estimator_status = body.assignedEstimator ? 'assigned' : 'unassigned';
+        const preservedStatuses = new Set(['bid_submitted', 'quoted', 'won', 'lost']);
+        if (!preservedStatuses.has(currentRecord.estimator_status || '')) {
+          updates.estimator_status = body.assignedEstimator ? 'assigned' : 'unassigned';
+        }
         updates.triage_status = body.assignedEstimator ? 'assigned' : 'ready_for_assignment';
       }
     }
