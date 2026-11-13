@@ -736,7 +736,7 @@ export default function DispatchDashboard() {
         if (b.sticker === 'Spam' || b.filterStatus === 'auto_filtered') return false;
         if (!isHistoricalBid(b)) return false;
       } else {
-        if (!showHistorical && activeFilter !== 'Spam' && isHistoricalBid(b)) {
+        if (!showHistorical && !feedSearchQuery.trim() && activeFilter !== 'Spam' && isHistoricalBid(b)) {
           return false;
         }
         if (activeFilter === 'ALL') {

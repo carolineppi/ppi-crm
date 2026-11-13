@@ -116,9 +116,13 @@ export default function EstimatorWorkspacePage() {
           }
         });
 
-        // Filter: Keep anything assigned to an estimator or primary ITB records
+        // Filter: Keep anything assigned to an estimator, in an active/submitted/won workflow state, or primary ITB records
         const mapped: JobItem[] = data.bidRequests
           .filter((r: any) => {
+            const activeStatuses = new Set(['in_progress', 'quoted', 'bid_submitted', 'won', 'lost', 'declined']);
+            if (r.estimator_status && activeStatuses.has(r.estimator_status)) {
+              return true;
+            }
             const rawAssigned = r.assigned_estimator_name || r.raw_payload?.assigned_estimator_name;
             const hasEstimator = Boolean(
               rawAssigned &&
