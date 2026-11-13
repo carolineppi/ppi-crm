@@ -1,6 +1,45 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { createServerSupabaseClient } from '@/lib/supabase/server';
 
+export async function GET(
+  _request: NextRequest,
+  { params }: { params: Promise<{ id: string }> }
+) {
+  try {
+    const { id } = await params;
+    const supabase = createServerSupabaseClient();
+
+    const [jobRes, poRes, coRes] = await Promise.all([
+      supabase.from('jobs').select('*').eq('id', id).single(),
+      supabase
+        .from('job_purchase_orders')
+        .select('*')
+        .eq('job_id', id)
+        .order('created_at', { ascending: false }),
+      supabase
+        .from('job_change_orders')
+        .select('*')
+        .eq('job_id', id)
+        .order('created_at', { ascending: false }),
+    ]);
+
+    if (jobRes.error || !jobRes.data) {
+      return NextResponse.json({ error: 'Job not found' }, { status: 404 });
+    }
+
+    return NextResponse.json({
+      job: jobRes.data,
+      purchaseOrders: poRes.data || [],
+      changeOrders: coRes.data || [],
+    });
+  } catch (err: any) {
+    return NextResponse.json(
+      { error: err instanceof Error ? err.message : 'Failed to load job' },
+      { status: 500 }
+    );
+  }
+}
+
 export async function PATCH(
   request: NextRequest,
   { params }: { params: Promise<{ id: string }> }
@@ -32,6 +71,11 @@ export async function PATCH(
       scopePdfUrl: 'scope_pdf_url',
       lineItems: 'line_items',
       projectManager: 'project_manager',
+      materialEta: 'material_eta',
+      siteAvailableRange: 'site_available_range',
+      requestedInstallDate: 'requested_install_date',
+      installAvailabilityNotes: 'install_availability_notes',
+      installRequestStatus: 'install_request_status',
     };
 
     const updates: Record<string, any> = {

@@ -2398,6 +2398,14 @@ export default function DispatchDashboard() {
             </Link>
 
             <Link
+              href="/pm"
+              className="px-3 py-2 rounded-lg text-xs font-bold transition-all flex items-center gap-1.5 bg-cyan-500/20 hover:bg-cyan-500/30 text-cyan-200 border border-cyan-400/30"
+              title="Project Manager Dashboard (POs, Change Orders, Install Requests)"
+            >
+              <span>📋 PM Portal</span>
+            </Link>
+
+            <Link
               href="/label"
               className="px-3 py-2 rounded-lg text-xs font-bold transition-all flex items-center gap-1.5 bg-purple-500/20 hover:bg-purple-500/30 text-purple-200 border border-purple-400/30"
               title="Mobile Data Labeling App"

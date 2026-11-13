@@ -470,6 +470,13 @@ export default function EstimatorWorkspacePage() {
             <span>Active Jobs</span>
           </Link>
 
+          <Link
+            href="/pm"
+            className="px-3.5 py-2 rounded-xl bg-teal-500/20 hover:bg-teal-500/30 text-teal-200 text-xs font-bold transition-all flex items-center gap-1.5 border border-teal-400/30"
+          >
+            <span>📋 PM Portal</span>
+          </Link>
+
           <button
             onClick={fetchBids}
             disabled={isLoading}

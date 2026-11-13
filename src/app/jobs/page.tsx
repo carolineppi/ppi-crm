@@ -215,6 +215,12 @@ export default function JobsPage() {
             <span>Estimator Portal</span>
           </Link>
           <Link
+            href="/pm"
+            className="px-3.5 py-2 rounded-xl bg-teal-500/20 hover:bg-teal-500/30 text-teal-200 text-xs font-bold transition flex items-center gap-1.5 border border-teal-400/30"
+          >
+            <span>📋 PM Portal</span>
+          </Link>
+          <Link
             href="/pricing"
             className="px-3.5 py-2 rounded-xl bg-emerald-500/20 hover:bg-emerald-500/30 text-emerald-200 text-xs font-bold transition flex items-center gap-1.5 border border-emerald-400/30"
           >
@@ -393,7 +399,11 @@ export default function JobsPage() {
                         </span>
                       )}
                     </div>
-                    <h2 className="text-base font-black text-slate-900 mt-1">{job.project_name}</h2>
+                    <Link href={`/jobs/${job.id}`} className="block group">
+                      <h2 className="text-base font-black text-slate-900 mt-1 group-hover:text-blue-700 group-hover:underline">
+                        {job.project_name} →
+                      </h2>
+                    </Link>
                   </div>
 
                   <select
