@@ -84,19 +84,20 @@ export async function POST(request: NextRequest) {
       }
       savedCart = data;
     } else if (bidRequestId) {
-      // Upsert by bid_request_id if one already exists
-      const { data: existing } = await supabase
+      // Upsert into an existing draft for this bid_request_id, or insert a new record so multiple printed quotes are preserved
+      const { data: existingDraft } = await supabase
         .from('job_quote_carts')
         .select('id')
         .eq('bid_request_id', bidRequestId)
+        .eq('status', 'draft')
         .limit(1)
         .maybeSingle();
 
-      if (existing?.id) {
+      if (existingDraft?.id) {
         const { data, error } = await supabase
           .from('job_quote_carts')
           .update(payload)
-          .eq('id', existing.id)
+          .eq('id', existingDraft.id)
           .select()
           .single();
         if (error) {

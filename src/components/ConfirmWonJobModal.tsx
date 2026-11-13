@@ -70,6 +70,9 @@ export default function ConfirmWonJobModal({
   const [estimatorName, setEstimatorName] = useState('');
   const [confirmedBy, setConfirmedBy] = useState('');
   const [notes, setNotes] = useState('');
+  const [quoteCarts, setQuoteCarts] = useState<any[]>([]);
+  const [selectedQuoteId, setSelectedQuoteId] = useState<string>('');
+  const [quoteAmount, setQuoteAmount] = useState<number | null>(null);
   const [pdfAttachments, setPdfAttachments] = useState<
     Array<{ filename: string; fromBidId: string; previewUrl: string; storageUrl?: string; category?: string }>
   >([]);
@@ -158,6 +161,29 @@ export default function ConfirmWonJobModal({
     }
   };
 
+  const applyQuoteCartToJob = (cart: any) => {
+    if (!cart) return;
+    const mult = 1 + (Number(cart.markup_percent ?? 0) || 0) / 100;
+    const itemsArr = Array.isArray(cart.items) ? cart.items : [];
+    const mapped = itemsArr.map((it: any, idx: number) => ({
+      id: it.priceItemId || `cart-${idx + 1}`,
+      lineNumber: idx + 1,
+      manufacturer: it.manufacturer || '',
+      sku: it.sku || '',
+      description: it.description || '',
+      quantity: Math.max(1, Number(it.quantity) || 1),
+      unit: 'EA',
+      unitPrice: Math.round((Number(it.unitCost) || 0) * mult * 100) / 100,
+    }));
+    const total = mapped.reduce(
+      (s: number, it: any) => s + (Number(it.unitPrice) || 0) * (Number(it.quantity) || 1),
+      0
+    );
+    setLineItems(mapped);
+    setQuoteAmount(Math.round(total * 100) / 100);
+    setUploadedPdfName(`${cart.title || 'Quote'}.pdf`);
+  };
+
   useEffect(() => {
     if (!isOpen || !bid) return;
     setErrorMsg(null);
@@ -175,6 +201,9 @@ export default function ConfirmWonJobModal({
     setEstimatorName(bid.estimatorName || ESTIMATORS[0] || '');
     setConfirmedBy(bid.estimatorName || ESTIMATORS[0] || '');
     setNotes(bid.notes || '');
+    setQuoteCarts([]);
+    setSelectedQuoteId('');
+    setQuoteAmount(null);
     setPdfAttachments([]);
     setSelectedPdfIdx('');
     setUploadedPdfName(null);
@@ -193,31 +222,22 @@ export default function ConfirmWonJobModal({
         );
         setPdfAttachments(pdfs);
 
-        // Pick best default scope PDF
-        const preferredIdx = pdfs.findIndex((p: any) =>
-          /scope|contract|quote|schedule|subcontract/i.test(p.filename || '')
-        );
-        const defaultIdx = preferredIdx !== -1 ? preferredIdx : pdfs.length > 0 ? 0 : -1;
-        if (defaultIdx !== -1) {
-          setSelectedPdfIdx(String(defaultIdx));
-        }
-
-        // Seed line items from linked quote cart if available
-        const firstCart = Array.isArray(d.quoteCarts) ? d.quoteCarts[0] : null;
-        if (firstCart && Array.isArray(firstCart.items) && firstCart.items.length > 0) {
-          const mult = 1 + (Number(firstCart.markup_percent ?? 0) || 0) / 100;
-          setLineItems(
-            firstCart.items.map((it: any, idx: number) => ({
-              id: it.priceItemId || `cart-${idx + 1}`,
-              lineNumber: idx + 1,
-              manufacturer: it.manufacturer || '',
-              sku: it.sku || '',
-              description: it.description || '',
-              quantity: Math.max(1, Number(it.quantity) || 1),
-              unit: 'EA',
-              unitPrice: Math.round((Number(it.unitCost) || 0) * mult * 100) / 100,
-            }))
+        // Load linked quote carts (each printed PDF quote has its exact cart line items attached)
+        const carts = Array.isArray(d.quoteCarts) ? d.quoteCarts : [];
+        setQuoteCarts(carts);
+        const preferredCart = carts.find((c: any) => c.status === 'quoted') || carts[0] || null;
+        if (preferredCart) {
+          setSelectedQuoteId(preferredCart.id);
+          applyQuoteCartToJob(preferredCart);
+        } else {
+          // Pick best default attached PDF if no quote cart exists
+          const preferredIdx = pdfs.findIndex((p: any) =>
+            /scope|contract|quote|schedule|subcontract/i.test(p.filename || '')
           );
+          const defaultIdx = preferredIdx !== -1 ? preferredIdx : pdfs.length > 0 ? 0 : -1;
+          if (defaultIdx !== -1) {
+            setSelectedPdfIdx(String(defaultIdx));
+          }
         }
       })
       .catch(() => {
@@ -261,6 +281,7 @@ export default function ConfirmWonJobModal({
             estimatorName: estimatorName.trim() || undefined,
             notes: notes.trim() || undefined,
             wonConfirmedBy: confirmedBy.trim(),
+            quoteAmount: quoteAmount !== null ? quoteAmount : undefined,
             scopePdfFilename:
               uploadedPdfName ||
               (selectedPdfIdx !== '' ? pdfAttachments[Number(selectedPdfIdx)]?.filename : null) ||
@@ -487,6 +508,50 @@ export default function ConfirmWonJobModal({
                 />
               </label>
             </div>
+
+            {quoteCarts.length > 0 && (
+              <div className="space-y-1">
+                <label className="block text-[10px] font-bold uppercase text-emerald-700">
+                  Printed Quote PDFs (Line Items Attached Automatically)
+                </label>
+                <select
+                  value={selectedQuoteId}
+                  onChange={(e) => {
+                    const id = e.target.value;
+                    setSelectedQuoteId(id);
+                    const found = quoteCarts.find((c) => c.id === id);
+                    if (found) {
+                      applyQuoteCartToJob(found);
+                      setSelectedPdfIdx('');
+                    }
+                  }}
+                  className="w-full px-2.5 py-1.5 rounded-lg border border-emerald-300 bg-emerald-50/50 font-semibold text-slate-900"
+                >
+                  {quoteCarts.map((c) => {
+                    const itemsArr = Array.isArray(c.items) ? c.items : [];
+                    const mult = 1 + (Number(c.markup_percent ?? 0) || 0) / 100;
+                    const tot = itemsArr.reduce(
+                      (s: number, it: any) =>
+                        s + (Number(it.unitCost) || 0) * mult * (Number(it.quantity) || 0),
+                      0
+                    );
+                    const dateLabel = c.quoted_at
+                      ? new Date(c.quoted_at).toLocaleDateString()
+                      : 'Draft';
+                    return (
+                      <option key={c.id} value={c.id}>
+                        📄 {c.title}.pdf — {itemsArr.length} line item(s) • $
+                        {tot.toLocaleString('en-US', {
+                          minimumFractionDigits: 2,
+                          maximumFractionDigits: 2,
+                        })}{' '}
+                        ({c.status === 'quoted' ? `Printed ${dateLabel}` : 'Draft'})
+                      </option>
+                    );
+                  })}
+                </select>
+              </div>
+            )}
 
             {pdfAttachments.length > 0 && (
               <div className="flex flex-col sm:flex-row gap-2">
