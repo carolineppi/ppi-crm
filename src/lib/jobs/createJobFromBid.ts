@@ -19,6 +19,11 @@ export interface JobOverrides {
   wonConfirmedBy?: string | null;
   scopePdfFilename?: string | null;
   scopePdfUrl?: string | null;
+  contractFilename?: string | null;
+  contractUrl?: string | null;
+  contractStatus?: string | null;
+  pocFirstName?: string | null;
+  pocLastName?: string | null;
   lineItems?: any[];
 }
 
@@ -125,6 +130,18 @@ export async function createOrSyncJobFromBid(
       overrides.scopePdfUrl !== undefined
         ? overrides.scopePdfUrl
         : existingJob?.scope_pdf_url ?? null,
+    contract_filename:
+      overrides.contractFilename !== undefined
+        ? overrides.contractFilename
+        : existingJob?.contract_filename ?? null,
+    contract_url:
+      overrides.contractUrl !== undefined
+        ? overrides.contractUrl
+        : existingJob?.contract_url ?? null,
+    contract_status:
+      overrides.contractStatus !== undefined
+        ? overrides.contractStatus
+        : existingJob?.contract_status ?? null,
     line_items:
       Array.isArray(overrides.lineItems)
         ? overrides.lineItems
@@ -135,6 +152,8 @@ export async function createOrSyncJobFromBid(
       Array.isArray(existingJob?.contacts) && existingJob.contacts.length > 0
         ? existingJob.contacts
         : overrides.clientName ||
+          overrides.pocFirstName ||
+          overrides.pocLastName ||
           overrides.clientPhone ||
           overrides.clientEmail ||
           bid.client_name ||
@@ -145,11 +164,14 @@ export async function createOrSyncJobFromBid(
               id: 'primary-init',
               name:
                 overrides.clientName ??
-                bid.client_name ??
-                bid.sender_name ??
-                overrides.clientCompany ??
-                bid.client_company ??
-                'Primary Contact',
+                ([overrides.pocFirstName, overrides.pocLastName].filter(Boolean).join(' ').trim() ||
+                bid.client_name ||
+                bid.sender_name ||
+                overrides.clientCompany ||
+                bid.client_company ||
+                'Primary Contact'),
+              firstName: overrides.pocFirstName ?? null,
+              lastName: overrides.pocLastName ?? null,
               role: 'Primary POC',
               company: overrides.clientCompany ?? bid.client_company ?? null,
               phone: overrides.clientPhone ?? bid.client_phone ?? null,

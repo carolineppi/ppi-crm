@@ -633,6 +633,29 @@ export default function JobViewerPage() {
                   <strong>{job.estimator_name || 'N/A'}</strong>
                 </span>
               </div>
+              {(job.contract_filename || job.contract_status) && (
+                <div className="flex items-center gap-2 pt-1 border-t border-slate-100 flex-wrap">
+                  <FileText className="w-4 h-4 text-indigo-600 shrink-0" />
+                  <span>Contract: </span>
+                  {job.contract_url ? (
+                    <a
+                      href={job.contract_url}
+                      target="_blank"
+                      rel="noopener noreferrer"
+                      className="font-bold text-blue-700 hover:underline truncate max-w-[180px]"
+                    >
+                      {job.contract_filename || 'View Contract'}
+                    </a>
+                  ) : (
+                    <strong>{job.contract_filename || 'Attached'}</strong>
+                  )}
+                  {job.contract_status && (
+                    <span className="px-2 py-0.5 rounded-full bg-indigo-50 text-indigo-800 border border-indigo-200 text-[10px] font-bold">
+                      {job.contract_status}
+                    </span>
+                  )}
+                </div>
+              )}
               {job.scope_pdf_filename && (
                 <div className="flex items-center gap-2 pt-1 border-t border-slate-100">
                   <FileText className="w-4 h-4 text-emerald-600" />

@@ -26,6 +26,17 @@ const ESTIMATORS = [
   'Jennifer MacPherson',
 ];
 
+const CONTRACT_STATUS_OPTIONS = [
+  'Contract Received',
+  'PO Received',
+  'Docusign',
+  'Signed Quote',
+  'Notice to Proceed',
+  'Verbal',
+  'Paid in Full',
+  'Deposit Received',
+] as const;
+
 export interface WonBidSeed {
   id: string;
   bidNumber?: string | null;
@@ -59,9 +70,16 @@ export default function ConfirmWonJobModal({
   const [jobNumber, setJobNumber] = useState('');
   const [projectName, setProjectName] = useState('');
   const [clientCompany, setClientCompany] = useState('');
-  const [clientName, setClientName] = useState('');
+  const [pocFirstName, setPocFirstName] = useState('');
+  const [pocLastName, setPocLastName] = useState('');
   const [clientPhone, setClientPhone] = useState('');
   const [clientEmail, setClientEmail] = useState('');
+  const [contractStatus, setContractStatus] = useState('');
+  const [contractDocs, setContractDocs] = useState<
+    Array<{ filename: string; url: string; uploadedAt?: string }>
+  >([]);
+  const [selectedContractIdx, setSelectedContractIdx] = useState<number>(-1);
+  const [isUploadingContract, setIsUploadingContract] = useState(false);
   const [addressStreet, setAddressStreet] = useState('');
   const [addressCity, setAddressCity] = useState('');
   const [addressState, setAddressState] = useState('');
@@ -190,15 +208,67 @@ export default function ConfirmWonJobModal({
     );
   };
 
+  const handleUploadContract = async (file: File) => {
+    if (!bid) return;
+    setIsUploadingContract(true);
+    setErrorMsg(null);
+    try {
+      const fd = new FormData();
+      fd.append('file', file);
+      fd.append('category', 'contracts');
+      const res = await fetch(`/api/bid-requests/${bid.id}/documents`, {
+        method: 'POST',
+        body: fd,
+      });
+      const data = await res.json();
+      if (!res.ok) {
+        setErrorMsg(data.error || 'Failed to upload contract document.');
+        return;
+      }
+      const doc = data.document;
+      if (doc) {
+        setContractDocs((prev) => {
+          const next = [
+            ...prev,
+            {
+              filename: doc.filename,
+              url: doc.storageUrl,
+              uploadedAt: doc.uploadedAt,
+            },
+          ];
+          setSelectedContractIdx(next.length - 1);
+          return next;
+        });
+      }
+    } catch (err: any) {
+      setErrorMsg(err instanceof Error ? err.message : 'Failed to upload contract.');
+    } finally {
+      setIsUploadingContract(false);
+    }
+  };
+
   useEffect(() => {
     if (!isOpen || !bid) return;
     setErrorMsg(null);
     setJobNumber(bid.bidNumber || `JOB-${bid.id.slice(0, 6).toUpperCase()}`);
     setProjectName(bid.projectName || '');
     setClientCompany(bid.clientCompany || '');
-    setClientName(bid.clientName || '');
+
+    const rawName = (bid.clientName || '').trim();
+    if (rawName) {
+      const parts = rawName.split(/\s+/);
+      setPocFirstName(parts[0] || '');
+      setPocLastName(parts.slice(1).join(' ') || '');
+    } else {
+      setPocFirstName('');
+      setPocLastName('');
+    }
+
     setClientPhone(bid.clientPhone || '');
     setClientEmail(bid.clientEmail || '');
+    setContractStatus('');
+    setContractDocs([]);
+    setSelectedContractIdx(-1);
     setAddressStreet(bid.addressStreet || '');
     setAddressCity(bid.addressCity || '');
     setAddressState(bid.addressState || '');
@@ -227,6 +297,22 @@ export default function ConfirmWonJobModal({
             a?.contentType === 'application/pdf'
         );
         setPdfAttachments(pdfs);
+
+        // Find any already-uploaded contract documents on this bid
+        const existingContracts = allAtts
+          .filter(
+            (a: any) =>
+              a?.category === 'contracts' ||
+              /contract|agreement|subcontract|signed.*quote|notice.*proceed/i.test(
+                a?.filename || ''
+              )
+          )
+          .map((a: any) => ({
+            filename: a.filename,
+            url: a.storageUrl || a.previewUrl,
+          }));
+        setContractDocs(existingContracts);
+        setSelectedContractIdx(existingContracts.length > 0 ? 0 : -1);
 
         // Load linked quote carts (each printed PDF quote has its exact cart line items attached)
         const carts = Array.isArray(d.quoteCarts) ? d.quoteCarts : [];
@@ -257,12 +343,48 @@ export default function ConfirmWonJobModal({
 
   if (!isOpen || !bid) return null;
 
+  const selectedContract =
+    selectedContractIdx >= 0 && contractDocs[selectedContractIdx]
+      ? contractDocs[selectedContractIdx]
+      : null;
+
   const handleConfirm = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!confirmedBy.trim()) {
       setErrorMsg('Please select or enter the estimator confirming this win.');
       return;
     }
+    if (!projectName.trim()) {
+      setErrorMsg('Job Name is required.');
+      return;
+    }
+    if (!clientCompany.trim()) {
+      setErrorMsg('Customer / GC is required.');
+      return;
+    }
+    if (!selectedContract) {
+      setErrorMsg('A Contract document is required. Please upload or select a contract.');
+      return;
+    }
+    if (!contractStatus) {
+      setErrorMsg('Contract Status is required.');
+      return;
+    }
+    if (!addressStreet.trim() && !(addressCity.trim() && addressState.trim())) {
+      setErrorMsg('Please verify the Job Location (street address or city & state).');
+      return;
+    }
+    if (!pocFirstName.trim() || !pocLastName.trim()) {
+      setErrorMsg('Point of Contact First and Last Name are required.');
+      return;
+    }
+    if (!clientEmail.trim() || !clientPhone.trim()) {
+      setErrorMsg('Point of Contact Email and Phone are required.');
+      return;
+    }
+
+    const combinedPocName = `${pocFirstName.trim()} ${pocLastName.trim()}`.trim();
+
     setIsSubmitting(true);
     setErrorMsg(null);
     try {
@@ -274,15 +396,20 @@ export default function ConfirmWonJobModal({
           wonConfirmedBy: confirmedBy.trim(),
           jobOverrides: {
             jobNumber: jobNumber.trim() || undefined,
-            projectName: projectName.trim() || 'Untitled Job',
-            clientCompany: clientCompany.trim() || undefined,
-            clientName: clientName.trim() || undefined,
-            clientPhone: clientPhone.trim() || undefined,
-            clientEmail: clientEmail.trim() || undefined,
+            projectName: projectName.trim(),
+            clientCompany: clientCompany.trim(),
+            clientName: combinedPocName,
+            pocFirstName: pocFirstName.trim(),
+            pocLastName: pocLastName.trim(),
+            clientPhone: clientPhone.trim(),
+            clientEmail: clientEmail.trim(),
             addressStreet: addressStreet.trim() || undefined,
             addressCity: addressCity.trim() || undefined,
             addressState: addressState.trim() || undefined,
             addressZip: addressZip.trim() || undefined,
+            contractFilename: selectedContract.filename,
+            contractUrl: selectedContract.url,
+            contractStatus,
             scopeOfWork: scopeOfWork.trim() || undefined,
             estimatorName: estimatorName.trim() || undefined,
             notes: notes.trim() || undefined,
@@ -379,11 +506,12 @@ export default function ConfirmWonJobModal({
             </div>
             <div className="sm:col-span-2">
               <label className="block text-[10px] font-bold uppercase text-slate-500 mb-1">
-                Project / Job Name
+                Job Name * (Typed by Estimator)
               </label>
               <input
                 type="text"
                 required
+                placeholder="Enter official job name..."
                 value={projectName}
                 onChange={(e) => setProjectName(e.target.value)}
                 className="w-full px-2.5 py-1.5 rounded-lg border border-slate-300 font-semibold"
@@ -391,57 +519,164 @@ export default function ConfirmWonJobModal({
             </div>
           </div>
 
-          {/* Contractor Details */}
+          {/* Customer & Point of Contact */}
           <div className="space-y-2 pt-1 border-t border-slate-100">
             <div className="flex items-center gap-1.5 text-[11px] font-bold text-slate-700">
               <Building2 className="w-3.5 h-3.5 text-slate-400" />
-              <span>Contractor &amp; Contact (Auto-filled from Bid)</span>
+              <span>Customer &amp; Job Point of Contact *</span>
             </div>
             <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
-              <div>
+              <div className="sm:col-span-2">
                 <label className="block text-[10px] font-bold uppercase text-slate-500 mb-1">
-                  Contractor / GC
+                  Customer / GC * (Auto-pulled — verify)
                 </label>
                 <input
                   type="text"
+                  required
                   value={clientCompany}
                   onChange={(e) => setClientCompany(e.target.value)}
-                  className="w-full px-2.5 py-1.5 rounded-lg border border-slate-300"
+                  className="w-full px-2.5 py-1.5 rounded-lg border border-slate-300 font-semibold"
                 />
               </div>
               <div>
                 <label className="block text-[10px] font-bold uppercase text-slate-500 mb-1">
-                  Contact Name
+                  POC First Name *
                 </label>
                 <input
                   type="text"
-                  value={clientName}
-                  onChange={(e) => setClientName(e.target.value)}
+                  required
+                  placeholder="First name"
+                  value={pocFirstName}
+                  onChange={(e) => setPocFirstName(e.target.value)}
                   className="w-full px-2.5 py-1.5 rounded-lg border border-slate-300"
                 />
               </div>
               <div>
                 <label className="block text-[10px] font-bold uppercase text-slate-500 mb-1">
-                  Phone
+                  POC Last Name *
                 </label>
                 <input
                   type="text"
-                  value={clientPhone}
-                  onChange={(e) => setClientPhone(e.target.value)}
+                  required
+                  placeholder="Last name"
+                  value={pocLastName}
+                  onChange={(e) => setPocLastName(e.target.value)}
                   className="w-full px-2.5 py-1.5 rounded-lg border border-slate-300"
                 />
               </div>
               <div>
                 <label className="block text-[10px] font-bold uppercase text-slate-500 mb-1">
-                  Email
+                  POC Email *
                 </label>
                 <input
                   type="email"
+                  required
+                  placeholder="name@company.com"
                   value={clientEmail}
                   onChange={(e) => setClientEmail(e.target.value)}
                   className="w-full px-2.5 py-1.5 rounded-lg border border-slate-300"
                 />
               </div>
+              <div>
+                <label className="block text-[10px] font-bold uppercase text-slate-500 mb-1">
+                  POC Phone *
+                </label>
+                <input
+                  type="tel"
+                  required
+                  placeholder="(555) 123-4567"
+                  value={clientPhone}
+                  onChange={(e) => setClientPhone(e.target.value)}
+                  className="w-full px-2.5 py-1.5 rounded-lg border border-slate-300"
+                />
+              </div>
+            </div>
+          </div>
+
+          {/* Contract & Contract Status */}
+          <div className="space-y-2.5 pt-2 border-t border-slate-100">
+            <div className="flex flex-wrap items-center justify-between gap-2">
+              <div className="flex items-center gap-1.5 text-[11px] font-bold text-slate-700">
+                <FileText className="w-3.5 h-3.5 text-emerald-600" />
+                <span>Contract &amp; Contract Status *</span>
+              </div>
+              <label className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-lg border border-dashed border-emerald-400 bg-emerald-50 hover:bg-emerald-100 text-[11px] font-bold text-emerald-800 cursor-pointer">
+                <Upload className="w-3 h-3" />
+                <span>{isUploadingContract ? 'Uploading...' : 'Upload Contract'}</span>
+                <input
+                  type="file"
+                  accept=".pdf,.doc,.docx,application/pdf"
+                  disabled={isUploadingContract}
+                  className="hidden"
+                  onChange={(e) => {
+                    const file = e.target.files?.[0];
+                    e.target.value = '';
+                    if (file) handleUploadContract(file);
+                  }}
+                />
+              </label>
+            </div>
+
+            {contractDocs.length === 0 ? (
+              <div className="p-3 rounded-xl border border-rose-200 bg-rose-50 text-rose-800 text-[11px] font-semibold">
+                No contract has been uploaded to this bid yet. Please upload the signed contract,
+                PO, or notice to proceed above before creating the job.
+              </div>
+            ) : (
+              <div className="space-y-1.5">
+                {contractDocs.map((doc, idx) => (
+                  <label
+                    key={`${doc.filename}-${idx}`}
+                    className={`flex items-center justify-between gap-2 p-2 rounded-lg border cursor-pointer ${
+                      selectedContractIdx === idx
+                        ? 'border-emerald-400 bg-emerald-50/70'
+                        : 'border-slate-200 bg-slate-50'
+                    }`}
+                  >
+                    <div className="flex items-center gap-2 min-w-0">
+                      <input
+                        type="radio"
+                        name="contractDoc"
+                        checked={selectedContractIdx === idx}
+                        onChange={() => setSelectedContractIdx(idx)}
+                      />
+                      <span className="font-semibold text-slate-800 truncate">
+                        {doc.filename}
+                      </span>
+                    </div>
+                    {doc.url && (
+                      <a
+                        href={doc.url}
+                        target="_blank"
+                        rel="noopener noreferrer"
+                        onClick={(e) => e.stopPropagation()}
+                        className="text-[11px] font-bold text-blue-700 hover:underline shrink-0"
+                      >
+                        View
+                      </a>
+                    )}
+                  </label>
+                ))}
+              </div>
+            )}
+
+            <div>
+              <label className="block text-[10px] font-bold uppercase text-slate-500 mb-1">
+                Contract Status *
+              </label>
+              <select
+                required
+                value={contractStatus}
+                onChange={(e) => setContractStatus(e.target.value)}
+                className="w-full px-2.5 py-1.5 rounded-lg border border-slate-300 bg-white font-semibold"
+              >
+                <option value="">-- Select Contract Status --</option>
+                {CONTRACT_STATUS_OPTIONS.map((opt) => (
+                  <option key={opt} value={opt}>
+                    {opt}
+                  </option>
+                ))}
+              </select>
             </div>
           </div>
 
@@ -449,7 +684,7 @@ export default function ConfirmWonJobModal({
           <div className="space-y-2 pt-1 border-t border-slate-100">
             <div className="flex items-center gap-1.5 text-[11px] font-bold text-slate-700">
               <MapPin className="w-3.5 h-3.5 text-slate-400" />
-              <span>Job Site Address (Auto-filled from Bid)</span>
+              <span>Job Location * (Auto-pulled — verify)</span>
             </div>
             <div className="grid grid-cols-1 sm:grid-cols-6 gap-2.5">
               <div className="sm:col-span-6">
