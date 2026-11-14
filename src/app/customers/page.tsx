@@ -323,6 +323,9 @@ export default function CustomersPage() {
             <Link href="/jobs" className="px-3 py-1.5 rounded-lg bg-slate-800 hover:bg-slate-700">
               Jobs
             </Link>
+            <Link href="/accounting" className="px-3 py-1.5 rounded-lg bg-slate-800 hover:bg-slate-700">
+              Accounting
+            </Link>
             <Link href="/suppliers" className="px-3 py-1.5 rounded-lg bg-slate-800 hover:bg-slate-700">
               Suppliers
             </Link>

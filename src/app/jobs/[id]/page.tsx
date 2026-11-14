@@ -92,6 +92,8 @@ export default function JobViewerPage() {
   const [generalNotes, setGeneralNotes] = useState('');
   const [isSavingGeneralNotes, setIsSavingGeneralNotes] = useState(false);
   const [generalNotesSavedMsg, setGeneralNotesSavedMsg] = useState<string | null>(null);
+  const [isRequestingBill, setIsRequestingBill] = useState(false);
+  const [billRequestMsg, setBillRequestMsg] = useState<string | null>(null);
 
   const loadJob = async () => {
     if (!jobId) return;
@@ -393,6 +395,37 @@ export default function JobViewerPage() {
     .filter(Boolean)
     .join(' • ');
 
+  const handleRequestBill = async () => {
+    if (!jobId) return;
+    setIsRequestingBill(true);
+    setBillRequestMsg(null);
+    try {
+      const res = await fetch(`/api/jobs/${jobId}/pay-applications`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          status: 'requested',
+          requestedBy: job?.project_manager || 'PM',
+          notes: 'Requested by PM from Job Viewer',
+        }),
+      });
+      const data = await res.json();
+      if (res.ok && data.payApplication) {
+        setBillRequestMsg(
+          `Billing Request #${data.payApplication.application_number} sent to Accounting Queue${
+            job?.assigned_accountant ? ` (${job.assigned_accountant})` : ''
+          }.`
+        );
+      } else {
+        setBillRequestMsg(data.error || 'Failed to submit billing request.');
+      }
+    } catch {
+      setBillRequestMsg('Network error submitting billing request.');
+    } finally {
+      setIsRequestingBill(false);
+    }
+  };
+
   return (
     <div className="min-h-screen bg-slate-100/70 text-slate-800 p-3 sm:p-6 lg:p-8 space-y-6">
       {/* Top Bar */}
@@ -430,8 +463,33 @@ export default function JobViewerPage() {
             <FileDiff className="w-4 h-4" />
             <span>Change Orders ({changeOrders.length})</span>
           </Link>
+          <button
+            type="button"
+            onClick={handleRequestBill}
+            disabled={isRequestingBill}
+            className="px-3.5 py-2 rounded-xl bg-emerald-600 hover:bg-emerald-500 disabled:opacity-60 text-white text-xs font-bold flex items-center gap-1.5 cursor-pointer"
+          >
+            <DollarSign className="w-4 h-4" />
+            <span>{isRequestingBill ? 'Requesting...' : 'Request Bill (PM)'}</span>
+          </button>
+          <Link
+            href="/accounting"
+            className="px-3.5 py-2 rounded-xl bg-amber-600 hover:bg-amber-500 text-white text-xs font-bold flex items-center gap-1.5"
+          >
+            <FileText className="w-4 h-4" />
+            <span>Accounting &amp; SOV</span>
+          </Link>
         </div>
       </div>
+
+      {billRequestMsg && (
+        <div className="bg-emerald-50 border border-emerald-200 text-emerald-900 px-4 py-3 rounded-xl text-xs font-semibold flex items-center justify-between">
+          <span>{billRequestMsg}</span>
+          <Link href="/accounting" className="underline font-bold text-emerald-700 hover:text-emerald-900">
+            Open Accounting Queue →
+          </Link>
+        </div>
+      )}
 
       {/* Financial Summary Cards */}
       <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">

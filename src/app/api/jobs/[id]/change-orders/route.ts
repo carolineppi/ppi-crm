@@ -1,5 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { createServerSupabaseClient } from '@/lib/supabase/server';
+import { syncChangeOrderToSov } from '@/lib/accounting/aia-helpers';
 
 export async function GET(
   _request: NextRequest,
@@ -68,6 +69,7 @@ export async function POST(
       .single();
 
     if (error) return NextResponse.json({ error: error.message }, { status: 500 });
+    await syncChangeOrderToSov(supabase, id, data);
     return NextResponse.json({ changeOrder: data });
   } catch (err: any) {
     return NextResponse.json(
@@ -117,6 +119,7 @@ export async function PATCH(
       .single();
 
     if (error) return NextResponse.json({ error: error.message }, { status: 500 });
+    await syncChangeOrderToSov(supabase, id, data);
     return NextResponse.json({ changeOrder: data });
   } catch (err: any) {
     return NextResponse.json(
