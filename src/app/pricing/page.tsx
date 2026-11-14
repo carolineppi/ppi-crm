@@ -133,6 +133,14 @@ export default function PricingPage() {
   } | null>(null);
   const [bidLinkSearch, setBidLinkSearch] = useState('');
 
+  // Custom Quote Item state
+  const [showCustomItemForm, setShowCustomItemForm] = useState(false);
+  const [customItemDesc, setCustomItemDesc] = useState('');
+  const [customItemMfg, setCustomItemMfg] = useState('');
+  const [customItemSku, setCustomItemSku] = useState('');
+  const [customItemQty, setCustomItemQty] = useState('1');
+  const [customItemCost, setCustomItemCost] = useState('');
+
   const fetchBooks = useCallback(async () => {
     const res = await fetch('/api/pricing/books');
     const data = await res.json();
@@ -406,6 +414,44 @@ export default function PricingPage() {
     );
   };
 
+  const updateCartItemCost = (priceItemId: string, unitCost: number) => {
+    const safeCost = Number.isFinite(unitCost) && unitCost >= 0 ? unitCost : 0;
+    setCartItems((prev) =>
+      prev.map((c) => (c.priceItemId === priceItemId ? { ...c, unitCost: safeCost } : c))
+    );
+  };
+
+  const addCustomItemToCart = (e?: React.FormEvent) => {
+    if (e) e.preventDefault();
+    const desc = customItemDesc.trim();
+    if (!desc) return;
+    const qty = Math.max(1, Math.floor(Number(customItemQty) || 1));
+    const unitCost = Math.max(0, Number(customItemCost) || 0);
+    const mfg = customItemMfg.trim() || 'Custom';
+    const sku = customItemSku.trim() || 'CUSTOM';
+    const customId = `custom-${Date.now()}-${Math.random().toString(36).slice(2, 6)}`;
+
+    setCartItems((prev) => [
+      ...prev,
+      {
+        priceItemId: customId,
+        manufacturer: mfg,
+        sku,
+        description: desc,
+        quantity: qty,
+        unitCost,
+      },
+    ]);
+    setCustomItemDesc('');
+    setCustomItemMfg('');
+    setCustomItemSku('');
+    setCustomItemQty('1');
+    setCustomItemCost('');
+    setShowCustomItemForm(false);
+    setCartTab('active');
+    setShowCartDrawer(true);
+  };
+
   const draftCarts = savedCarts.filter((c) => c.status === 'draft');
 
   const clearActiveCart = () => {
@@ -616,6 +662,19 @@ export default function PricingPage() {
             >
               {isAutoTagging ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <Sparkles className="w-3.5 h-3.5" />}
               <span>{isAutoTagging ? 'Tagging...' : `AI Auto-Tag (${untaggedCount})`}</span>
+            </button>
+            <button
+              type="button"
+              onClick={() => {
+                setCartTab('active');
+                setShowCustomItemForm(true);
+                setShowCartDrawer(true);
+              }}
+              className="px-3.5 py-1.5 rounded-xl bg-amber-600 hover:bg-amber-500 text-white text-xs font-bold flex items-center gap-1.5 shadow-sm"
+              title="Add a custom item (e.g. Toilet Partitions, Custom Mirrors) to the quote cart"
+            >
+              <Plus className="w-3.5 h-3.5" />
+              <span>Custom Item</span>
             </button>
             <button
               type="button"
@@ -1399,38 +1458,176 @@ export default function PricingPage() {
 
               {/* Cart Items */}
               <div className="space-y-2">
-                <div className="text-[10px] font-bold uppercase text-slate-500">
-                  Items in Quote ({cartItems.length} lines)
+                <div className="flex items-center justify-between gap-2">
+                  <div className="text-[10px] font-bold uppercase text-slate-500">
+                    Items in Quote ({cartItems.length} lines)
+                  </div>
+                  <button
+                    type="button"
+                    onClick={() => setShowCustomItemForm((prev) => !prev)}
+                    className="px-2.5 py-1 rounded-lg bg-amber-50 hover:bg-amber-100 border border-amber-300 text-amber-800 text-[11px] font-bold inline-flex items-center gap-1"
+                  >
+                    <Plus className="w-3 h-3" />
+                    <span>{showCustomItemForm ? 'Close Custom Form' : 'Add Custom Item'}</span>
+                  </button>
                 </div>
+
+                {showCustomItemForm && (
+                  <form
+                    onSubmit={addCustomItemToCart}
+                    className="p-3 rounded-xl border border-amber-300 bg-amber-50/70 space-y-2.5"
+                  >
+                    <div className="text-[11px] font-bold text-amber-900">
+                      Add Custom / Non-Catalog Item
+                    </div>
+                    <div>
+                      <label className="block text-[10px] font-bold uppercase text-slate-600 mb-0.5">
+                        Item Description *
+                      </label>
+                      <input
+                        type="text"
+                        required
+                        value={customItemDesc}
+                        onChange={(e) => setCustomItemDesc(e.target.value)}
+                        placeholder="e.g. Toilet Partitions, Custom Frameless Mirror 36x48..."
+                        className="w-full px-2.5 py-1.5 rounded-lg border border-slate-300 bg-white text-xs"
+                      />
+                    </div>
+                    <div className="grid grid-cols-2 gap-2">
+                      <div>
+                        <label className="block text-[10px] font-bold uppercase text-slate-600 mb-0.5">
+                          Manufacturer / Category
+                        </label>
+                        <input
+                          type="text"
+                          value={customItemMfg}
+                          onChange={(e) => setCustomItemMfg(e.target.value)}
+                          placeholder="Custom"
+                          className="w-full px-2.5 py-1.5 rounded-lg border border-slate-300 bg-white text-xs"
+                        />
+                      </div>
+                      <div>
+                        <label className="block text-[10px] font-bold uppercase text-slate-600 mb-0.5">
+                          SKU / Part #
+                        </label>
+                        <input
+                          type="text"
+                          value={customItemSku}
+                          onChange={(e) => setCustomItemSku(e.target.value)}
+                          placeholder="CUSTOM"
+                          className="w-full px-2.5 py-1.5 rounded-lg border border-slate-300 bg-white text-xs font-mono"
+                        />
+                      </div>
+                    </div>
+                    <div className="grid grid-cols-2 gap-2">
+                      <div>
+                        <label className="block text-[10px] font-bold uppercase text-slate-600 mb-0.5">
+                          Quantity
+                        </label>
+                        <input
+                          type="number"
+                          min={1}
+                          value={customItemQty}
+                          onChange={(e) => setCustomItemQty(e.target.value)}
+                          className="w-full px-2.5 py-1.5 rounded-lg border border-slate-300 bg-white text-xs"
+                        />
+                      </div>
+                      <div>
+                        <label className="block text-[10px] font-bold uppercase text-slate-600 mb-0.5">
+                          Unit Net Cost ($)
+                        </label>
+                        <input
+                          type="number"
+                          step="0.01"
+                          min={0}
+                          value={customItemCost}
+                          onChange={(e) => setCustomItemCost(e.target.value)}
+                          placeholder="0.00"
+                          className="w-full px-2.5 py-1.5 rounded-lg border border-slate-300 bg-white text-xs"
+                        />
+                      </div>
+                    </div>
+                    <div className="flex items-center justify-end gap-2 pt-1">
+                      <button
+                        type="button"
+                        onClick={() => setShowCustomItemForm(false)}
+                        className="px-3 py-1.5 rounded-lg border border-slate-300 bg-white text-slate-700 text-xs font-semibold hover:bg-slate-50"
+                      >
+                        Cancel
+                      </button>
+                      <button
+                        type="submit"
+                        disabled={!customItemDesc.trim()}
+                        className="px-3 py-1.5 rounded-lg bg-amber-600 hover:bg-amber-700 disabled:opacity-50 text-white text-xs font-bold"
+                      >
+                        Add to Quote
+                      </button>
+                    </div>
+                  </form>
+                )}
+
                 {cartItems.length === 0 ? (
                   <div className="p-6 text-center text-slate-500 border border-dashed border-slate-300 rounded-xl space-y-3">
                     <p>
-                      Click <strong>+ Add</strong> on any product in the price book to build this job&apos;s quote.
+                      Click <strong>+ Add</strong> on any product in the price book or add a custom item to build this job&apos;s quote.
                     </p>
-                    <button
-                      type="button"
-                      onClick={() => setShowCartDrawer(false)}
-                      className="px-4 py-2 rounded-xl bg-blue-600 hover:bg-blue-700 text-white font-bold text-xs inline-flex items-center gap-1.5 shadow-xs"
-                    >
-                      <Plus className="w-3.5 h-3.5" />
-                      <span>Browse Price Book &amp; Add Items</span>
-                    </button>
+                    <div className="flex flex-wrap items-center justify-center gap-2">
+                      <button
+                        type="button"
+                        onClick={() => setShowCartDrawer(false)}
+                        className="px-4 py-2 rounded-xl bg-blue-600 hover:bg-blue-700 text-white font-bold text-xs inline-flex items-center gap-1.5 shadow-xs"
+                      >
+                        <Plus className="w-3.5 h-3.5" />
+                        <span>Browse Price Book &amp; Add Items</span>
+                      </button>
+                      <button
+                        type="button"
+                        onClick={() => setShowCustomItemForm(true)}
+                        className="px-4 py-2 rounded-xl bg-amber-600 hover:bg-amber-700 text-white font-bold text-xs inline-flex items-center gap-1.5 shadow-xs"
+                      >
+                        <Plus className="w-3.5 h-3.5" />
+                        <span>Add Custom Item</span>
+                      </button>
+                    </div>
                   </div>
                 ) : (
                   cartItems.map((it) => {
                     const sellUnit = it.unitCost * (1 + (Number(cartMarkup) || 0) / 100);
+                    const isCustom = it.priceItemId.startsWith('custom-');
                     return (
                       <div
                         key={it.priceItemId}
                         className="p-2.5 rounded-xl border border-slate-200 bg-slate-50 flex items-center justify-between gap-2"
                       >
                         <div className="min-w-0 flex-1">
-                          <div className="font-bold text-slate-900">
-                            {it.manufacturer} • <span className="font-mono">{it.sku}</span>
+                          <div className="font-bold text-slate-900 flex items-center gap-1.5 flex-wrap">
+                            <span>
+                              {it.manufacturer} • <span className="font-mono">{it.sku}</span>
+                            </span>
+                            {isCustom && (
+                              <span className="px-1.5 py-0.5 rounded bg-amber-100 text-amber-800 text-[10px] font-bold uppercase">
+                                Custom
+                              </span>
+                            )}
                           </div>
                           <div className="text-[11px] text-slate-600 truncate">{it.description}</div>
-                          <div className="text-[11px] text-slate-500 mt-0.5">
-                            Net: {formatCurrency(it.unitCost)} → Quote: <strong>{formatCurrency(sellUnit)}</strong>
+                          <div className="text-[11px] text-slate-500 mt-0.5 flex items-center gap-1.5 flex-wrap">
+                            {isCustom ? (
+                              <label className="inline-flex items-center gap-1">
+                                <span>Net: $</span>
+                                <input
+                                  type="number"
+                                  step="0.01"
+                                  min={0}
+                                  value={it.unitCost}
+                                  onChange={(e) => updateCartItemCost(it.priceItemId, Number(e.target.value))}
+                                  className="w-20 px-1.5 py-0.5 rounded border border-slate-300 bg-white text-[11px] text-slate-900"
+                                />
+                              </label>
+                            ) : (
+                              <span>Net: {formatCurrency(it.unitCost)}</span>
+                            )}
+                            <span>→ Quote: <strong>{formatCurrency(sellUnit)}</strong></span>
                           </div>
                         </div>
                         <div className="flex items-center gap-1 flex-shrink-0">
