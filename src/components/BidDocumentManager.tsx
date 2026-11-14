@@ -18,6 +18,7 @@ import {
   Loader2,
   Download,
 } from 'lucide-react';
+import { uploadBidDocument } from '@/lib/uploads/uploadBidDocument';
 
 export interface BidAttachmentItem {
   filename: string;
@@ -128,22 +129,9 @@ export default function BidDocumentManager({
     setIsUploading(true);
     setUploadError(null);
 
-    const formData = new FormData();
-    formData.append('file', file);
-    formData.append('category', selectedCategory);
-
     try {
-      const res = await fetch(`/api/bid-requests/${bidId}/documents`, {
-        method: 'POST',
-        body: formData,
-      });
-
-      if (res.ok) {
-        if (onDocumentAdded) onDocumentAdded();
-      } else {
-        const err = await res.json();
-        setUploadError(err.error || 'Upload failed');
-      }
+      await uploadBidDocument(bidId, file, selectedCategory);
+      if (onDocumentAdded) onDocumentAdded();
     } catch (e: any) {
       setUploadError(e.message || 'Network error during upload');
     } finally {

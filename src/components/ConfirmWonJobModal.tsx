@@ -15,6 +15,7 @@ import {
   Trash2,
   Upload,
 } from 'lucide-react';
+import { uploadBidDocument } from '@/lib/uploads/uploadBidDocument';
 
 const ESTIMATORS = [
   'Lisa Williams',
@@ -213,19 +214,7 @@ export default function ConfirmWonJobModal({
     setIsUploadingContract(true);
     setErrorMsg(null);
     try {
-      const fd = new FormData();
-      fd.append('file', file);
-      fd.append('category', 'contracts');
-      const res = await fetch(`/api/bid-requests/${bid.id}/documents`, {
-        method: 'POST',
-        body: fd,
-      });
-      const data = await res.json();
-      if (!res.ok) {
-        setErrorMsg(data.error || 'Failed to upload contract document.');
-        return;
-      }
-      const doc = data.document;
+      const doc = await uploadBidDocument(bid.id, file, 'contracts');
       if (doc) {
         setContractDocs((prev) => {
           const next = [

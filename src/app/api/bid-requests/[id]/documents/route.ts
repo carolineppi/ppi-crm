@@ -126,8 +126,90 @@ export async function POST(
         });
       }
     } else {
-      // JSON body (e.g. updating Google Drive folder link only)
+      // JSON body (signed upload URL, document registration, or Google Drive folder link)
       const body = await request.json();
+
+      if (body.action === 'create_upload_url') {
+        const filename = typeof body.filename === 'string' ? body.filename.trim() : '';
+        if (!filename) {
+          return NextResponse.json({ error: 'Filename is required' }, { status: 400 });
+        }
+        const safeName = filename.replace(/[^a-zA-Z0-9._-]/g, '_');
+        const storagePath = `${id}/${Date.now()}_${safeName}`;
+
+        const { data: signedData, error: signedErr } = await supabase.storage
+          .from('bid-documents')
+          .createSignedUploadUrl(storagePath);
+
+        if (signedErr || !signedData?.signedUrl) {
+          return NextResponse.json(
+            { error: 'Failed to create upload URL', details: signedErr?.message },
+            { status: 500 }
+          );
+        }
+
+        const { data: publicUrlData } = supabase.storage
+          .from('bid-documents')
+          .getPublicUrl(storagePath);
+
+        return NextResponse.json({
+          success: true,
+          signedUrl: signedData.signedUrl,
+          token: signedData.token,
+          path: storagePath,
+          publicUrl: publicUrlData.publicUrl,
+        });
+      }
+
+      if (body.action === 'register_document') {
+        const filename = typeof body.filename === 'string' ? body.filename.trim() : '';
+        const storageUrl = typeof body.storageUrl === 'string' ? body.storageUrl.trim() : '';
+        if (!filename || !storageUrl) {
+          return NextResponse.json(
+            { error: 'filename and storageUrl are required' },
+            { status: 400 }
+          );
+        }
+
+        const category =
+          (typeof body.category === 'string' && body.category.trim()) ||
+          categorizeFilename(filename);
+
+        newDocumentRecord = {
+          filename,
+          size: Number(body.size) || 0,
+          contentType: body.contentType || 'application/octet-stream',
+          storageUrl,
+          category,
+          uploadedAt: new Date().toISOString(),
+          isManualUpload: true,
+        };
+
+        const existingAttachments = Array.isArray(bid.attachments) ? bid.attachments : [];
+        const existingDocs = Array.isArray(bid.bid_documents) ? bid.bid_documents : [];
+
+        const { error: updateErr } = await supabase
+          .from('bid_requests')
+          .update({
+            attachments: [...existingAttachments, newDocumentRecord],
+            bid_documents: [...existingDocs, newDocumentRecord],
+            updated_at: new Date().toISOString(),
+          })
+          .eq('id', id);
+
+        if (updateErr) {
+          return NextResponse.json(
+            { error: 'Failed to attach document to bid', details: updateErr.message },
+            { status: 500 }
+          );
+        }
+
+        return NextResponse.json({
+          success: true,
+          document: newDocumentRecord,
+        });
+      }
+
       if (body.googleDriveFolderUrl !== undefined) {
         updatedDriveUrl = typeof body.googleDriveFolderUrl === 'string' ? body.googleDriveFolderUrl.trim() : null;
       }
