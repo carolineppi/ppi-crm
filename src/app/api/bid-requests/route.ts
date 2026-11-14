@@ -148,22 +148,47 @@ export async function POST(request: NextRequest) {
         : null;
 
     const nowIso = new Date().toISOString();
+    const inviteSource =
+      typeof body.inviteSource === 'string' && body.inviteSource.trim()
+        ? body.inviteSource.trim()
+        : 'Manual Entry';
+    const contactName =
+      typeof body.clientName === 'string' && body.clientName.trim()
+        ? body.clientName.trim()
+        : null;
+    const contactPhone =
+      typeof body.clientPhone === 'string' && body.clientPhone.trim()
+        ? body.clientPhone.trim()
+        : null;
+    const contactEmail =
+      typeof body.clientEmail === 'string' && body.clientEmail.trim()
+        ? body.clientEmail.trim()
+        : null;
+
     const record = {
       bid_number: bidNumber,
       email_subject: projectName,
-      sender_email: 'manual@calendar-manager.local',
-      sender_name: body.clientCompany?.trim() || 'Manual Calendar Entry',
+      sender_email: contactEmail || 'manual@calendar-manager.local',
+      sender_name: contactName || body.clientCompany?.trim() || inviteSource,
       email_received_at: nowIso,
-      email_body_text: body.notes?.trim() || `Manual bid entry created from Calendar Schedule.`,
+      email_body_text:
+        body.notes?.trim() ||
+        body.scopeSummary?.trim() ||
+        `Invitation to bid (${inviteSource}) entered by Calendar Manager.`,
       project_name: projectName,
       client_company: body.clientCompany?.trim() || null,
+      client_name: contactName,
+      client_phone: contactPhone,
+      project_address_street: body.projectAddressStreet?.trim() || null,
       project_address_city: body.projectAddressCity?.trim() || null,
       project_address_state: body.projectAddressState?.trim() || null,
+      project_address_zip: body.projectAddressZip?.trim() || null,
+      scope_summary: body.scopeSummary?.trim() || null,
       bid_due_date: bidDueDate,
       google_drive_folder_url: body.googleDriveFolderUrl?.trim() || null,
       email_intent: 'invitation_to_bid',
       intent_confidence: 1.0,
-      intent_explanation: 'Manually created by Calendar Manager',
+      intent_explanation: `Manually entered by Calendar Manager (${inviteSource})`,
       is_human_labeled: true,
       human_label: 'ITB',
       human_labeled_at: nowIso,
@@ -174,8 +199,10 @@ export async function POST(request: NextRequest) {
       is_flagged_duplicate: false,
       raw_payload: {
         source: 'manual_calendar_entry',
+        invite_source: inviteSource,
         assigned_estimator_name: assignedEstimator,
         bid_due_time: body.bidDueTime?.trim() || null,
+        estimator_notes: body.notes?.trim() || null,
         is_labeled: true,
         human_verified: true,
         human_label: 'ITB',

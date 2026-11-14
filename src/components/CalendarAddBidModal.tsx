@@ -32,14 +32,21 @@ export default function CalendarAddBidModal({
   onClose,
   onCreated,
 }: CalendarAddBidModalProps) {
+  const [inviteSource, setInviteSource] = useState('Phone Call');
   const [projectName, setProjectName] = useState('');
   const [clientCompany, setClientCompany] = useState('');
+  const [clientName, setClientName] = useState('');
+  const [clientPhone, setClientPhone] = useState('');
+  const [clientEmail, setClientEmail] = useState('');
+  const [street, setStreet] = useState('');
   const [city, setCity] = useState('');
   const [stateCode, setStateCode] = useState('');
+  const [zip, setZip] = useState('');
   const [bidDueDate, setBidDueDate] = useState(defaultDueDate || '');
   const [bidDueTime, setBidDueTime] = useState('2:00 PM');
   const [assignedEstimator, setAssignedEstimator] = useState('');
   const [googleDriveFolderUrl, setGoogleDriveFolderUrl] = useState('');
+  const [scopeSummary, setScopeSummary] = useState('');
   const [notes, setNotes] = useState('');
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -85,14 +92,21 @@ export default function CalendarAddBidModal({
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
+          inviteSource,
           projectName: projectName.trim(),
           clientCompany: clientCompany.trim() || null,
+          clientName: clientName.trim() || null,
+          clientPhone: clientPhone.trim() || null,
+          clientEmail: clientEmail.trim() || null,
+          projectAddressStreet: street.trim() || null,
           projectAddressCity: city.trim() || null,
           projectAddressState: stateCode.trim() || null,
+          projectAddressZip: zip.trim() || null,
           bidDueDate: bidDueDate || null,
           bidDueTime: bidDueTime.trim() || null,
           assignedEstimator: assignedEstimator || null,
           googleDriveFolderUrl: googleDriveFolderUrl.trim() || null,
+          scopeSummary: scopeSummary.trim() || null,
           notes: notes.trim() || null,
         }),
       });
@@ -104,14 +118,21 @@ export default function CalendarAddBidModal({
       }
 
       // Reset form
+      setInviteSource('Phone Call');
       setProjectName('');
       setClientCompany('');
+      setClientName('');
+      setClientPhone('');
+      setClientEmail('');
+      setStreet('');
       setCity('');
       setStateCode('');
+      setZip('');
       setBidDueDate('');
       setBidDueTime('2:00 PM');
       setAssignedEstimator('');
       setGoogleDriveFolderUrl('');
+      setScopeSummary('');
       setNotes('');
 
       onCreated(data.bidRequest?.bid_number || null);
@@ -125,60 +146,123 @@ export default function CalendarAddBidModal({
 
   return (
     <div className="fixed inset-0 z-50 bg-slate-900/70 backdrop-blur-xs flex items-center justify-center p-4">
-      <div className="bg-white rounded-2xl border border-slate-200 shadow-2xl w-full max-w-lg overflow-hidden">
+      <div className="bg-white rounded-2xl border border-slate-200 shadow-2xl w-full max-w-xl overflow-hidden">
         <div className="px-5 py-4 bg-slate-900 text-white flex items-center justify-between">
           <div className="flex items-center gap-2">
             <PlusCircle className="w-5 h-5 text-emerald-400" />
-            <h3 className="text-base font-bold">Add Bid Manually to Calendar</h3>
+            <div>
+              <h3 className="text-base font-bold">New Invitation to Bid (Manual / Phone / Outside)</h3>
+              <p className="text-[11px] text-slate-300">
+                Log a bid received over the phone, walk-in, or outside platform.
+              </p>
+            </div>
           </div>
           <button onClick={onClose} className="p-1 rounded-lg hover:bg-white/10 text-slate-300 hover:text-white">
             <X className="w-5 h-5" />
           </button>
         </div>
 
-        <form onSubmit={handleSubmit} className="p-5 space-y-3 text-xs">
-          <div>
-            <label className="font-bold text-slate-700 block mb-1">Project Name *</label>
-            <input
-              type="text"
-              required
-              value={projectName}
-              onChange={(e) => setProjectName(e.target.value)}
-              placeholder="e.g. Lincoln Elementary School Additions"
-              className="w-full px-3 py-2 rounded-xl border border-slate-300 focus:outline-none focus:ring-2 focus:ring-blue-500"
-            />
-          </div>
-
-          <div>
-            <label className="font-bold text-slate-700 block mb-1">Contractor / GC</label>
-            <input
-              type="text"
-              value={clientCompany}
-              onChange={(e) => setClientCompany(e.target.value)}
-              placeholder="e.g. Nabholz Construction"
-              className="w-full px-3 py-2 rounded-xl border border-slate-300 focus:outline-none focus:ring-2 focus:ring-blue-500"
-            />
-          </div>
-
-          <div className="grid grid-cols-2 gap-3">
+        <form onSubmit={handleSubmit} className="p-5 space-y-3 text-xs max-h-[80vh] overflow-y-auto">
+          <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
             <div>
-              <label className="font-bold text-slate-700 block mb-1">City</label>
+              <label className="font-bold text-slate-700 block mb-1">Invitation Source</label>
+              <select
+                value={inviteSource}
+                onChange={(e) => setInviteSource(e.target.value)}
+                className="w-full px-3 py-2 rounded-xl border border-slate-300 bg-white font-semibold"
+              >
+                <option value="Phone Call">Phone Call</option>
+                <option value="Outside Platform">Outside Platform</option>
+                <option value="Walk-In">Walk-In</option>
+                <option value="Other">Other</option>
+              </select>
+            </div>
+            <div className="sm:col-span-2">
+              <label className="font-bold text-slate-700 block mb-1">Project / Bid Name *</label>
+              <input
+                type="text"
+                required
+                value={projectName}
+                onChange={(e) => setProjectName(e.target.value)}
+                placeholder="e.g. Lincoln Elementary School Additions"
+                className="w-full px-3 py-2 rounded-xl border border-slate-300 focus:outline-none focus:ring-2 focus:ring-blue-500"
+              />
+            </div>
+          </div>
+
+          <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+            <div>
+              <label className="font-bold text-slate-700 block mb-1">Customer / GC</label>
+              <input
+                type="text"
+                value={clientCompany}
+                onChange={(e) => setClientCompany(e.target.value)}
+                placeholder="e.g. Nabholz Construction"
+                className="w-full px-3 py-2 rounded-xl border border-slate-300 focus:outline-none focus:ring-2 focus:ring-blue-500"
+              />
+            </div>
+            <div>
+              <label className="font-bold text-slate-700 block mb-1">Contact Name (POC)</label>
+              <input
+                type="text"
+                value={clientName}
+                onChange={(e) => setClientName(e.target.value)}
+                placeholder="e.g. Jane Doe"
+                className="w-full px-3 py-2 rounded-xl border border-slate-300"
+              />
+            </div>
+            <div>
+              <label className="font-bold text-slate-700 block mb-1">Contact Phone</label>
+              <input
+                type="tel"
+                value={clientPhone}
+                onChange={(e) => setClientPhone(e.target.value)}
+                placeholder="(555) 123-4567"
+                className="w-full px-3 py-2 rounded-xl border border-slate-300"
+              />
+            </div>
+            <div>
+              <label className="font-bold text-slate-700 block mb-1">Contact Email</label>
+              <input
+                type="email"
+                value={clientEmail}
+                onChange={(e) => setClientEmail(e.target.value)}
+                placeholder="contact@gc.com"
+                className="w-full px-3 py-2 rounded-xl border border-slate-300"
+              />
+            </div>
+          </div>
+
+          <div className="space-y-2">
+            <label className="font-bold text-slate-700 block">Project Location</label>
+            <input
+              type="text"
+              value={street}
+              onChange={(e) => setStreet(e.target.value)}
+              placeholder="Street Address"
+              className="w-full px-3 py-2 rounded-xl border border-slate-300"
+            />
+            <div className="grid grid-cols-6 gap-2">
               <input
                 type="text"
                 value={city}
                 onChange={(e) => setCity(e.target.value)}
                 placeholder="City"
-                className="w-full px-3 py-2 rounded-xl border border-slate-300"
+                className="col-span-3 px-3 py-2 rounded-xl border border-slate-300"
               />
-            </div>
-            <div>
-              <label className="font-bold text-slate-700 block mb-1">State</label>
               <input
                 type="text"
                 value={stateCode}
                 onChange={(e) => setStateCode(e.target.value)}
-                placeholder="AR / OK / TX"
-                className="w-full px-3 py-2 rounded-xl border border-slate-300"
+                placeholder="State"
+                className="col-span-1 px-3 py-2 rounded-xl border border-slate-300"
+              />
+              <input
+                type="text"
+                value={zip}
+                onChange={(e) => setZip(e.target.value)}
+                placeholder="ZIP"
+                className="col-span-2 px-3 py-2 rounded-xl border border-slate-300"
               />
             </div>
           </div>
@@ -252,12 +336,23 @@ export default function CalendarAddBidModal({
           </div>
 
           <div>
+            <label className="font-bold text-slate-700 block mb-1">Scope Summary</label>
+            <input
+              type="text"
+              value={scopeSummary}
+              onChange={(e) => setScopeSummary(e.target.value)}
+              placeholder="e.g. Division 8 doors, frames, hardware, and access control"
+              className="w-full px-3 py-2 rounded-xl border border-slate-300"
+            />
+          </div>
+
+          <div>
             <label className="font-bold text-slate-700 block mb-1">Notes</label>
             <textarea
               rows={2}
               value={notes}
               onChange={(e) => setNotes(e.target.value)}
-              placeholder="Walk-in plans, phone invite, scope notes..."
+              placeholder="Phone call details, portal link, walk-in plans..."
               className="w-full px-3 py-2 rounded-xl border border-slate-300"
             />
           </div>

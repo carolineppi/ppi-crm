@@ -52,9 +52,11 @@ import {
   CheckCircle2,
   Split,
   BookOpen,
+  PlusCircle,
 } from 'lucide-react';
 import EmailDocumentViewer from '@/components/EmailDocumentViewer';
 import CalendarScheduleView from '@/components/CalendarScheduleView';
+import CalendarAddBidModal from '@/components/CalendarAddBidModal';
 import BidDocumentManager from '@/components/BidDocumentManager';
 import AssignmentRulesModal from '@/components/AssignmentRulesModal';
 import AssignmentRuleOverlay from '@/components/AssignmentRuleOverlay';
@@ -199,6 +201,7 @@ export default function DispatchDashboard() {
   const [toastMessage, setToastMessage] = useState<string | null>(null);
   const [assignmentRules, setAssignmentRules] = useState<AssignmentRule[]>([]);
   const [showRulesModal, setShowRulesModal] = useState(false);
+  const [showManualBidModal, setShowManualBidModal] = useState(false);
 
   // Pagination & Search States
   const [currentPage, setCurrentPage] = useState(1);
@@ -2458,6 +2461,16 @@ export default function DispatchDashboard() {
               {bids.filter((b) => (b.bidDueDate || b.normalizedAiDueDate) && b.sticker !== 'Spam').length}
             </span>
           </button>
+
+          <button
+            type="button"
+            onClick={() => setShowManualBidModal(true)}
+            className="px-3.5 py-1.5 rounded-xl text-xs font-bold bg-emerald-600 hover:bg-emerald-700 text-white shadow-xs transition-all flex items-center gap-1.5"
+            title="Manually log an Invitation to Bid received by phone or outside platform"
+          >
+            <PlusCircle className="w-3.5 h-3.5" />
+            <span>New ITB / Manual Bid</span>
+          </button>
         </div>
 
         {/* Layout Switcher (Full Screen Viewer vs Split 2-Pane vs Grouped Cards) */}
@@ -3850,6 +3863,20 @@ export default function DispatchDashboard() {
         estimators={ESTIMATORS}
         onRulesChanged={fetchAssignmentRules}
         onNotify={showToast}
+      />
+
+      {/* Manual Invitation to Bid Modal */}
+      <CalendarAddBidModal
+        isOpen={showManualBidModal}
+        estimators={ESTIMATORS}
+        defaultDueDate={todayYmd}
+        assignmentRules={assignmentRules}
+        existingBids={bids}
+        onClose={() => setShowManualBidModal(false)}
+        onCreated={(bidNumber) => {
+          showToast(`✔ Added manual ITB ${bidNumber || ''}!`);
+          fetchLiveBids();
+        }}
       />
     </div>
   );
