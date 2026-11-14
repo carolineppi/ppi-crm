@@ -259,8 +259,8 @@ Forwarded Email Body Core:
 ${deconstructed.forwardedBody.slice(0, 3500)}
 """`;
 
-  // Try modern models with fallback
-  const modelsToTry = ['gemini-2.5-flash', 'gemini-1.5-flash', 'gemini-flash-lite-latest'];
+  // Try active Gemini models with fallback
+  const modelsToTry = ['gemini-flash-lite-latest', 'gemini-2.0-flash'];
 
   for (const modelName of modelsToTry) {
     try {
