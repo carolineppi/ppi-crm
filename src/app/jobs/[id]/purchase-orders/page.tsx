@@ -30,6 +30,8 @@ export default function JobPurchaseOrdersPage() {
 
   const [poNumber, setPoNumber] = useState('');
   const [vendor, setVendor] = useState('');
+  const [supplierId, setSupplierId] = useState<string | null>(null);
+  const [suppliersList, setSuppliersList] = useState<any[]>([]);
   const [status, setStatus] = useState('ordered');
   const [orderDate, setOrderDate] = useState(new Date().toISOString().slice(0, 10));
   const [expectedDeliveryDate, setExpectedDeliveryDate] = useState('');
@@ -58,6 +60,12 @@ export default function JobPurchaseOrdersPage() {
 
   useEffect(() => {
     loadData();
+    fetch('/api/suppliers')
+      .then((r) => r.json())
+      .then((d) => {
+        if (Array.isArray(d.suppliers)) setSuppliersList(d.suppliers);
+      })
+      .catch(() => {});
   }, [jobId]);
 
   const loadFromJobScope = (filterVendor?: string) => {
@@ -91,6 +99,7 @@ export default function JobPurchaseOrdersPage() {
         body: JSON.stringify({
           poNumber,
           vendor,
+          supplierId,
           status,
           orderDate: orderDate || null,
           expectedDeliveryDate: expectedDeliveryDate || null,
@@ -102,6 +111,7 @@ export default function JobPurchaseOrdersPage() {
       });
       if (res.ok) {
         setVendor('');
+        setSupplierId(null);
         setExpectedDeliveryDate('');
         setTrackingNumber('');
         setNotes('');
@@ -207,15 +217,40 @@ export default function JobPurchaseOrdersPage() {
             />
           </div>
           <div className="sm:col-span-2">
-            <label className="block text-[10px] font-bold uppercase text-slate-500 mb-1">Vendor / Manufacturer</label>
+            <label className="block text-[10px] font-bold uppercase text-slate-500 mb-1">
+              Vendor / Manufacturer (Supplier Directory)
+            </label>
             <input
               type="text"
               required
-              placeholder="e.g. Bobrick, Bradley, ASI..."
+              list="suppliers-master-list"
+              placeholder="Search 260+ suppliers (e.g. Bobrick, ASI, Scranton)..."
               value={vendor}
-              onChange={(e) => setVendor(e.target.value)}
+              onChange={(e) => {
+                const val = e.target.value;
+                setVendor(val);
+                const match = suppliersList.find(
+                  (s) => s.name.toLowerCase() === val.trim().toLowerCase()
+                );
+                setSupplierId(match ? match.id : null);
+              }}
               className="w-full px-2.5 py-1.5 rounded-lg border border-slate-300 font-semibold"
             />
+            <datalist id="suppliers-master-list">
+              {suppliersList.map((s) => (
+                <option key={s.id} value={s.name} />
+              ))}
+            </datalist>
+            {supplierId && (() => {
+              const s = suppliersList.find((x) => x.id === supplierId);
+              if (!s) return null;
+              return (
+                <div className="text-[10px] text-emerald-700 font-semibold mt-1 truncate">
+                  ✓ Master Supplier{s.representative ? ` • Rep: ${s.representative}` : ''}
+                  {s.representative_phone ? ` (${s.representative_phone})` : ''}
+                </div>
+              );
+            })()}
           </div>
           <div>
             <label className="block text-[10px] font-bold uppercase text-slate-500 mb-1">Status</label>

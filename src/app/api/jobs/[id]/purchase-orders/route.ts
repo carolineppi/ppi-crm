@@ -45,6 +45,7 @@ export async function POST(
 
     const payload = {
       job_id: id,
+      supplier_id: body.supplierId || null,
       po_number: String(body.poNumber || `PO-${Date.now().toString().slice(-5)}`).trim(),
       vendor: String(body.vendor || 'Supplier').trim(),
       status: body.status || 'draft',

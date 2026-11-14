@@ -113,6 +113,15 @@ export default function ConfirmWonJobModal({
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [errorMsg, setErrorMsg] = useState<string | null>(null);
 
+  // Customer Master Matching & Multi-POC
+  const [matchedCustomerId, setMatchedCustomerId] = useState<string | null>(null);
+  const [matchedCustomer, setMatchedCustomer] = useState<any | null>(null);
+  const [customerCandidates, setCustomerCandidates] = useState<any[]>([]);
+  const [showCustomerPicker, setShowCustomerPicker] = useState(false);
+  const [customerSearch, setCustomerSearch] = useState('');
+  const [customerSearchResults, setCustomerSearchResults] = useState<any[]>([]);
+  const [isCreatingCustomer, setIsCreatingCustomer] = useState(false);
+
   const parseAttachedPdf = async (att: {
     filename: string;
     fromBidId: string;
@@ -263,6 +272,31 @@ export default function ConfirmWonJobModal({
     setAddressState(bid.addressState || '');
     setAddressZip(bid.addressZip || '');
     setScopeOfWork(bid.scopeOfWork || '');
+    setMatchedCustomerId(null);
+    setMatchedCustomer(null);
+    setCustomerCandidates([]);
+    setShowCustomerPicker(false);
+    setCustomerSearch('');
+    setCustomerSearchResults([]);
+
+    const matchParams = new URLSearchParams();
+    if (bid.clientCompany) matchParams.set('company', bid.clientCompany);
+    if (bid.clientEmail) matchParams.set('email', bid.clientEmail);
+    if (bid.clientPhone) matchParams.set('phone', bid.clientPhone);
+    fetch(`/api/customers/match?${matchParams.toString()}`)
+      .then((r) => r.json())
+      .then((d) => {
+        if (!active) return;
+        if (Array.isArray(d.candidates)) setCustomerCandidates(d.candidates);
+        if (d.bestMatch?.customer) {
+          setMatchedCustomerId(d.bestMatch.customer.id);
+          setMatchedCustomer(d.bestMatch.customer);
+          setClientCompany(d.bestMatch.customer.name);
+        }
+      })
+      .catch(() => {
+        // ignore match errors
+      });
     setEstimatorName(bid.estimatorName || ESTIMATORS[0] || '');
     setConfirmedBy(bid.estimatorName || ESTIMATORS[0] || '');
     setNotes(bid.notes || '');
@@ -330,6 +364,49 @@ export default function ConfirmWonJobModal({
     };
   }, [isOpen, bid]);
 
+  useEffect(() => {
+    if (!showCustomerPicker) return;
+    const q = customerSearch.trim();
+    const t = setTimeout(() => {
+      fetch(`/api/customers?q=${encodeURIComponent(q)}`)
+        .then((r) => r.json())
+        .then((d) => {
+          if (Array.isArray(d.customers)) setCustomerSearchResults(d.customers.slice(0, 25));
+        })
+        .catch(() => {});
+    }, 200);
+    return () => clearTimeout(t);
+  }, [showCustomerPicker, customerSearch]);
+
+  const handleQuickCreateCustomer = async () => {
+    const name = clientCompany.trim();
+    if (!name) return;
+    setIsCreatingCustomer(true);
+    try {
+      const res = await fetch('/api/customers', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          name,
+          customerType: 'Contractor',
+          standing: 'No History',
+          addressStreet: addressStreet.trim() || null,
+          addressCity: addressCity.trim() || null,
+          addressState: addressState.trim() || null,
+          addressZip: addressZip.trim() || null,
+        }),
+      });
+      const data = await res.json();
+      if (res.ok && data.customer) {
+        setMatchedCustomerId(data.customer.id);
+        setMatchedCustomer(data.customer);
+        setShowCustomerPicker(false);
+      }
+    } finally {
+      setIsCreatingCustomer(false);
+    }
+  };
+
   if (!isOpen || !bid) return null;
 
   const selectedContract =
@@ -377,6 +454,23 @@ export default function ConfirmWonJobModal({
     setIsSubmitting(true);
     setErrorMsg(null);
     try {
+      let finalCustomerId = matchedCustomerId;
+      if (!finalCustomerId && clientCompany.trim()) {
+        const custRes = await fetch('/api/customers', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            name: clientCompany.trim(),
+            customerType: 'Contractor',
+            standing: 'No History',
+          }),
+        });
+        const custData = await custRes.json();
+        if (custRes.ok && custData.customer?.id) {
+          finalCustomerId = custData.customer.id;
+        }
+      }
+
       const res = await fetch(`/api/bid-requests/${bid.id}`, {
         method: 'PATCH',
         headers: { 'Content-Type': 'application/json' },
@@ -384,6 +478,7 @@ export default function ConfirmWonJobModal({
           estimatorStatus: 'won',
           wonConfirmedBy: confirmedBy.trim(),
           jobOverrides: {
+            customerId: finalCustomerId || undefined,
             jobNumber: jobNumber.trim() || undefined,
             projectName: projectName.trim(),
             clientCompany: clientCompany.trim(),
@@ -515,17 +610,157 @@ export default function ConfirmWonJobModal({
               <span>Customer &amp; Job Point of Contact *</span>
             </div>
             <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
-              <div className="sm:col-span-2">
-                <label className="block text-[10px] font-bold uppercase text-slate-500 mb-1">
-                  Customer / GC * (Auto-pulled — verify)
-                </label>
+              <div className="sm:col-span-2 space-y-1.5">
+                <div className="flex flex-wrap items-center justify-between gap-2">
+                  <label className="block text-[10px] font-bold uppercase text-slate-500">
+                    Customer / GC * (Matched to Customer Master)
+                  </label>
+                  <div className="flex items-center gap-1.5">
+                    <button
+                      type="button"
+                      onClick={() => setShowCustomerPicker((p) => !p)}
+                      className="text-[10px] font-bold text-blue-700 hover:underline"
+                    >
+                      {showCustomerPicker ? 'Hide Directory Search' : 'Search / Switch Customer'}
+                    </button>
+                    {!matchedCustomerId && clientCompany.trim() && (
+                      <button
+                        type="button"
+                        disabled={isCreatingCustomer}
+                        onClick={handleQuickCreateCustomer}
+                        className="px-2 py-0.5 rounded bg-emerald-600 hover:bg-emerald-700 text-white text-[10px] font-bold"
+                      >
+                        {isCreatingCustomer ? 'Creating...' : '+ Save as New Customer'}
+                      </button>
+                    )}
+                  </div>
+                </div>
+
                 <input
                   type="text"
                   required
                   value={clientCompany}
-                  onChange={(e) => setClientCompany(e.target.value)}
+                  onChange={(e) => {
+                    setClientCompany(e.target.value);
+                    if (matchedCustomer && e.target.value !== matchedCustomer.name) {
+                      setMatchedCustomerId(null);
+                      setMatchedCustomer(null);
+                    }
+                  }}
                   className="w-full px-2.5 py-1.5 rounded-lg border border-slate-300 font-semibold"
                 />
+
+                {matchedCustomer ? (
+                  <div
+                    className={`px-2.5 py-1.5 rounded-lg border text-[11px] flex items-center justify-between gap-2 ${
+                      matchedCustomer.bad_pay
+                        ? 'bg-rose-50 border-rose-300 text-rose-900'
+                        : 'bg-emerald-50 border-emerald-200 text-emerald-900'
+                    }`}
+                  >
+                    <div>
+                      <span className="font-bold">Linked Customer:</span> {matchedCustomer.name} (
+                      {matchedCustomer.standing || 'No History'})
+                      {matchedCustomer.bad_pay && (
+                        <span className="ml-2 font-extrabold text-rose-700">
+                          ⚠ BAD PAY{matchedCustomer.bad_pay_notes ? `: ${matchedCustomer.bad_pay_notes}` : ''}
+                        </span>
+                      )}
+                    </div>
+                    <button
+                      type="button"
+                      onClick={() => {
+                        setMatchedCustomerId(null);
+                        setMatchedCustomer(null);
+                      }}
+                      className="text-[10px] font-bold underline flex-shrink-0"
+                    >
+                      Unlink
+                    </button>
+                  </div>
+                ) : customerCandidates.length > 0 ? (
+                  <div className="flex flex-wrap items-center gap-1.5 text-[10px]">
+                    <span className="text-slate-500 font-semibold">Possible matches:</span>
+                    {customerCandidates.slice(0, 4).map((cand) => (
+                      <button
+                        key={cand.customer.id}
+                        type="button"
+                        onClick={() => {
+                          setMatchedCustomerId(cand.customer.id);
+                          setMatchedCustomer(cand.customer);
+                          setClientCompany(cand.customer.name);
+                        }}
+                        className="px-2 py-0.5 rounded-full bg-amber-50 border border-amber-300 text-amber-900 hover:bg-amber-100 font-semibold"
+                      >
+                        {cand.customer.name} ({cand.score}%)
+                      </button>
+                    ))}
+                  </div>
+                ) : (
+                  <div className="text-[10px] text-slate-500">
+                    No existing customer matched — a new Customer record will be created automatically on confirm.
+                  </div>
+                )}
+
+                {showCustomerPicker && (
+                  <div className="p-2.5 rounded-xl border border-slate-200 bg-slate-50 space-y-2">
+                    <input
+                      type="text"
+                      value={customerSearch}
+                      onChange={(e) => setCustomerSearch(e.target.value)}
+                      placeholder="Type to search 1,100+ customers..."
+                      className="w-full px-2.5 py-1.5 rounded-lg border border-slate-300 bg-white text-xs"
+                    />
+                    <div className="max-h-36 overflow-y-auto divide-y divide-slate-200 bg-white rounded-lg border border-slate-200">
+                      {customerSearchResults.map((c) => (
+                        <button
+                          key={c.id}
+                          type="button"
+                          onClick={() => {
+                            setMatchedCustomerId(c.id);
+                            setMatchedCustomer(c);
+                            setClientCompany(c.name);
+                            setShowCustomerPicker(false);
+                          }}
+                          className="w-full text-left px-2.5 py-1.5 hover:bg-blue-50 text-[11px] flex items-center justify-between"
+                        >
+                          <span className="font-bold text-slate-900">{c.name}</span>
+                          <span className="text-[10px] text-slate-500">
+                            {c.standing || 'No History'} • {c.contacts?.length || 0} POC
+                          </span>
+                        </button>
+                      ))}
+                    </div>
+                  </div>
+                )}
+
+                {matchedCustomer?.contacts?.length > 0 && (
+                  <div className="pt-1 space-y-1">
+                    <div className="text-[10px] font-bold uppercase text-slate-500">
+                      Existing POCs at {matchedCustomer.name} (click to fill, or type new below to add):
+                    </div>
+                    <div className="flex flex-wrap gap-1.5">
+                      {matchedCustomer.contacts.map((poc: any) => (
+                        <button
+                          key={poc.id}
+                          type="button"
+                          onClick={() => {
+                            setPocFirstName(poc.first_name || (poc.full_name || '').split(' ')[0] || '');
+                            setPocLastName(
+                              poc.last_name || (poc.full_name || '').split(' ').slice(1).join(' ') || ''
+                            );
+                            if (poc.email) setClientEmail(poc.email);
+                            if (poc.phone) setClientPhone(poc.phone);
+                          }}
+                          className="px-2 py-1 rounded-lg bg-blue-50 hover:bg-blue-100 border border-blue-200 text-[10px] font-semibold text-blue-900"
+                        >
+                          {poc.full_name || poc.email}
+                          {poc.is_primary ? ' ★' : ''}
+                        </button>
+                      ))}
+                    </div>
+                  </div>
+                )}
               </div>
               <div>
                 <label className="block text-[10px] font-bold uppercase text-slate-500 mb-1">

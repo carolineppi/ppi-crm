@@ -1,5 +1,9 @@
 import { SupabaseClient } from '@supabase/supabase-js';
 import { groupItemsBySection } from '@/lib/pricing/quote-sections';
+import {
+  findBestCustomerMatches,
+  upsertCustomerContact,
+} from '@/lib/customers/matchCustomer';
 
 export interface JobOverrides {
   jobNumber?: string | null;
@@ -25,6 +29,7 @@ export interface JobOverrides {
   contractStatus?: string | null;
   pocFirstName?: string | null;
   pocLastName?: string | null;
+  customerId?: string | null;
   lineItems?: any[];
 }
 
@@ -68,8 +73,25 @@ export async function createOrSyncJobFromBid(
   const assignedEstimator = bid.raw_payload?.assigned_estimator_name || null;
   const now = new Date().toISOString();
 
+  let resolvedCustomerId: string | null =
+    overrides.customerId !== undefined
+      ? overrides.customerId
+      : existingJob?.customer_id ?? null;
+
+  if (!resolvedCustomerId) {
+    const matchRes = await findBestCustomerMatches(supabase, {
+      companyName: overrides.clientCompany ?? bid.client_company ?? bid.ai_analysis?.clientCompany,
+      email: overrides.clientEmail ?? bid.sender_email,
+      phone: overrides.clientPhone ?? bid.client_phone,
+    });
+    if (matchRes.bestMatch) {
+      resolvedCustomerId = matchRes.bestMatch.customer.id;
+    }
+  }
+
   const payload = {
     bid_request_id: bid.id,
+    customer_id: resolvedCustomerId,
     job_number:
       overrides.jobNumber ??
       existingJob?.job_number ??
@@ -194,10 +216,28 @@ export async function createOrSyncJobFromBid(
       .select()
       .single();
     if (error) throw new Error(error.message);
+    if (resolvedCustomerId) {
+      await upsertCustomerContact(supabase, resolvedCustomerId, {
+        firstName: overrides.pocFirstName,
+        lastName: overrides.pocLastName,
+        fullName: payload.client_name,
+        email: payload.client_email,
+        phone: payload.client_phone,
+      });
+    }
     return { job: data, created: false };
   }
 
   const { data, error } = await supabase.from('jobs').insert(payload).select().single();
   if (error) throw new Error(error.message);
+  if (resolvedCustomerId) {
+    await upsertCustomerContact(supabase, resolvedCustomerId, {
+      firstName: overrides.pocFirstName,
+      lastName: overrides.pocLastName,
+      fullName: payload.client_name,
+      email: payload.client_email,
+      phone: payload.client_phone,
+    });
+  }
   return { job: data, created: true };
 }
