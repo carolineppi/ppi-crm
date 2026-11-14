@@ -17,6 +17,7 @@ interface QuotePrintModalProps {
   projectName?: string | null;
   contractorName?: string | null;
   bidNumber?: string | null;
+  estimatorName?: string | null;
   markupPercent: number;
   notes?: string | null;
   items: QuoteCartItem[];
@@ -35,6 +36,7 @@ export default function QuotePrintModal({
   projectName,
   contractorName,
   bidNumber,
+  estimatorName,
   markupPercent,
   notes,
   items,
@@ -287,7 +289,7 @@ export default function QuotePrintModal({
             <div className="flex justify-end pr-12 pt-1">
               <div>
                 <div>Respectfully Submitted,</div>
-                <div>Harrison Schumaker</div>
+                <div>{estimatorName?.trim() || 'Partition Plus Estimating'}</div>
               </div>
             </div>
             <div className="flex items-center justify-between pt-4 text-sm">

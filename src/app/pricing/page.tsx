@@ -122,7 +122,7 @@ export default function PricingPage() {
   const [cartHydrated, setCartHydrated] = useState(false);
   const [cartTab, setCartTab] = useState<'active' | 'saved'>('active');
   const [isParsingPdf, setIsParsingPdf] = useState(false);
-  const [bidsList, setBidsList] = useState<Array<{ id: string; bid_number: string | null; project_name: string | null; email_subject: string; client_company: string | null; estimator_status: string | null }>>([]);
+  const [bidsList, setBidsList] = useState<Array<{ id: string; bid_number: string | null; project_name: string | null; email_subject: string; client_company: string | null; estimator_status: string | null; assigned_estimator_name?: string | null }>>([]);
   const [savedCarts, setSavedCarts] = useState<any[]>([]);
   const [showPrintModal, setShowPrintModal] = useState(false);
   const [bidSwitchedToQuoted, setBidSwitchedToQuoted] = useState(false);
@@ -131,6 +131,7 @@ export default function PricingPage() {
     projectName?: string | null;
     contractorName?: string | null;
     bidNumber?: string | null;
+    estimatorName?: string | null;
     markupPercent: number;
     notes?: string;
     items: QuoteCartItem[];
@@ -639,6 +640,7 @@ export default function PricingPage() {
           projectName: targetBid?.project_name || targetBid?.email_subject,
           contractorName: targetBid?.client_company,
           bidNumber: targetBid?.bid_number,
+          estimatorName: targetBid?.assigned_estimator_name || null,
           markupPercent: targetMarkup,
           notes: targetNotes,
           items: targetItems,
@@ -2284,6 +2286,7 @@ export default function PricingPage() {
         projectName={printSnapshot?.projectName ?? (linkedBid?.project_name || linkedBid?.email_subject)}
         contractorName={printSnapshot?.contractorName ?? linkedBid?.client_company}
         bidNumber={printSnapshot?.bidNumber ?? linkedBid?.bid_number}
+        estimatorName={printSnapshot?.estimatorName ?? linkedBid?.assigned_estimator_name}
         markupPercent={printSnapshot?.markupPercent ?? (Number(cartMarkup) || 0)}
         notes={printSnapshot?.notes ?? cartNotes}
         items={printSnapshot?.items ?? cartItems}
