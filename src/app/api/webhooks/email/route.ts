@@ -7,6 +7,7 @@ import {
   extractJobCode,
 } from '@/lib/email-parser/deduplication';
 import { classifyEmailWithML } from '@/lib/ml/classifier';
+import { analyzeEmailWithAI } from '@/lib/email-parser/ai-classifier';
 import { deconstructEmailThread } from '@/lib/email-parser/thread-cleaner';
 import { normalizeDateToYyyyMmDd } from '@/lib/date-utils';
 import { findBestBidMatchForAddendum, extractProjectCandidate } from '@/lib/matching/match-addendums';
@@ -174,7 +175,7 @@ export async function POST(request: NextRequest) {
       }
     }
 
-    // 1. Thread deconstruction & Machine Learning Classification
+    // 1. Thread deconstruction & First-Round ML Classification
     const deconstructed = deconstructEmailThread(
       payload.subject,
       bodyText,
@@ -196,29 +197,70 @@ export async function POST(request: NextRequest) {
       deconstructed.originalSenderEmail || directSenderEmail
     );
 
+    // 2. Second-Round LLM Confirmation & Address/Due-Date Extraction
+    const llm = await analyzeEmailWithAI({
+      subject: payload.subject,
+      bodyText,
+      senderEmail: directSenderEmail,
+      senderName: directSenderName,
+      attachmentFilenames,
+      mlPrediction: {
+        predictedClass: ml.predictedClass,
+        sticker: ml.sticker,
+        confidence: ml.confidence,
+      },
+    });
+
+    const canonicalizeSticker = (s: string) => {
+      if (s === 'Addendum / RFI' || s === 'Date Reminder') return 'Addendum';
+      if (s === 'Contractor Awarded') return 'Won';
+      return s;
+    };
+
+    const canonicalMl = canonicalizeSticker(ml.sticker);
+    const canonicalLlm = canonicalizeSticker(llm.sticker);
+    const mlLlmAgreed = Boolean(llm.agreesWithMl && canonicalMl === canonicalLlm);
+    const needsCalendarManagerReview = !mlLlmAgreed;
+
     const ai = {
       sticker: ml.sticker,
       confidence: ml.confidence / 100,
-      reasoning: `Categorized by ML algorithm: ${ml.predictedClass} (${ml.confidence}% confidence)`,
-      isForwarded: deconstructed.isForwarded,
-      forwardedBy: deconstructed.forwardedBy,
-      originalSenderEmail: deconstructed.originalSenderEmail,
-      originalSenderName: deconstructed.originalSenderName,
-      originalSubject: deconstructed.originalSubject,
-      projectName: payload.projectName || extractedMeta.projectName,
-      projectAddress: null,
-      jobCode: extractJobCode(payload.subject) || extractJobCode(bodyText),
-      clientCompany: payload.clientCompany || extractedMeta.clientCompany,
-      bidDueDate: payload.bidDueDate || extractedMeta.bidDueDate,
-      bidDueTime: extractedMeta.bidDueTime,
-      scopeSummary: deconstructed.cleanSubject,
-      matchedBidNumber: null as string | null,
-      matchConfidence: 0,
-      matchReason: null as string | null,
-      isDueDateRevised: false,
-      revisedDueDate: null,
-      dueDateRevisionNotes: null,
-      isGcWonPrime: ml.predictedClass === 'Contractor Awarded',
+      reasoning: mlLlmAgreed
+        ? `ML (${ml.predictedClass} ${ml.confidence}%) confirmed by LLM: ${llm.reasoning}`
+        : `FLAGGED FOR REVIEW — ML predicted "${ml.sticker}" (${ml.confidence}%), LLM predicted "${llm.sticker}": ${llm.reasoning}`,
+      isForwarded: llm.isForwarded ?? deconstructed.isForwarded,
+      forwardedBy: llm.forwardedBy ?? deconstructed.forwardedBy,
+      originalSenderEmail: llm.originalSenderEmail ?? deconstructed.originalSenderEmail,
+      originalSenderName: llm.originalSenderName ?? deconstructed.originalSenderName,
+      originalSubject: llm.originalSubject ?? deconstructed.originalSubject,
+      projectName: payload.projectName || llm.projectName || extractedMeta.projectName,
+      projectAddress: llm.projectAddress || null,
+      projectAddressStreet: llm.projectAddressStreet || null,
+      projectAddressCity: llm.projectAddressCity || null,
+      projectAddressState: llm.projectAddressState || null,
+      projectAddressZip: llm.projectAddressZip || null,
+      jobCode: llm.jobCode || extractJobCode(payload.subject) || extractJobCode(bodyText),
+      clientCompany: payload.clientCompany || llm.clientCompany || extractedMeta.clientCompany,
+      bidDueDate: llm.bidDueDate || payload.bidDueDate || extractedMeta.bidDueDate,
+      bidDueTime: llm.bidDueTime || extractedMeta.bidDueTime,
+      scopeSummary: llm.scopeSummary || deconstructed.cleanSubject,
+      matchedBidNumber: llm.matchedBidNumber || null,
+      matchConfidence: llm.matchConfidence || 0,
+      matchReason: llm.matchReason || null,
+      isDueDateRevised: Boolean(llm.isDueDateRevised),
+      revisedDueDate: llm.revisedDueDate || null,
+      dueDateRevisionNotes: llm.dueDateRevisionNotes || null,
+      isGcWonPrime: Boolean(llm.isGcWonPrime || ml.predictedClass === 'Contractor Awarded'),
+      mlLlmReview: {
+        needsReview: needsCalendarManagerReview,
+        mlSticker: ml.sticker,
+        mlClass: ml.predictedClass,
+        mlConfidence: ml.confidence,
+        llmSticker: llm.sticker,
+        llmConfidence: Math.round((llm.confidence || 0) * 100),
+        llmReasoning: llm.reasoning,
+        resolved: !needsCalendarManagerReview,
+      },
     };
 
     // 2. Identify the true client (if forwarded by coworker, use original GC)
@@ -338,7 +380,11 @@ export async function POST(request: NextRequest) {
     let filterStatus = 'inbox';
     let estimatorStatus = 'unassigned';
 
-    if (ai.sticker === 'Spam') {
+    if (needsCalendarManagerReview) {
+      // LLM disagreed with ML — hold in Calendar Manager Review queue instead of auto-routing/archiving
+      triageStatus = 'pending_triage';
+      filterStatus = 'inbox';
+    } else if (ai.sticker === 'Spam') {
       triageStatus = 'archived';
       filterStatus = 'auto_filtered';
     } else if (ai.sticker === 'Won') {
@@ -404,6 +450,7 @@ export async function POST(request: NextRequest) {
           confidence: ml.confidence,
           probabilities: ml.probabilities,
         },
+        ml_llm_review: ai.mlLlmReview,
         ...(assignedEstimatorName ? {
           assigned_estimator_name: assignedEstimatorName,
           auto_dispatched: isAutoDispatched,
@@ -414,6 +461,10 @@ export async function POST(request: NextRequest) {
 
       project_name: effectiveProjectName,
       client_company: effectiveClientCompany,
+      project_address_street: ai.projectAddressStreet,
+      project_address_city: ai.projectAddressCity,
+      project_address_state: ai.projectAddressState,
+      project_address_zip: ai.projectAddressZip,
       job_code: effectiveJobCode,
       bid_due_date: (() => {
         const rawDate = ai.bidDueDate || payload.bidDueDate;
@@ -443,7 +494,7 @@ export async function POST(request: NextRequest) {
       // Intent & AI Extraction
       email_intent: ml.intent || intentMap[ai.sticker] || 'invitation_to_bid',
       intent_confidence: ml.confidence / 100,
-      intent_explanation: `Classified by ML algorithm (${ml.predictedClass} ${ml.confidence}%)`,
+      intent_explanation: ai.reasoning,
       is_human_labeled: false,
       human_label: null,
       filter_status: filterStatus,
@@ -466,7 +517,7 @@ export async function POST(request: NextRequest) {
       is_gc_won_prime: Boolean(ai.isGcWonPrime || (ai.sticker === 'Won' && !ai.matchedBidNumber)),
 
       triage_status: triageStatus,
-      priority: ai.sticker === 'Won' ? 'urgent' : 'normal',
+      priority: needsCalendarManagerReview ? 'high' : ai.sticker === 'Won' ? 'urgent' : 'normal',
       estimator_status: estimatorStatus,
     };
 

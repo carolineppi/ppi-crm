@@ -43,7 +43,23 @@ export const aiEmailAnalysisSchema = z.object({
   projectAddress: z
     .string()
     .nullable()
-    .describe('Project street address, city, or state if mentioned (e.g. "Hardy, VA", "Richmond, VA")'),
+    .describe('Full project street address, city, state, and ZIP if mentioned (e.g. "123 Main St, Austin, TX 78701")'),
+  projectAddressStreet: z
+    .string()
+    .nullable()
+    .describe('Project street address only (e.g. "123 Main St") if mentioned, else null'),
+  projectAddressCity: z
+    .string()
+    .nullable()
+    .describe('Project city name only (e.g. "Austin") if mentioned, else null'),
+  projectAddressState: z
+    .string()
+    .nullable()
+    .describe('2-letter US state abbreviation (e.g. "TX", "AR", "VA") if mentioned, else null'),
+  projectAddressZip: z
+    .string()
+    .nullable()
+    .describe('5-digit ZIP code if mentioned, else null'),
   jobCode: z
     .string()
     .nullable()
@@ -55,7 +71,14 @@ export const aiEmailAnalysisSchema = z.object({
   bidDueDate: z
     .string()
     .nullable()
-    .describe('Deadline or bid due date mentioned in the email'),
+    .describe('Bid deadline / due date in YYYY-MM-DD format if mentioned anywhere in subject or body, else null'),
+  bidDueTime: z
+    .string()
+    .nullable()
+    .describe('Bid due time (e.g. "2:00 PM") if mentioned, else null'),
+  agreesWithMl: z
+    .boolean()
+    .describe('True if your chosen sticker agrees with the first-round ML classification provided in the prompt, false if you disagree'),
   scopeSummary: z
     .string()
     .describe(
@@ -122,6 +145,11 @@ export async function analyzeEmailWithAI(input: {
   senderName?: string | null;
   attachmentFilenames?: string[];
   activeBids?: ActiveBidSummary[];
+  mlPrediction?: {
+    predictedClass: string;
+    sticker: string;
+    confidence: number;
+  };
 }): Promise<AIEmailAnalysis> {
   // 1. Thread deconstruction: split top message from quoted forwarded history
   const deconstructed: DeconstructedEmail = deconstructEmailThread(
@@ -159,6 +187,10 @@ export async function analyzeEmailWithAI(input: {
     ? `\n*** PRECEDENCE ENGINE PRE-CHECK ***\nMatched Rule: ${precedence.matchedRule}\nIndicated Sticker: "${precedence.sticker}" (${precedence.ruleReason})\nAssign sticker "${precedence.sticker}" unless there is undeniable contradicting evidence.\n***********************************\n`
     : '';
 
+  const mlContext = input.mlPrediction
+    ? `\n*** FIRST-ROUND ML CLASSIFICATION (SECOND-ROUND CONFIRMATION REQUIRED) ***\nThe ML model classified this email as: "${input.mlPrediction.sticker}" (class: "${input.mlPrediction.predictedClass}", ${input.mlPrediction.confidence}% confidence).\nConfirm if you agree (set agreesWithMl: true and match the sticker) OR if you disagree, set agreesWithMl: false, pick the correct sticker, and explain why in reasoning.\n*****************************************************************************\n`
+    : '';
+
   const prompt = `You are an expert commercial construction estimating assistant.
 Your job is to categorize this incoming email and extract structured project data.
 
@@ -173,7 +205,12 @@ HIERARCHICAL CATEGORY PRECEDENCE (STRICTLY ENFORCED):
 5. "ITB": Invitation to Bid. A brand NEW bidding opportunity or new RFP needing a new estimator assignment.
 
 ${precedenceHint}
+${mlContext}
 ${activeBidsContext}
+
+IMPORTANT EXTRACTION RULES:
+- Extract the job site address carefully into projectAddress, projectAddressStreet, projectAddressCity, projectAddressState (2-letter code), and projectAddressZip whenever mentioned in the email subject or body.
+- Extract the bid due date into bidDueDate in YYYY-MM-DD format (and bidDueTime like "2:00 PM" if present). Look for "Bid Date", "Due Date", "Bids Due", "Submit By", "Proposal Due", etc.
 
 =======================================================
 FEW-SHOT EXAMPLES:
@@ -276,9 +313,15 @@ function buildFallbackAnalysis(
     originalSubject: deconstructed.originalSubject,
     projectName: null,
     projectAddress: null,
+    projectAddressStreet: null,
+    projectAddressCity: null,
+    projectAddressState: null,
+    projectAddressZip: null,
     jobCode: null,
     clientCompany: null,
     bidDueDate: null,
+    bidDueTime: null,
+    agreesWithMl: true,
     scopeSummary: deconstructed.cleanSubject,
     matchedBidNumber: null,
     matchConfidence: 0,

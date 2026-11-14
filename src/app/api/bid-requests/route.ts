@@ -45,6 +45,7 @@ export async function GET(request: NextRequest) {
       estimator_status,
       estimator_notes:raw_payload->>estimator_notes,
       refused_by:raw_payload->>refused_by,
+      ml_llm_review:raw_payload->ml_llm_review,
       is_human_labeled,
       human_label,
       human_labeled_at,

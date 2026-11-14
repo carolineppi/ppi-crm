@@ -119,6 +119,14 @@ interface DisplayBidRequest {
   scopeSummary?: string | null;
   aiReasoning?: string | null;
   aiConfidence?: number | null;
+  mlLlmReview?: {
+    needsReview?: boolean;
+    mlSticker?: string;
+    mlConfidence?: number;
+    llmSticker?: string;
+    llmReasoning?: string;
+    resolved?: boolean;
+  } | null;
 
   // Matching Fields for Addendum / Won / Lost
   matchedBidNumber?: string | null;
@@ -382,6 +390,7 @@ export default function DispatchDashboard() {
             scopeSummary: r.scope_summary,
             aiReasoning: r.intent_explanation,
             aiConfidence: r.intent_confidence,
+            mlLlmReview: r.ml_llm_review || null,
 
             matchedBidNumber: r.matched_bid_number,
             matchConfidence: r.match_confidence,
@@ -2965,6 +2974,19 @@ export default function DispatchDashboard() {
                                   className="px-1.5 py-0.5 rounded text-[10px] font-bold bg-purple-100 text-purple-900 border border-purple-300 flex items-center gap-0.5"
                                 >
                                   <span>🚀 Dispatched</span>
+                                </span>
+                              )}
+                              {bid.mlLlmReview?.needsReview && !bid.isHumanLabeled && (
+                                <span
+                                  title={
+                                    bid.mlLlmReview.llmReasoning ||
+                                    `ML: ${bid.mlLlmReview.mlSticker} vs LLM: ${bid.mlLlmReview.llmSticker}`
+                                  }
+                                  className="px-1.5 py-0.5 rounded text-[10px] font-bold bg-amber-100 text-amber-900 border border-amber-300 flex items-center gap-0.5"
+                                >
+                                  <span>
+                                    ⚠ Review ({bid.mlLlmReview.mlSticker} vs {bid.mlLlmReview.llmSticker})
+                                  </span>
                                 </span>
                               )}
                               {hasMultiGC && (
