@@ -1133,8 +1133,17 @@ export default function PricingPage() {
 
       {/* Slide-Over Job Quote Cart Drawer */}
       {showCartDrawer && (
-        <div className="fixed inset-0 z-40 bg-slate-900/50 backdrop-blur-xs flex justify-end">
-          <div className="w-full max-w-lg bg-white h-full shadow-2xl flex flex-col border-l border-slate-200">
+        <div
+          onClick={() => setShowCartDrawer(false)}
+          onKeyDown={(e) => {
+            if (e.key === 'Escape') setShowCartDrawer(false);
+          }}
+          className="fixed inset-0 z-[60] bg-slate-900/50 backdrop-blur-xs flex justify-end"
+        >
+          <div
+            onClick={(e) => e.stopPropagation()}
+            className="w-full max-w-lg bg-white h-full shadow-2xl flex flex-col border-l border-slate-200"
+          >
             <div className="px-5 py-4 bg-slate-900 text-white flex items-center justify-between">
               <div className="flex items-center gap-2">
                 <ShoppingCart className="w-5 h-5 text-emerald-400" />
@@ -1148,9 +1157,11 @@ export default function PricingPage() {
               <button
                 type="button"
                 onClick={() => setShowCartDrawer(false)}
-                className="p-1.5 rounded-lg text-slate-400 hover:text-white hover:bg-slate-800"
+                className="px-2.5 py-1.5 rounded-lg text-slate-200 hover:text-white bg-slate-800 hover:bg-slate-700 flex items-center gap-1 text-xs font-bold"
+                title="Close Cart & Browse Catalog"
               >
                 <X className="w-4 h-4" />
+                <span>Close</span>
               </button>
             </div>
 
@@ -1392,8 +1403,18 @@ export default function PricingPage() {
                   Items in Quote ({cartItems.length} lines)
                 </div>
                 {cartItems.length === 0 ? (
-                  <div className="p-6 text-center text-slate-400 border border-dashed border-slate-300 rounded-xl">
-                    Click <strong>+ Add</strong> on any product in the price book to build this job&apos;s quote.
+                  <div className="p-6 text-center text-slate-500 border border-dashed border-slate-300 rounded-xl space-y-3">
+                    <p>
+                      Click <strong>+ Add</strong> on any product in the price book to build this job&apos;s quote.
+                    </p>
+                    <button
+                      type="button"
+                      onClick={() => setShowCartDrawer(false)}
+                      className="px-4 py-2 rounded-xl bg-blue-600 hover:bg-blue-700 text-white font-bold text-xs inline-flex items-center gap-1.5 shadow-xs"
+                    >
+                      <Plus className="w-3.5 h-3.5" />
+                      <span>Browse Price Book &amp; Add Items</span>
+                    </button>
                   </div>
                 ) : (
                   cartItems.map((it) => {
@@ -1473,7 +1494,15 @@ export default function PricingPage() {
                     Quote Total: {formatCurrency(cartSubtotalCost * (1 + (Number(cartMarkup) || 0) / 100))}
                   </span>
                 </div>
-                <div className="grid grid-cols-2 gap-2">
+                <div className="grid grid-cols-3 gap-2">
+                  <button
+                    type="button"
+                    onClick={() => setShowCartDrawer(false)}
+                    className="px-3 py-2 rounded-xl bg-blue-600 hover:bg-blue-700 text-white text-xs font-bold flex items-center justify-center gap-1"
+                  >
+                    <Plus className="w-3.5 h-3.5" />
+                    <span>Add Items</span>
+                  </button>
                   <button
                     type="button"
                     disabled={isSavingCart || cartItems.length === 0}
@@ -1481,7 +1510,7 @@ export default function PricingPage() {
                     className="px-3 py-2 rounded-xl bg-white hover:bg-slate-100 border border-slate-300 text-slate-800 text-xs font-bold flex items-center justify-center gap-1.5 disabled:opacity-50"
                   >
                     <Save className="w-3.5 h-3.5" />
-                    <span>Save for Later</span>
+                    <span>Save Draft</span>
                   </button>
                   <button
                     type="button"
@@ -1490,7 +1519,7 @@ export default function PricingPage() {
                     className="px-3 py-2 rounded-xl bg-emerald-600 hover:bg-emerald-500 text-white text-xs font-bold flex items-center justify-center gap-1.5 disabled:opacity-50"
                   >
                     <Printer className="w-3.5 h-3.5" />
-                    <span>Print / PDF Quote</span>
+                    <span>Print / PDF</span>
                   </button>
                 </div>
               </div>
