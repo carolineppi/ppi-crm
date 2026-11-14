@@ -30,6 +30,7 @@ import {
   getInstallerAvailabilityForDate,
   shiftMatches,
 } from '@/lib/installers/availability';
+import { getWarehouseStatusMeta } from '@/lib/warehouse/helpers';
 
 interface InstallTicketRow {
   id: string;
@@ -66,6 +67,8 @@ interface InstallTicketRow {
     address_state: string | null;
     address_zip: string | null;
     project_manager: string | null;
+    warehouse_status?: string | null;
+    warehouse_location?: string | null;
   };
 }
 
@@ -343,6 +346,12 @@ export default function InstallDepartmentDashboardPage() {
           >
             <CalendarDays className="w-3.5 h-3.5" />
             <span>Installer Calendar</span>
+          </Link>
+          <Link
+            href="/warehouse"
+            className="px-3 py-2 rounded-xl bg-amber-500/20 hover:bg-amber-500/30 text-amber-200 text-xs font-bold transition flex items-center gap-1.5 border border-amber-400/30"
+          >
+            <span>📦 Warehouse</span>
           </Link>
           <button
             type="button"
@@ -679,6 +688,19 @@ export default function InstallDepartmentDashboardPage() {
                             )}
                             {ticket.work_shift} Work
                           </span>
+                          {(() => {
+                            const whMeta = getWarehouseStatusMeta(ticket.job?.warehouse_status);
+                            return (
+                              <span
+                                className={`px-2 py-0.5 rounded-full text-[10px] font-bold border ${whMeta.badgeClass}`}
+                              >
+                                {whMeta.label}
+                                {ticket.job?.warehouse_location
+                                  ? ` • ${ticket.job.warehouse_location}`
+                                  : ''}
+                              </span>
+                            );
+                          })()}
                         </div>
 
                         <div className="flex items-center gap-2">

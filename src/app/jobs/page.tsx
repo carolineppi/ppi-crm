@@ -238,6 +238,12 @@ export default function JobsPage() {
           >
             <span>🧾 Accounting</span>
           </Link>
+          <Link
+            href="/warehouse"
+            className="px-3.5 py-2 rounded-xl bg-orange-500/20 hover:bg-orange-500/30 text-orange-200 text-xs font-bold transition flex items-center gap-1.5 border border-orange-400/30"
+          >
+            <span>📦 Warehouse</span>
+          </Link>
           <button
             type="button"
             onClick={fetchJobs}

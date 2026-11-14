@@ -37,7 +37,9 @@ export async function GET(request: NextRequest) {
             estimator_name,
             quote_amount,
             scope_pdf_filename,
-            scope_pdf_url
+            scope_pdf_url,
+            warehouse_status,
+            warehouse_location
           )
         `
         )

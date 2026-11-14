@@ -29,6 +29,7 @@ import {
 import InstallCalendarMicroView, {
   CalendarDaySummary,
 } from '@/components/InstallCalendarMicroView';
+import { getWarehouseStatusMeta } from '@/lib/warehouse/helpers';
 
 export default function JobViewerPage() {
   const params = useParams<{ id: string }>();
@@ -478,6 +479,15 @@ export default function JobViewerPage() {
           >
             <FileText className="w-4 h-4" />
             <span>Accounting &amp; SOV</span>
+          </Link>
+          <Link
+            href="/warehouse"
+            className={`px-3 py-1.5 rounded-xl text-xs font-bold border ${
+              getWarehouseStatusMeta(job.warehouse_status).badgeClass
+            }`}
+          >
+            {getWarehouseStatusMeta(job.warehouse_status).label}
+            {job.warehouse_location ? ` (${job.warehouse_location})` : ''}
           </Link>
         </div>
       </div>

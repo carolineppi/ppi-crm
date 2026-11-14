@@ -317,6 +317,9 @@ export default function AccountingPage() {
             <Link href="/customers" className="px-3 py-1.5 rounded-lg bg-slate-800 hover:bg-slate-700">
               Customers
             </Link>
+            <Link href="/warehouse" className="px-3 py-1.5 rounded-lg bg-slate-800 hover:bg-slate-700">
+              Warehouse
+            </Link>
             <button
               type="button"
               onClick={handleExportQuickBooksCsv}
