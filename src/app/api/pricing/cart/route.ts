@@ -50,6 +50,7 @@ export async function POST(request: NextRequest) {
       markupPercent = 0,
       notes = null,
       items = [],
+      sections = [],
       status = 'draft',
     } = body;
 
@@ -62,6 +63,7 @@ export async function POST(request: NextRequest) {
       markup_percent: Number(markupPercent) || 0,
       notes: notes ? String(notes).trim() : null,
       items: Array.isArray(items) ? items : [],
+      sections: Array.isArray(sections) ? sections : [],
       status: status === 'quoted' ? 'quoted' : 'draft',
       updated_at: now,
     };

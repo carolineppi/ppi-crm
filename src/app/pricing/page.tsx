@@ -26,7 +26,12 @@ import {
   getParentCategoryId,
   getSubCategoryShortLabel,
 } from '@/lib/pricing/category-hierarchy';
-import QuotePrintModal, { QuoteCartItem } from '@/components/QuotePrintModal';
+import QuotePrintModal, { QuoteCartItem, QuoteSectionConfig } from '@/components/QuotePrintModal';
+import {
+  DEFAULT_SCOPE_PRESETS,
+  createDefaultSection,
+  groupItemsBySection,
+} from '@/lib/pricing/quote-sections';
 
 interface PriceBook {
   id: string;
@@ -129,9 +134,19 @@ export default function PricingPage() {
     markupPercent: number;
     notes?: string;
     items: QuoteCartItem[];
+    sections?: QuoteSectionConfig[];
     bidSwitchedToQuoted: boolean;
   } | null>(null);
   const [bidLinkSearch, setBidLinkSearch] = useState('');
+
+  // Multi-Section Scope State
+  const [cartSections, setCartSections] = useState<QuoteSectionConfig[]>([
+    createDefaultSection('Toilet Accessories', 0),
+  ]);
+  const [activeSectionName, setActiveSectionName] = useState<string>('Toilet Accessories');
+  const [newSectionName, setNewSectionName] = useState<string>('');
+  const [expandedSectionId, setExpandedSectionId] = useState<string | null>(null);
+  const [addonDrafts, setAddonDrafts] = useState<Record<string, { label: string; amount: string }>>({});
 
   // Custom Quote Item state
   const [showCustomItemForm, setShowCustomItemForm] = useState(false);
@@ -139,6 +154,7 @@ export default function PricingPage() {
   const [customItemMfg, setCustomItemMfg] = useState('');
   const [customItemSku, setCustomItemSku] = useState('');
   const [customItemQty, setCustomItemQty] = useState('1');
+  const [customItemUnitLabel, setCustomItemUnitLabel] = useState('');
   const [customItemCost, setCustomItemCost] = useState('');
 
   const fetchBooks = useCallback(async () => {
@@ -218,9 +234,17 @@ export default function PricingPage() {
             if (d.cart) {
               setCartId(d.cart.id);
               setCartTitle(d.cart.title || 'Job Material Quote');
-              setCartMarkup(String(d.cart.markup_percent ?? 0));
+              const mk = Number(d.cart.markup_percent ?? 0);
+              setCartMarkup(String(mk));
               setCartNotes(d.cart.notes || '');
-              setCartItems(Array.isArray(d.cart.items) ? d.cart.items : []);
+              const loadedItems: QuoteCartItem[] = Array.isArray(d.cart.items) ? d.cart.items : [];
+              setCartItems(loadedItems);
+              const loadedSections: QuoteSectionConfig[] =
+                Array.isArray(d.cart.sections) && d.cart.sections.length > 0
+                  ? d.cart.sections
+                  : [createDefaultSection(loadedItems[0]?.section || 'Toilet Accessories', mk)];
+              setCartSections(loadedSections);
+              setActiveSectionName(loadedSections[0].name);
             }
           })
           .finally(() => setCartHydrated(true));
@@ -236,6 +260,10 @@ export default function PricingPage() {
               if (parsed.cartMarkup !== undefined) setCartMarkup(String(parsed.cartMarkup));
               if (parsed.cartNotes !== undefined) setCartNotes(parsed.cartNotes);
               if (Array.isArray(parsed.cartItems)) setCartItems(parsed.cartItems);
+              if (Array.isArray(parsed.cartSections) && parsed.cartSections.length > 0) {
+                setCartSections(parsed.cartSections);
+                setActiveSectionName(parsed.activeSectionName || parsed.cartSections[0].name);
+              }
             }
           }
         } catch {
@@ -258,12 +286,14 @@ export default function PricingPage() {
           cartMarkup,
           cartNotes,
           cartItems,
+          cartSections,
+          activeSectionName,
         })
       );
     } catch {
       // ignore storage quota errors
     }
-  }, [cartHydrated, cartId, linkedBidId, cartTitle, cartMarkup, cartNotes, cartItems]);
+  }, [cartHydrated, cartId, linkedBidId, cartTitle, cartMarkup, cartNotes, cartItems, cartSections, activeSectionName]);
 
   useEffect(() => {
     const t = setTimeout(() => {
@@ -380,11 +410,91 @@ export default function PricingPage() {
     }
   };
 
-  // Cart Helpers
+  // Section & Cart Helpers
+  const addScopeSection = (rawName: string) => {
+    const trimmed = rawName.trim();
+    if (!trimmed) return;
+    setCartSections((prev) => {
+      if (prev.some((s) => s.name.toLowerCase() === trimmed.toLowerCase())) {
+        return prev;
+      }
+      const created = createDefaultSection(trimmed, Number(cartMarkup) || 0);
+      setExpandedSectionId(created.id);
+      return [...prev, created];
+    });
+    const existing = cartSections.find((s) => s.name.toLowerCase() === trimmed.toLowerCase());
+    setActiveSectionName(existing ? existing.name : trimmed);
+    setNewSectionName('');
+  };
+
+  const updateSectionConfig = (sectionName: string, patch: Partial<QuoteSectionConfig>) => {
+    setCartSections((prev) => {
+      const idx = prev.findIndex((s) => s.name === sectionName);
+      if (idx === -1) {
+        return [...prev, { ...createDefaultSection(sectionName, Number(cartMarkup) || 0), ...patch }];
+      }
+      const next = [...prev];
+      next[idx] = { ...next[idx], ...patch };
+      return next;
+    });
+  };
+
+  const removeScopeSection = (sectionName: string) => {
+    if (cartSections.length <= 1) return;
+    const remaining = cartSections.filter((s) => s.name !== sectionName);
+    const fallbackName = remaining[0]?.name || 'General';
+    setCartSections(remaining);
+    setCartItems((prev) =>
+      prev.map((it) => (it.section === sectionName ? { ...it, section: fallbackName } : it))
+    );
+    if (activeSectionName === sectionName) {
+      setActiveSectionName(fallbackName);
+    }
+  };
+
+  const addSectionAddon = (sectionName: string) => {
+    const draft = addonDrafts[sectionName];
+    const label = draft?.label?.trim();
+    const amount = Number(draft?.amount);
+    if (!label || !Number.isFinite(amount)) return;
+    const target = cartSections.find((s) => s.name === sectionName);
+    const existingAddons = target?.addons || [];
+    updateSectionConfig(sectionName, {
+      addons: [
+        ...existingAddons,
+        { id: `addon-${Date.now()}`, label, amount },
+      ],
+    });
+    setAddonDrafts((prev) => ({ ...prev, [sectionName]: { label: '', amount: '' } }));
+  };
+
+  const removeSectionAddon = (sectionName: string, addonId: string) => {
+    const target = cartSections.find((s) => s.name === sectionName);
+    if (!target) return;
+    updateSectionConfig(sectionName, {
+      addons: (target.addons || []).filter((a) => a.id !== addonId),
+    });
+  };
+
+  const moveItemToSection = (priceItemId: string, nextSection: string) => {
+    setCartItems((prev) =>
+      prev.map((c) => (c.priceItemId === priceItemId ? { ...c, section: nextSection } : c))
+    );
+  };
+
+  const updateCartItemUnitLabel = (priceItemId: string, unitLabel: string) => {
+    setCartItems((prev) =>
+      prev.map((c) => (c.priceItemId === priceItemId ? { ...c, unitLabel } : c))
+    );
+  };
+
   const addToCart = (item: PriceItem) => {
     const unitCost = Number(item.effective_net_price ?? item.list_price ?? 0);
+    const targetSection = activeSectionName || cartSections[0]?.name || 'Toilet Accessories';
     setCartItems((prev) => {
-      const idx = prev.findIndex((c) => c.priceItemId === item.id);
+      const idx = prev.findIndex(
+        (c) => c.priceItemId === item.id && (c.section || targetSection) === targetSection
+      );
       if (idx !== -1) {
         const next = [...prev];
         next[idx] = { ...next[idx], quantity: next[idx].quantity + 1 };
@@ -399,6 +509,7 @@ export default function PricingPage() {
           description: item.description,
           quantity: 1,
           unitCost,
+          section: targetSection,
         },
       ];
     });
@@ -440,12 +551,15 @@ export default function PricingPage() {
         description: desc,
         quantity: qty,
         unitCost,
+        section: activeSectionName || cartSections[0]?.name || 'Toilet Accessories',
+        unitLabel: customItemUnitLabel.trim() || undefined,
       },
     ]);
     setCustomItemDesc('');
     setCustomItemMfg('');
     setCustomItemSku('');
     setCustomItemQty('1');
+    setCustomItemUnitLabel('');
     setCustomItemCost('');
     setShowCustomItemForm(false);
     setCartTab('active');
@@ -457,6 +571,9 @@ export default function PricingPage() {
   const clearActiveCart = () => {
     setCartId(null);
     setCartItems([]);
+    setCartSections([createDefaultSection('Toilet Accessories', 0)]);
+    setActiveSectionName('Toilet Accessories');
+    setExpandedSectionId(null);
     setLinkedBidId('');
     setCartTitle('Job Material Quote');
     setCartMarkup('0');
@@ -479,6 +596,11 @@ export default function PricingPage() {
       : cartItems;
     if (targetItems.length === 0) return;
 
+    const targetSections: QuoteSectionConfig[] = overrideCart
+      ? Array.isArray(overrideCart.sections)
+        ? overrideCart.sections
+        : []
+      : cartSections;
     const targetId = overrideCart ? overrideCart.id : cartId;
     const targetBidId = overrideCart ? overrideCart.bid_request_id || '' : linkedBidId;
     const targetTitle = overrideCart ? overrideCart.title || 'Job Material Quote' : cartTitle;
@@ -499,6 +621,7 @@ export default function PricingPage() {
           markupPercent: targetMarkup,
           notes: targetNotes,
           items: targetItems,
+          sections: targetSections,
           status: mode,
         }),
       });
@@ -519,6 +642,7 @@ export default function PricingPage() {
           markupPercent: targetMarkup,
           notes: targetNotes,
           items: targetItems,
+          sections: targetSections,
           bidSwitchedToQuoted: switched,
         });
         setShowPrintModal(true);
@@ -593,6 +717,16 @@ export default function PricingPage() {
   const cartSubtotalCost = useMemo(
     () => cartItems.reduce((sum, it) => sum + it.unitCost * it.quantity, 0),
     [cartItems]
+  );
+
+  const groupedCartSections = useMemo(
+    () => groupItemsBySection(cartItems, cartSections, Number(cartMarkup) || 0),
+    [cartItems, cartSections, cartMarkup]
+  );
+
+  const cartGrandTotal = useMemo(
+    () => groupedCartSections.reduce((sum, g) => sum + g.totals.sectionTotal, 0),
+    [groupedCartSections]
   );
 
   const linkedBid = useMemo(
@@ -1315,9 +1449,16 @@ export default function PricingPage() {
                                 setCartId(c.id);
                                 setLinkedBidId(c.bid_request_id || '');
                                 setCartTitle(c.title || 'Job Material Quote');
-                                setCartMarkup(String(c.markup_percent ?? 0));
+                                const mk = Number(c.markup_percent ?? 0);
+                                setCartMarkup(String(mk));
                                 setCartNotes(c.notes || '');
                                 setCartItems(itemsArr);
+                                const loadedSections: QuoteSectionConfig[] =
+                                  Array.isArray(c.sections) && c.sections.length > 0
+                                    ? c.sections
+                                    : [createDefaultSection(itemsArr[0]?.section || 'Toilet Accessories', mk)];
+                                setCartSections(loadedSections);
+                                setActiveSectionName(loadedSections[0].name);
                                 setCartTab('active');
                               }}
                               className="px-2.5 py-1.5 rounded-lg bg-white hover:bg-slate-100 border border-slate-300 text-slate-800 text-[11px] font-bold"
@@ -1444,7 +1585,7 @@ export default function PricingPage() {
                 </div>
                 <div>
                   <label className="block text-[10px] font-bold uppercase text-slate-500 mb-1">
-                    Markup %
+                    Default Markup %
                   </label>
                   <input
                     type="number"
@@ -1453,6 +1594,77 @@ export default function PricingPage() {
                     onChange={(e) => setCartMarkup(e.target.value)}
                     className="w-full px-2.5 py-1.5 rounded-lg border border-slate-300 text-right font-mono"
                   />
+                </div>
+              </div>
+
+              {/* Scope Sections Selector & Quick-Add */}
+              <div className="p-3 rounded-xl border border-slate-200 bg-slate-50 space-y-2">
+                <div className="flex items-center justify-between gap-2">
+                  <span className="text-[10px] font-bold uppercase text-slate-600">
+                    Scope Sections (Active target for + Add)
+                  </span>
+                  <span className="text-[10px] font-semibold text-blue-700">
+                    Adding to: <strong>{activeSectionName}</strong>
+                  </span>
+                </div>
+                <div className="flex flex-wrap gap-1.5">
+                  {cartSections.map((sec) => {
+                    const isActive = sec.name === activeSectionName;
+                    const secCount = cartItems.filter(
+                      (it) => (it.section || cartSections[0]?.name) === sec.name
+                    ).length;
+                    return (
+                      <button
+                        key={sec.id}
+                        type="button"
+                        onClick={() => setActiveSectionName(sec.name)}
+                        className={`px-2.5 py-1 rounded-lg text-[11px] font-bold border transition ${
+                          isActive
+                            ? 'bg-blue-600 text-white border-blue-600 shadow-xs'
+                            : 'bg-white text-slate-700 border-slate-300 hover:bg-slate-100'
+                        }`}
+                      >
+                        {sec.name} ({secCount})
+                      </button>
+                    );
+                  })}
+                </div>
+                <div className="flex flex-wrap items-center gap-1 pt-0.5">
+                  {DEFAULT_SCOPE_PRESETS.filter(
+                    (preset) => !cartSections.some((s) => s.name.toLowerCase() === preset.toLowerCase())
+                  ).map((preset) => (
+                    <button
+                      key={preset}
+                      type="button"
+                      onClick={() => addScopeSection(preset)}
+                      className="px-2 py-0.5 rounded-md border border-dashed border-slate-300 bg-white hover:bg-blue-50 hover:border-blue-300 text-[10px] font-semibold text-slate-600"
+                    >
+                      + {preset}
+                    </button>
+                  ))}
+                </div>
+                <div className="flex items-center gap-1.5">
+                  <input
+                    type="text"
+                    value={newSectionName}
+                    onChange={(e) => setNewSectionName(e.target.value)}
+                    onKeyDown={(e) => {
+                      if (e.key === 'Enter') {
+                        e.preventDefault();
+                        addScopeSection(newSectionName);
+                      }
+                    }}
+                    placeholder="Custom scope name (e.g. Visual Display, Lockers)..."
+                    className="flex-1 px-2.5 py-1 rounded-lg border border-slate-300 bg-white text-[11px]"
+                  />
+                  <button
+                    type="button"
+                    onClick={() => addScopeSection(newSectionName)}
+                    disabled={!newSectionName.trim()}
+                    className="px-2.5 py-1 rounded-lg bg-slate-800 hover:bg-slate-700 disabled:opacity-40 text-white text-[11px] font-bold"
+                  >
+                    + Add Scope
+                  </button>
                 </div>
               </div>
 
@@ -1478,7 +1690,7 @@ export default function PricingPage() {
                     className="p-3 rounded-xl border border-amber-300 bg-amber-50/70 space-y-2.5"
                   >
                     <div className="text-[11px] font-bold text-amber-900">
-                      Add Custom / Non-Catalog Item
+                      Add Custom / Non-Catalog Item → <span className="underline">{activeSectionName}</span>
                     </div>
                     <div>
                       <label className="block text-[10px] font-bold uppercase text-slate-600 mb-0.5">
@@ -1519,7 +1731,7 @@ export default function PricingPage() {
                         />
                       </div>
                     </div>
-                    <div className="grid grid-cols-2 gap-2">
+                    <div className="grid grid-cols-3 gap-2">
                       <div>
                         <label className="block text-[10px] font-bold uppercase text-slate-600 mb-0.5">
                           Quantity
@@ -1529,6 +1741,18 @@ export default function PricingPage() {
                           min={1}
                           value={customItemQty}
                           onChange={(e) => setCustomItemQty(e.target.value)}
+                          className="w-full px-2.5 py-1.5 rounded-lg border border-slate-300 bg-white text-xs"
+                        />
+                      </div>
+                      <div>
+                        <label className="block text-[10px] font-bold uppercase text-slate-600 mb-0.5">
+                          Unit Label
+                        </label>
+                        <input
+                          type="text"
+                          value={customItemUnitLabel}
+                          onChange={(e) => setCustomItemUnitLabel(e.target.value)}
+                          placeholder="e.g. Stalls"
                           className="w-full px-2.5 py-1.5 rounded-lg border border-slate-300 bg-white text-xs"
                         />
                       </div>
@@ -1591,78 +1815,406 @@ export default function PricingPage() {
                     </div>
                   </div>
                 ) : (
-                  cartItems.map((it) => {
-                    const sellUnit = it.unitCost * (1 + (Number(cartMarkup) || 0) / 100);
-                    const isCustom = it.priceItemId.startsWith('custom-');
-                    return (
-                      <div
-                        key={it.priceItemId}
-                        className="p-2.5 rounded-xl border border-slate-200 bg-slate-50 flex items-center justify-between gap-2"
-                      >
-                        <div className="min-w-0 flex-1">
-                          <div className="font-bold text-slate-900 flex items-center gap-1.5 flex-wrap">
-                            <span>
-                              {it.manufacturer} • <span className="font-mono">{it.sku}</span>
-                            </span>
-                            {isCustom && (
-                              <span className="px-1.5 py-0.5 rounded bg-amber-100 text-amber-800 text-[10px] font-bold uppercase">
-                                Custom
-                              </span>
-                            )}
+                  <div className="space-y-3">
+                    {groupedCartSections.map((group) => {
+                      const { sectionName, config, items: secItems, totals } = group;
+                      const isExpanded = expandedSectionId === config.id;
+                      const secMarkupMult = 1 + (Number(config.markupPercent ?? cartMarkup) || 0) / 100;
+                      const addonDraft = addonDrafts[sectionName] || { label: '', amount: '' };
+
+                      return (
+                        <div
+                          key={sectionName}
+                          className="rounded-xl border border-slate-300 bg-white overflow-hidden shadow-2xs"
+                        >
+                          {/* Section Header */}
+                          <div className="px-3 py-2 bg-slate-100 border-b border-slate-200 flex items-center justify-between gap-2">
+                            <div className="min-w-0">
+                              <div className="font-bold text-slate-900 text-xs flex items-center gap-1.5">
+                                <span>{sectionName}</span>
+                                <span className="text-[10px] font-semibold text-slate-500">
+                                  ({secItems.length} lines)
+                                </span>
+                              </div>
+                              <div className="text-[10px] text-slate-600">
+                                {config.pricingMode === 'furnish_and_install' ? (
+                                  <span>
+                                    Furnish &amp; Install:{' '}
+                                    <strong>{formatCurrency(totals.furnishSell + totals.installSell)}</strong>
+                                  </span>
+                                ) : (
+                                  <span>
+                                    Furnish: <strong>{formatCurrency(totals.furnishSell)}</strong>
+                                    {totals.installSell > 0 && (
+                                      <> • Install: <strong>{formatCurrency(totals.installSell)}</strong></>
+                                    )}
+                                  </span>
+                                )}
+                                {totals.addonsTotal > 0 && (
+                                  <> • Add-ons: <strong>{formatCurrency(totals.addonsTotal)}</strong></>
+                                )}
+                              </div>
+                            </div>
+                            <div className="flex items-center gap-1 flex-shrink-0">
+                              <button
+                                type="button"
+                                onClick={() =>
+                                  setExpandedSectionId(isExpanded ? null : config.id)
+                                }
+                                className={`px-2 py-1 rounded-lg text-[10px] font-bold border ${
+                                  isExpanded
+                                    ? 'bg-slate-800 text-white border-slate-800'
+                                    : 'bg-white text-slate-700 border-slate-300 hover:bg-slate-50'
+                                }`}
+                              >
+                                {isExpanded ? 'Hide Options' : 'Notes & Pricing'}
+                              </button>
+                              {cartSections.length > 1 && (
+                                <button
+                                  type="button"
+                                  onClick={() => removeScopeSection(sectionName)}
+                                  className="p-1 text-slate-400 hover:text-rose-600"
+                                  title="Remove scope section (moves items to first remaining section)"
+                                >
+                                  <Trash2 className="w-3.5 h-3.5" />
+                                </button>
+                              )}
+                            </div>
                           </div>
-                          <div className="text-[11px] text-slate-600 truncate">{it.description}</div>
-                          <div className="text-[11px] text-slate-500 mt-0.5 flex items-center gap-1.5 flex-wrap">
-                            {isCustom ? (
-                              <label className="inline-flex items-center gap-1">
-                                <span>Net: $</span>
+
+                          {/* Collapsible Section Pricing & Notes */}
+                          {isExpanded && (
+                            <div className="p-3 bg-slate-50 border-b border-slate-200 space-y-2.5 text-[11px]">
+                              <div>
+                                <label className="block text-[10px] font-bold uppercase text-slate-500 mb-1">
+                                  Pricing Display Mode
+                                </label>
+                                <div className="grid grid-cols-2 gap-1.5">
+                                  <button
+                                    type="button"
+                                    onClick={() =>
+                                      updateSectionConfig(sectionName, {
+                                        pricingMode: 'furnish_only_plus_install',
+                                      })
+                                    }
+                                    className={`px-2 py-1.5 rounded-lg border text-[10px] font-bold ${
+                                      config.pricingMode === 'furnish_only_plus_install'
+                                        ? 'bg-blue-600 text-white border-blue-600'
+                                        : 'bg-white text-slate-700 border-slate-300'
+                                    }`}
+                                  >
+                                    Furnish Only + Add to Install
+                                  </button>
+                                  <button
+                                    type="button"
+                                    onClick={() =>
+                                      updateSectionConfig(sectionName, {
+                                        pricingMode: 'furnish_and_install',
+                                      })
+                                    }
+                                    className={`px-2 py-1.5 rounded-lg border text-[10px] font-bold ${
+                                      config.pricingMode === 'furnish_and_install'
+                                        ? 'bg-blue-600 text-white border-blue-600'
+                                        : 'bg-white text-slate-700 border-slate-300'
+                                    }`}
+                                  >
+                                    Furnish &amp; Install Combined
+                                  </button>
+                                </div>
+                              </div>
+
+                              <div className="grid grid-cols-4 gap-1.5">
+                                <div>
+                                  <label className="block text-[9px] font-bold uppercase text-slate-500 mb-0.5">
+                                    Markup %
+                                  </label>
+                                  <input
+                                    type="number"
+                                    step="0.5"
+                                    value={config.markupPercent}
+                                    onChange={(e) =>
+                                      updateSectionConfig(sectionName, {
+                                        markupPercent: Number(e.target.value) || 0,
+                                      })
+                                    }
+                                    className="w-full px-1.5 py-1 rounded border border-slate-300 bg-white font-mono text-right"
+                                  />
+                                </div>
+                                <div>
+                                  <label className="block text-[9px] font-bold uppercase text-slate-500 mb-0.5">
+                                    Freight ($)
+                                  </label>
+                                  <input
+                                    type="number"
+                                    step="1"
+                                    min={0}
+                                    value={config.freight}
+                                    onChange={(e) =>
+                                      updateSectionConfig(sectionName, {
+                                        freight: Number(e.target.value) || 0,
+                                      })
+                                    }
+                                    className="w-full px-1.5 py-1 rounded border border-slate-300 bg-white font-mono text-right"
+                                  />
+                                </div>
+                                <div>
+                                  <label className="block text-[9px] font-bold uppercase text-slate-500 mb-0.5">
+                                    Tax %
+                                  </label>
+                                  <input
+                                    type="number"
+                                    step="0.5"
+                                    min={0}
+                                    value={config.taxPercent}
+                                    onChange={(e) =>
+                                      updateSectionConfig(sectionName, {
+                                        taxPercent: Number(e.target.value) || 0,
+                                      })
+                                    }
+                                    className="w-full px-1.5 py-1 rounded border border-slate-300 bg-white font-mono text-right"
+                                  />
+                                </div>
+                                <div>
+                                  <label className="block text-[9px] font-bold uppercase text-slate-500 mb-0.5">
+                                    Install ($)
+                                  </label>
+                                  <input
+                                    type="number"
+                                    step="1"
+                                    min={0}
+                                    value={config.installCost}
+                                    onChange={(e) =>
+                                      updateSectionConfig(sectionName, {
+                                        installCost: Number(e.target.value) || 0,
+                                      })
+                                    }
+                                    className="w-full px-1.5 py-1 rounded border border-slate-300 bg-white font-mono text-right"
+                                  />
+                                </div>
+                              </div>
+
+                              <div>
+                                <label className="block text-[10px] font-bold uppercase text-slate-500 mb-0.5">
+                                  Furnish Sell Override ($) — Calc: {formatCurrency(totals.calculatedMaterialSell)}
+                                </label>
                                 <input
                                   type="number"
                                   step="0.01"
                                   min={0}
-                                  value={it.unitCost}
-                                  onChange={(e) => updateCartItemCost(it.priceItemId, Number(e.target.value))}
-                                  className="w-20 px-1.5 py-0.5 rounded border border-slate-300 bg-white text-[11px] text-slate-900"
+                                  value={config.materialSellOverride ?? ''}
+                                  onChange={(e) =>
+                                    updateSectionConfig(sectionName, {
+                                      materialSellOverride:
+                                        e.target.value === '' ? null : Number(e.target.value),
+                                    })
+                                  }
+                                  placeholder="Leave blank to use calculated Furnish Sell"
+                                  className="w-full px-2 py-1 rounded border border-slate-300 bg-white font-mono"
                                 />
-                              </label>
+                              </div>
+
+                              <div>
+                                <label className="block text-[10px] font-bold uppercase text-slate-500 mb-0.5">
+                                  Section Notes (Printed bold inside this scope box)
+                                </label>
+                                <textarea
+                                  rows={2}
+                                  value={config.notes || ''}
+                                  onChange={(e) =>
+                                    updateSectionConfig(sectionName, { notes: e.target.value })
+                                  }
+                                  placeholder="e.g. As Manufactured by ASI and Bobrick as Specified..."
+                                  className="w-full px-2 py-1 rounded border border-slate-300 bg-white"
+                                />
+                              </div>
+
+                              {/* Optional Add-ons / Alternates */}
+                              <div className="space-y-1.5">
+                                <div className="text-[10px] font-bold uppercase text-slate-500">
+                                  Section Add-Ons / Alternates
+                                </div>
+                                {(config.addons || []).map((ad) => (
+                                  <div
+                                    key={ad.id}
+                                    className="flex items-center justify-between gap-2 px-2 py-1 rounded bg-white border border-slate-200"
+                                  >
+                                    <span className="truncate font-semibold">{ad.label}</span>
+                                    <div className="flex items-center gap-1.5 flex-shrink-0">
+                                      <span className="font-mono font-bold">
+                                        {formatCurrency(ad.amount)}
+                                      </span>
+                                      <button
+                                        type="button"
+                                        onClick={() => removeSectionAddon(sectionName, ad.id)}
+                                        className="text-slate-400 hover:text-rose-600"
+                                      >
+                                        <X className="w-3 h-3" />
+                                      </button>
+                                    </div>
+                                  </div>
+                                ))}
+                                <div className="flex items-center gap-1.5">
+                                  <input
+                                    type="text"
+                                    value={addonDraft.label}
+                                    onChange={(e) =>
+                                      setAddonDrafts((prev) => ({
+                                        ...prev,
+                                        [sectionName]: { ...addonDraft, label: e.target.value },
+                                      }))
+                                    }
+                                    placeholder="e.g. ADD FOR (8) SEMI RECESSED FIRE CABINETS"
+                                    className="flex-1 px-2 py-1 rounded border border-slate-300 bg-white text-[11px]"
+                                  />
+                                  <input
+                                    type="number"
+                                    step="0.01"
+                                    value={addonDraft.amount}
+                                    onChange={(e) =>
+                                      setAddonDrafts((prev) => ({
+                                        ...prev,
+                                        [sectionName]: { ...addonDraft, amount: e.target.value },
+                                      }))
+                                    }
+                                    placeholder="$"
+                                    className="w-20 px-2 py-1 rounded border border-slate-300 bg-white text-[11px] font-mono"
+                                  />
+                                  <button
+                                    type="button"
+                                    onClick={() => addSectionAddon(sectionName)}
+                                    className="px-2 py-1 rounded bg-slate-800 text-white text-[10px] font-bold"
+                                  >
+                                    Add
+                                  </button>
+                                </div>
+                              </div>
+                            </div>
+                          )}
+
+                          {/* Section Line Items */}
+                          <div className="divide-y divide-slate-100">
+                            {secItems.length === 0 ? (
+                              <div className="p-3 text-center text-[11px] text-slate-400">
+                                No items in {sectionName} yet. Select this scope above and add items.
+                              </div>
                             ) : (
-                              <span>Net: {formatCurrency(it.unitCost)}</span>
+                              secItems.map((it) => {
+                                const sellUnit = it.unitCost * secMarkupMult;
+                                const isCustom = it.priceItemId.startsWith('custom-');
+                                return (
+                                  <div
+                                    key={`${sectionName}-${it.priceItemId}`}
+                                    className="p-2.5 flex items-center justify-between gap-2"
+                                  >
+                                    <div className="min-w-0 flex-1">
+                                      <div className="font-bold text-slate-900 flex items-center gap-1.5 flex-wrap">
+                                        <span>
+                                          {it.manufacturer} • <span className="font-mono">{it.sku}</span>
+                                        </span>
+                                        {isCustom && (
+                                          <span className="px-1.5 py-0.5 rounded bg-amber-100 text-amber-800 text-[10px] font-bold uppercase">
+                                            Custom
+                                          </span>
+                                        )}
+                                      </div>
+                                      <div className="text-[11px] text-slate-600 truncate">
+                                        {it.description}
+                                      </div>
+                                      <div className="text-[11px] text-slate-500 mt-0.5 flex items-center gap-1.5 flex-wrap">
+                                        {isCustom ? (
+                                          <label className="inline-flex items-center gap-1">
+                                            <span>Net: $</span>
+                                            <input
+                                              type="number"
+                                              step="0.01"
+                                              min={0}
+                                              value={it.unitCost}
+                                              onChange={(e) =>
+                                                updateCartItemCost(
+                                                  it.priceItemId,
+                                                  Number(e.target.value)
+                                                )
+                                              }
+                                              className="w-20 px-1.5 py-0.5 rounded border border-slate-300 bg-white text-[11px] text-slate-900"
+                                            />
+                                          </label>
+                                        ) : (
+                                          <span>Net: {formatCurrency(it.unitCost)}</span>
+                                        )}
+                                        <span>
+                                          → Sell: <strong>{formatCurrency(sellUnit)}</strong>
+                                        </span>
+                                        {cartSections.length > 1 && (
+                                          <select
+                                            value={it.section || sectionName}
+                                            onChange={(e) =>
+                                              moveItemToSection(it.priceItemId, e.target.value)
+                                            }
+                                            className="px-1 py-0.5 rounded border border-slate-200 bg-slate-50 text-[10px] text-slate-700"
+                                            title="Move item to another scope section"
+                                          >
+                                            {cartSections.map((s) => (
+                                              <option key={s.id} value={s.name}>
+                                                {s.name}
+                                              </option>
+                                            ))}
+                                          </select>
+                                        )}
+                                        <input
+                                          type="text"
+                                          value={it.unitLabel || ''}
+                                          onChange={(e) =>
+                                            updateCartItemUnitLabel(it.priceItemId, e.target.value)
+                                          }
+                                          placeholder="unit (e.g. Stalls)"
+                                          className="w-24 px-1.5 py-0.5 rounded border border-slate-200 bg-slate-50 text-[10px] text-slate-700"
+                                        />
+                                      </div>
+                                    </div>
+                                    <div className="flex items-center gap-1 flex-shrink-0">
+                                      <button
+                                        type="button"
+                                        onClick={() => updateCartQty(it.priceItemId, it.quantity - 1)}
+                                        className="p-1 rounded bg-white border border-slate-300 hover:bg-slate-100"
+                                      >
+                                        <Minus className="w-3 h-3" />
+                                      </button>
+                                      <input
+                                        type="number"
+                                        min={1}
+                                        value={it.quantity}
+                                        onChange={(e) =>
+                                          updateCartQty(
+                                            it.priceItemId,
+                                            Number(e.target.value) || 1
+                                          )
+                                        }
+                                        className="w-11 text-center font-bold py-0.5 border border-slate-300 rounded bg-white"
+                                      />
+                                      <button
+                                        type="button"
+                                        onClick={() => updateCartQty(it.priceItemId, it.quantity + 1)}
+                                        className="p-1 rounded bg-white border border-slate-300 hover:bg-slate-100"
+                                      >
+                                        <Plus className="w-3 h-3" />
+                                      </button>
+                                      <button
+                                        type="button"
+                                        onClick={() => updateCartQty(it.priceItemId, 0)}
+                                        className="p-1 text-slate-400 hover:text-rose-600 ml-1"
+                                      >
+                                        <Trash2 className="w-3.5 h-3.5" />
+                                      </button>
+                                    </div>
+                                  </div>
+                                );
+                              })
                             )}
-                            <span>→ Quote: <strong>{formatCurrency(sellUnit)}</strong></span>
                           </div>
                         </div>
-                        <div className="flex items-center gap-1 flex-shrink-0">
-                          <button
-                            type="button"
-                            onClick={() => updateCartQty(it.priceItemId, it.quantity - 1)}
-                            className="p-1 rounded bg-white border border-slate-300 hover:bg-slate-100"
-                          >
-                            <Minus className="w-3 h-3" />
-                          </button>
-                          <input
-                            type="number"
-                            min={1}
-                            value={it.quantity}
-                            onChange={(e) => updateCartQty(it.priceItemId, Number(e.target.value) || 1)}
-                            className="w-11 text-center font-bold py-0.5 border border-slate-300 rounded bg-white"
-                          />
-                          <button
-                            type="button"
-                            onClick={() => updateCartQty(it.priceItemId, it.quantity + 1)}
-                            className="p-1 rounded bg-white border border-slate-300 hover:bg-slate-100"
-                          >
-                            <Plus className="w-3 h-3" />
-                          </button>
-                          <button
-                            type="button"
-                            onClick={() => updateCartQty(it.priceItemId, 0)}
-                            className="p-1 text-slate-400 hover:text-rose-600 ml-1"
-                          >
-                            <Trash2 className="w-3.5 h-3.5" />
-                          </button>
-                        </div>
-                      </div>
-                    );
-                  })
+                      );
+                    })}
+                  </div>
                 )}
               </div>
 
@@ -1688,7 +2240,7 @@ export default function PricingPage() {
                 <div className="flex items-center justify-between text-xs">
                   <span className="text-slate-600">Material Cost: {formatCurrency(cartSubtotalCost)}</span>
                   <span className="text-sm font-black text-slate-900">
-                    Quote Total: {formatCurrency(cartSubtotalCost * (1 + (Number(cartMarkup) || 0) / 100))}
+                    Quote Total: {formatCurrency(cartGrandTotal)}
                   </span>
                 </div>
                 <div className="grid grid-cols-3 gap-2">
@@ -1735,6 +2287,7 @@ export default function PricingPage() {
         markupPercent={printSnapshot?.markupPercent ?? (Number(cartMarkup) || 0)}
         notes={printSnapshot?.notes ?? cartNotes}
         items={printSnapshot?.items ?? cartItems}
+        sections={printSnapshot?.sections ?? cartSections}
         bidSwitchedToQuoted={printSnapshot?.bidSwitchedToQuoted ?? bidSwitchedToQuoted}
       />
     </div>

@@ -1,4 +1,5 @@
 import { SupabaseClient } from '@supabase/supabase-js';
+import { groupItemsBySection } from '@/lib/pricing/quote-sections';
 
 export interface JobOverrides {
   jobNumber?: string | null;
@@ -46,20 +47,21 @@ export async function createOrSyncJobFromBid(
   if (computedQuoteAmount === null) {
     const { data: cart } = await supabase
       .from('job_quote_carts')
-      .select('items, markup_percent')
+      .select('items, sections, markup_percent')
       .eq('bid_request_id', bid.id)
       .order('updated_at', { ascending: false })
       .limit(1)
       .maybeSingle();
 
     if (cart && Array.isArray(cart.items) && cart.items.length > 0) {
-      const subtotal = cart.items.reduce(
-        (sum: number, item: any) =>
-          sum + (Number(item.unitCost) || 0) * (Number(item.quantity) || 0),
-        0
-      );
       const markup = Number(cart.markup_percent) || 0;
-      computedQuoteAmount = Math.round(subtotal * (1 + markup / 100) * 100) / 100;
+      const grouped = groupItemsBySection(
+        cart.items,
+        Array.isArray(cart.sections) ? cart.sections : [],
+        markup
+      );
+      const total = grouped.reduce((sum, g) => sum + g.totals.sectionTotal, 0);
+      computedQuoteAmount = Math.round(total * 100) / 100;
     }
   }
 
