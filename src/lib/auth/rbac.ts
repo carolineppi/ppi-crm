@@ -5,15 +5,11 @@ import { UserProfile, UserRole } from '@/lib/auth/roles';
 
 export * from '@/lib/auth/roles';
 
-export async function getCurrentUserContext() {
-  const ssr = await createSsrSupabaseClient();
-  const {
-    data: { user },
-    error,
-  } = await ssr.auth.getUser();
-
-  if (error || !user) return null;
-
+export async function ensureUserProfile(user: {
+  id: string;
+  email?: string | null;
+  user_metadata?: Record<string, any>;
+}): Promise<UserProfile | null> {
   const service = createServerSupabaseClient();
   const email = (user.email || '').toLowerCase();
 
@@ -62,10 +58,24 @@ export async function getCurrentUserContext() {
   if (!profile || !profile.is_active) {
     return null;
   }
+  return profile as UserProfile;
+}
+
+export async function getCurrentUserContext() {
+  const ssr = await createSsrSupabaseClient();
+  const {
+    data: { user },
+    error,
+  } = await ssr.auth.getUser();
+
+  if (error || !user) return null;
+
+  const profile = await ensureUserProfile(user);
+  if (!profile) return null;
 
   return {
     user,
-    profile: profile as UserProfile,
+    profile,
     ssr,
   };
 }
