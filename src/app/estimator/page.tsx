@@ -86,6 +86,11 @@ interface JobItem {
 export default function EstimatorWorkspacePage() {
   const [bids, setBids] = useState<JobItem[]>([]);
   const [isLoading, setIsLoading] = useState(true);
+  const [isLoadingMore, setIsLoadingMore] = useState(false);
+  const [hasMoreBids, setHasMoreBids] = useState(false);
+  const [totalAvailableBids, setTotalAvailableBids] = useState(0);
+  const [loadedRawCount, setLoadedRawCount] = useState(0);
+  const [hasLoadedOnce, setHasLoadedOnce] = useState(false);
   const [selectedEstimator, setSelectedEstimator] = useState<string>('ALL');
   const [statusFilter, setStatusFilter] = useState<string>('ALL');
   const [searchQuery, setSearchQuery] = useState<string>('');
@@ -109,17 +114,27 @@ export default function EstimatorWorkspacePage() {
     fetchBids(name);
   };
 
-  const fetchBids = async (estimatorOverride?: string | unknown) => {
-    setIsLoading(true);
+  const fetchBids = async (
+    estimatorOverride?: string | unknown,
+    opts?: { q?: string; offset?: number; append?: boolean }
+  ) => {
+    const append = Boolean(opts?.append);
+    if (append) setIsLoadingMore(true);
+    else setIsLoading(true);
     try {
       const est = typeof estimatorOverride === 'string' ? estimatorOverride : selectedEstimator;
       const params = new URLSearchParams({
         summary: '1',
         scope: 'estimator',
-        limit: '250',
+        limit: append ? '500' : '250',
+        offset: String(opts?.offset ?? 0),
       });
       if (est && est !== 'ALL') {
         params.set('estimator', est);
+      }
+      const qVal = (opts?.q ?? searchQuery).trim();
+      if (qVal) {
+        params.set('q', qVal);
       }
       const [res, cartsRes] = await Promise.all([
         fetch(`/api/bid-requests?${params.toString()}`),
@@ -302,12 +317,23 @@ export default function EstimatorWorkspacePage() {
             };
           });
 
-        setBids(mapped);
+        setBids((prev) => {
+          if (!opts?.append) return mapped;
+          const seen = new Set(prev.map((p) => p.id));
+          return [...prev, ...mapped.filter((m) => !seen.has(m.id))];
+        });
+        setLoadedRawCount((prev) =>
+          opts?.append ? prev + data.bidRequests.length : data.bidRequests.length
+        );
+        setHasMoreBids(Boolean(data.hasMore));
+        setTotalAvailableBids(Number(data.totalCount || mapped.length));
+        setHasLoadedOnce(true);
       }
     } catch (err) {
       console.error('Failed to load bids for estimator:', err);
     } finally {
       setIsLoading(false);
+      setIsLoadingMore(false);
     }
   };
 
@@ -316,6 +342,16 @@ export default function EstimatorWorkspacePage() {
     const initialEst = saved && (ESTIMATORS.includes(saved) || saved === 'ALL') ? saved : 'ALL';
     fetchBids(initialEst);
   }, []);
+
+  // Debounced server-side search across all 3,000+ assigned bids
+  useEffect(() => {
+    if (!hasLoadedOnce) return;
+    const timer = setTimeout(() => {
+      fetchBids(selectedEstimator, { q: searchQuery.trim(), offset: 0, append: false });
+    }, 350);
+    return () => clearTimeout(timer);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [searchQuery]);
 
   const [pendingWonBid, setPendingWonBid] = useState<WonBidSeed | null>(null);
 
@@ -688,23 +724,30 @@ export default function EstimatorWorkspacePage() {
 
       {/* Main Jobs Feed */}
       {filteredBids.length === 0 ? (
-        <div className="p-16 text-center bg-white rounded-2xl border border-slate-200 shadow-sm space-y-4">
-          <div className="w-14 h-14 rounded-2xl bg-blue-50 text-blue-600 flex items-center justify-center mx-auto">
-            <Briefcase className="w-7 h-7" />
+        isLoading ? (
+          <div className="p-16 flex flex-col items-center justify-center gap-3 bg-white rounded-2xl border border-slate-200 shadow-sm text-slate-500 text-sm">
+            <div className="w-8 h-8 border-4 border-slate-200 border-t-blue-600 rounded-full animate-spin" />
+            <span className="font-semibold">Loading...</span>
           </div>
-          <div>
-            <h3 className="text-base font-bold text-slate-900">
-              {totalAssigned === 0
-                ? `No jobs currently assigned to ${selectedEstimator}`
-                : 'No bids match your current filter'}
-            </h3>
-            <p className="text-xs text-slate-500 max-w-md mx-auto mt-1">
-              {totalAssigned === 0
-                ? 'The Calendar Manager can assign incoming bid requests from the Inbound Dispatch Feed or Calendar Schedule.'
-                : 'Try adjusting your search terms or clearing the status filter.'}
-            </p>
+        ) : (
+          <div className="p-16 text-center bg-white rounded-2xl border border-slate-200 shadow-sm space-y-4">
+            <div className="w-14 h-14 rounded-2xl bg-blue-50 text-blue-600 flex items-center justify-center mx-auto">
+              <Briefcase className="w-7 h-7" />
+            </div>
+            <div>
+              <h3 className="text-base font-bold text-slate-900">
+                {totalAssigned === 0
+                  ? `No jobs currently assigned to ${selectedEstimator}`
+                  : 'No bids match your current filter'}
+              </h3>
+              <p className="text-xs text-slate-500 max-w-md mx-auto mt-1">
+                {totalAssigned === 0
+                  ? 'The Calendar Manager can assign incoming bid requests from the Inbound Dispatch Feed or Calendar Schedule.'
+                  : 'Try adjusting your search terms or clearing the status filter.'}
+              </p>
+            </div>
           </div>
-        </div>
+        )
       ) : (
         <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
           {filteredBids.map((job) => {
@@ -843,6 +886,23 @@ export default function EstimatorWorkspacePage() {
               </div>
             );
           })}
+        </div>
+      )}
+
+      {hasMoreBids && (
+        <div className="flex items-center justify-center pt-2">
+          <button
+            type="button"
+            disabled={isLoadingMore}
+            onClick={() =>
+              fetchBids(selectedEstimator, { offset: loadedRawCount, append: true })
+            }
+            className="px-5 py-2.5 rounded-xl bg-white hover:bg-slate-50 border border-slate-300 text-slate-800 text-xs font-bold shadow-2xs disabled:opacity-50 cursor-pointer"
+          >
+            {isLoadingMore
+              ? 'Loading more bids...'
+              : `Load More Assigned Bids (${loadedRawCount.toLocaleString()} of ${totalAvailableBids.toLocaleString()} loaded)`}
+          </button>
         </div>
       )}
 

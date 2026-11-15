@@ -203,7 +203,10 @@ export default function DispatchDashboard() {
   const [isSplitMaximized, setIsSplitMaximized] = useState(false);
   const [selectedEmailId, setSelectedEmailId] = useState<string | null>(null);
   const [isUsingLiveDb, setIsUsingLiveDb] = useState(false);
-  const [isLoading, setIsLoading] = useState(false);
+  const [isLoading, setIsLoading] = useState(true);
+  const [isLoadingMore, setIsLoadingMore] = useState(false);
+  const [hasMoreBids, setHasMoreBids] = useState(false);
+  const [totalAvailableBids, setTotalAvailableBids] = useState<number>(0);
   const [expandedGroups, setExpandedGroups] = useState<Record<string, boolean>>({});
   const [expandedEmails, setExpandedEmails] = useState<Record<string, boolean>>({});
   const [toastMessage, setToastMessage] = useState<string | null>(null);
@@ -280,10 +283,28 @@ export default function DispatchDashboard() {
     setTimeout(() => setToastMessage(null), 4000);
   };
 
-  const fetchLiveBids = async () => {
-    setIsLoading(true);
+  const fetchLiveBids = async (
+    opts?: { q?: string; offset?: number; append?: boolean } | unknown
+  ) => {
+    const options =
+      opts && typeof opts === 'object' && ('q' in opts || 'offset' in opts || 'append' in opts)
+        ? (opts as { q?: string; offset?: number; append?: boolean })
+        : undefined;
+    const append = Boolean(options?.append);
+    if (append) setIsLoadingMore(true);
+    else setIsLoading(true);
     try {
-      const res = await fetch('/api/bid-requests?summary=1&scope=calendar&limit=400');
+      const params = new URLSearchParams({
+        summary: '1',
+        scope: 'calendar',
+        limit: append ? '500' : '400',
+        offset: String(options?.offset ?? 0),
+      });
+      const qVal = (options?.q ?? feedSearchQuery).trim();
+      if (qVal) {
+        params.set('q', qVal);
+      }
+      const res = await fetch(`/api/bid-requests?${params.toString()}`);
       const data = await res.json();
       if (data.bidRequests && Array.isArray(data.bidRequests)) {
         const mapped: DisplayBidRequest[] = data.bidRequests.map((r: any) => {
@@ -404,15 +425,34 @@ export default function DispatchDashboard() {
             ),
           };
         });
-        setBids(mapped);
+        setBids((prev) => {
+          if (!options?.append) return mapped;
+          const seen = new Set(prev.map((p) => p.id));
+          return [...prev, ...mapped.filter((m) => !seen.has(m.id))];
+        });
+        setHasMoreBids(Boolean(data.hasMore));
+        setTotalAvailableBids(Number(data.totalCount || mapped.length));
         setIsUsingLiveDb(true);
       }
     } catch (err) {
       console.error('Error fetching live bids:', err);
     } finally {
       setIsLoading(false);
+      setIsLoadingMore(false);
     }
   };
+
+  // Debounced server-side search across all 6,800+ bids
+  useEffect(() => {
+    const trimmed = feedSearchQuery.trim();
+    const timer = setTimeout(() => {
+      if (isUsingLiveDb) {
+        fetchLiveBids({ q: trimmed, offset: 0, append: false });
+      }
+    }, 350);
+    return () => clearTimeout(timer);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [feedSearchQuery]);
 
   const fetchAssignmentRules = useCallback(async () => {
     try {
@@ -2889,6 +2929,20 @@ export default function DispatchDashboard() {
                   </div>
 
                   <div className="flex items-center gap-3">
+                    {hasMoreBids && (
+                      <button
+                        type="button"
+                        disabled={isLoadingMore}
+                        onClick={() =>
+                          fetchLiveBids({ offset: bids.length, append: true })
+                        }
+                        className="px-2.5 py-1 rounded-lg bg-blue-50 hover:bg-blue-100 text-blue-700 border border-blue-200 font-bold text-[11px] disabled:opacity-50 cursor-pointer"
+                      >
+                        {isLoadingMore
+                          ? 'Loading...'
+                          : `Load More (+500 of ${totalAvailableBids.toLocaleString()})`}
+                      </button>
+                    )}
                     <span className="text-xs font-mono text-slate-500">
                       {totalItems === 0 ? '0 of 0' : `${startIndex + 1}–${endIndex} of ${totalItems}`}
                     </span>
@@ -2918,11 +2972,18 @@ export default function DispatchDashboard() {
                 {/* Full-Width Email Rows */}
                 <div className="divide-y divide-slate-100">
                   {paginatedBids.length === 0 ? (
-                    <div className="p-16 text-center text-slate-400 text-sm">
-                      {feedSearchQuery
-                        ? `No emails found matching "${feedSearchQuery}".`
-                        : `No emails in ${activeFilter}.`}
-                    </div>
+                    isLoading ? (
+                      <div className="p-16 flex flex-col items-center justify-center gap-3 text-slate-500 text-sm">
+                        <div className="w-8 h-8 border-4 border-slate-200 border-t-blue-600 rounded-full animate-spin" />
+                        <span className="font-semibold">Loading...</span>
+                      </div>
+                    ) : (
+                      <div className="p-16 text-center text-slate-400 text-sm">
+                        {feedSearchQuery
+                          ? `No emails found matching "${feedSearchQuery}".`
+                          : `No emails in ${activeFilter}.`}
+                      </div>
+                    )
                   ) : (
                     paginatedBids.map((bid) => {
                       const hasMultiGC = findCrossContractorMatches(bid).length > 0;
@@ -3250,11 +3311,18 @@ export default function DispatchDashboard() {
               </div>
 
               {paginatedGroupEntries.length === 0 ? (
-                <div className="p-12 text-center text-slate-400 text-sm">
-                  {feedSearchQuery
-                    ? `No emails found matching "${feedSearchQuery}".`
-                    : `No emails found in ${activeFilter}.`}
-                </div>
+                isLoading ? (
+                  <div className="p-12 flex flex-col items-center justify-center gap-3 text-slate-500 text-sm">
+                    <div className="w-8 h-8 border-4 border-slate-200 border-t-blue-600 rounded-full animate-spin" />
+                    <span className="font-semibold">Loading...</span>
+                  </div>
+                ) : (
+                  <div className="p-12 text-center text-slate-400 text-sm">
+                    {feedSearchQuery
+                      ? `No emails found matching "${feedSearchQuery}".`
+                      : `No emails found in ${activeFilter}.`}
+                  </div>
+                )
               ) : (
                 <div className="divide-y divide-slate-200">
                   {paginatedGroupEntries.map(([groupId, groupItems]) => {
