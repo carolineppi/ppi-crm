@@ -16,6 +16,7 @@ import {
   Upload,
 } from 'lucide-react';
 import { uploadBidDocument } from '@/lib/uploads/uploadBidDocument';
+import { buildJobLineItemsFromQuoteCart } from '@/lib/pricing/quote-sections';
 
 const ESTIMATORS = [
   'Lisa Williams',
@@ -191,22 +192,7 @@ export default function ConfirmWonJobModal({
 
   const applyQuoteCartToJob = (cart: any) => {
     if (!cart) return;
-    const mult = 1 + (Number(cart.markup_percent ?? 0) || 0) / 100;
-    const itemsArr = Array.isArray(cart.items) ? cart.items : [];
-    const mapped = itemsArr.map((it: any, idx: number) => ({
-      id: it.priceItemId || `cart-${idx + 1}`,
-      lineNumber: idx + 1,
-      manufacturer: it.manufacturer || '',
-      sku: it.sku || '',
-      description: it.description || '',
-      quantity: Math.max(1, Number(it.quantity) || 1),
-      unit: 'EA',
-      unitPrice: Math.round((Number(it.unitCost) || 0) * mult * 100) / 100,
-    }));
-    const total = mapped.reduce(
-      (s: number, it: any) => s + (Number(it.unitPrice) || 0) * (Number(it.quantity) || 1),
-      0
-    );
+    const { lineItems: mapped, quoteTotal: total } = buildJobLineItemsFromQuoteCart(cart);
     setLineItems(mapped);
     setQuoteAmount(Math.round(total * 100) / 100);
     setUploadedPdfName(`${cart.title || 'Quote'}.pdf`);
@@ -1012,12 +998,7 @@ export default function ConfirmWonJobModal({
                   <optgroup label="Printed Quote PDFs (Line Items Attached)">
                     {quoteCarts.map((c) => {
                       const itemsArr = Array.isArray(c.items) ? c.items : [];
-                      const mult = 1 + (Number(c.markup_percent ?? 0) || 0) / 100;
-                      const tot = itemsArr.reduce(
-                        (s: number, it: any) =>
-                          s + (Number(it.unitCost) || 0) * mult * (Number(it.quantity) || 0),
-                        0
-                      );
+                      const { quoteTotal: tot } = buildJobLineItemsFromQuoteCart(c);
                       const dateLabel = c.quoted_at
                         ? new Date(c.quoted_at).toLocaleString([], {
                             month: 'numeric',

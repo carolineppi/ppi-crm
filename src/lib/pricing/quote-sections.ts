@@ -156,3 +156,104 @@ export function groupItemsBySection(
     })
     .filter((group) => group.items.length > 0 || configByName.has(group.sectionName));
 }
+
+export interface JobLineItemFromCart {
+  id: string;
+  lineNumber: number;
+  manufacturer: string;
+  sku: string;
+  description: string;
+  quantity: number;
+  unit: string;
+  unitPrice: number;
+  section?: string;
+}
+
+/**
+ * Converts a saved job_quote_carts record into Job Scope Line Items,
+ * respecting section-level Furnish Sell Overrides (materialSellOverride)
+ * so overridden lump-sum packages never transfer as $0 items.
+ */
+export function buildJobLineItemsFromQuoteCart(cart: any): {
+  lineItems: JobLineItemFromCart[];
+  quoteTotal: number;
+} {
+  const itemsArr: QuoteCartItem[] = Array.isArray(cart?.items) ? cart.items : [];
+  const sectionsArr: QuoteSectionConfig[] = Array.isArray(cart?.sections) ? cart.sections : [];
+  const fallbackMarkup = Number(cart?.markup_percent ?? 0) || 0;
+
+  if (sectionsArr.length === 0) {
+    const mult = 1 + fallbackMarkup / 100;
+    const lineItems: JobLineItemFromCart[] = itemsArr.map((it: any, idx: number) => ({
+      id: it.priceItemId || `cart-${idx + 1}`,
+      lineNumber: idx + 1,
+      manufacturer: it.manufacturer || '',
+      sku: it.sku || '',
+      description: it.description || '',
+      quantity: Math.max(1, Number(it.quantity) || 1),
+      unit: it.unitLabel || 'EA',
+      unitPrice: Math.round((Number(it.unitCost) || 0) * mult * 100) / 100,
+      section: it.section || undefined,
+    }));
+    const quoteTotal =
+      Math.round(
+        lineItems.reduce((s, it) => s + it.unitPrice * it.quantity, 0) * 100
+      ) / 100;
+    return { lineItems, quoteTotal };
+  }
+
+  const grouped = groupItemsBySection(itemsArr, sectionsArr, fallbackMarkup);
+  const lineItems: JobLineItemFromCart[] = [];
+  let quoteTotal = 0;
+  let lineCounter = 1;
+
+  for (const group of grouped) {
+    const { sectionName, config, items: secItems, totals } = group;
+    quoteTotal += totals.sectionTotal;
+
+    const totalQty = secItems.reduce(
+      (s, it) => s + Math.max(1, Number(it.quantity) || 1),
+      0
+    );
+    const hasOverride =
+      config.materialSellOverride !== null &&
+      config.materialSellOverride !== undefined &&
+      Number.isFinite(Number(config.materialSellOverride));
+
+    const targetMaterialSell = hasOverride
+      ? totals.furnishSell
+      : totals.calculatedMaterialSell;
+
+    for (let idx = 0; idx < secItems.length; idx++) {
+      const it = secItems[idx];
+      const qty = Math.max(1, Number(it.quantity) || 1);
+      const itemCost = Number(it.unitCost) || 0;
+
+      let unitPrice = 0;
+      if (totals.materialCost > 0) {
+        unitPrice =
+          Math.round(itemCost * (targetMaterialSell / totals.materialCost) * 100) / 100;
+      } else if (targetMaterialSell > 0 && totalQty > 0) {
+        // Items had $0 individual cost and a section override was entered for the full set
+        unitPrice = Math.round((targetMaterialSell / totalQty) * 100) / 100;
+      }
+
+      lineItems.push({
+        id: it.priceItemId || `cart-${lineCounter}`,
+        lineNumber: lineCounter++,
+        manufacturer: it.manufacturer || '',
+        sku: it.sku || '',
+        description: it.description || '',
+        quantity: qty,
+        unit: it.unitLabel || 'EA',
+        unitPrice,
+        section: sectionName,
+      });
+    }
+  }
+
+  return {
+    lineItems,
+    quoteTotal: Math.round(quoteTotal * 100) / 100,
+  };
+}

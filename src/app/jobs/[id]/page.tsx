@@ -30,6 +30,7 @@ import InstallCalendarMicroView, {
   CalendarDaySummary,
 } from '@/components/InstallCalendarMicroView';
 import { getWarehouseStatusMeta } from '@/lib/warehouse/helpers';
+import { getJobLineItemsOrderStatus } from '@/lib/jobs/lineItemOrderStatus';
 
 export default function JobViewerPage() {
   const params = useParams<{ id: string }>();
@@ -1022,19 +1023,37 @@ export default function JobViewerPage() {
 
         {/* Right 2 Columns: Scope Line Items + PO & CO Snapshots */}
         <div className="lg:col-span-2 space-y-6">
+          {(() => {
+            const lineOrderSummary = getJobLineItemsOrderStatus(lineItems, purchaseOrders);
+            return (
           <div className="bg-white rounded-2xl border border-slate-200 shadow-sm overflow-hidden">
-            <div className="p-4 border-b border-slate-200 flex items-center justify-between">
+            <div className="p-4 border-b border-slate-200 flex items-center justify-between gap-3">
               <div>
-                <h2 className="text-sm font-black text-slate-900">
-                  Job Scope Line Items ({lineItems.length})
-                </h2>
+                <div className="flex items-center gap-2 flex-wrap">
+                  <h2 className="text-sm font-black text-slate-900">
+                    Job Scope Line Items ({lineItems.length})
+                  </h2>
+                  {lineItems.length > 0 && (
+                    <span
+                      className={`text-[10px] font-bold px-2 py-0.5 rounded-full border ${
+                        lineOrderSummary.orderedItems === lineOrderSummary.totalItems
+                          ? 'bg-emerald-50 text-emerald-700 border-emerald-200'
+                          : lineOrderSummary.orderedItems > 0 || lineOrderSummary.partialItems > 0
+                          ? 'bg-blue-50 text-blue-700 border-blue-200'
+                          : 'bg-slate-100 text-slate-600 border-slate-200'
+                      }`}
+                    >
+                      {lineOrderSummary.orderedItems} / {lineOrderSummary.totalItems} Ordered on POs
+                    </span>
+                  )}
+                </div>
                 <p className="text-[11px] text-slate-500">
-                  Selected scope items transferred from the won bid.
+                  Selected scope items transferred from the won bid. Items ordered on a PO are checked off below.
                 </p>
               </div>
               <Link
                 href={`/jobs/${job.id}/purchase-orders`}
-                className="px-3 py-1.5 rounded-lg bg-blue-600 hover:bg-blue-500 text-white text-xs font-bold"
+                className="px-3 py-1.5 rounded-lg bg-blue-600 hover:bg-blue-500 text-white text-xs font-bold shrink-0"
               >
                 + Order Items (PO)
               </Link>
@@ -1049,6 +1068,7 @@ export default function JobViewerPage() {
                 <table className="w-full text-xs text-left">
                   <thead className="bg-slate-50 text-[10px] uppercase text-slate-500 border-b border-slate-200">
                     <tr>
+                      <th className="py-2.5 px-4">PO Status</th>
                       <th className="py-2.5 px-4">#</th>
                       <th className="py-2.5 px-4">Qty</th>
                       <th className="py-2.5 px-4">Manufacturer / SKU</th>
@@ -1057,15 +1077,35 @@ export default function JobViewerPage() {
                     </tr>
                   </thead>
                   <tbody className="divide-y divide-slate-100">
-                    {lineItems.map((li: any, idx: number) => (
-                      <tr key={li.id || idx}>
+                    {lineItems.map((li: any, idx: number) => {
+                      const st = lineOrderSummary.byIndex[idx];
+                      const isOrdered = st?.status === 'ordered';
+                      const isPartial = st?.status === 'partial';
+                      return (
+                      <tr key={li.id || idx} className={isOrdered ? 'bg-emerald-50/40' : ''}>
+                        <td className="py-2.5 px-4 whitespace-nowrap">
+                          {isOrdered ? (
+                            <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full bg-emerald-100 text-emerald-800 border border-emerald-200 text-[10px] font-bold">
+                              <CheckCircle2 className="w-3 h-3" />
+                              <span>Ordered{st.poNumbers.length > 0 ? ` (${st.poNumbers.join(', ')})` : ''}</span>
+                            </span>
+                          ) : isPartial ? (
+                            <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full bg-amber-100 text-amber-800 border border-amber-200 text-[10px] font-bold">
+                              <span>{st.orderedQty}/{st.requiredQty} Ordered</span>
+                            </span>
+                          ) : (
+                            <span className="inline-flex items-center px-2 py-0.5 rounded-full bg-slate-100 text-slate-500 text-[10px] font-semibold">
+                              Pending
+                            </span>
+                          )}
+                        </td>
                         <td className="py-2.5 px-4 text-slate-400 font-mono">{idx + 1}</td>
-                        <td className="py-2.5 px-4 font-bold">{li.quantity}</td>
-                        <td className="py-2.5 px-4 font-mono text-[11px]">
+                        <td className={`py-2.5 px-4 font-bold ${isOrdered ? 'line-through text-slate-400' : ''}`}>{li.quantity}</td>
+                        <td className={`py-2.5 px-4 font-mono text-[11px] ${isOrdered ? 'line-through text-slate-400' : ''}`}>
                           {[li.manufacturer, li.sku].filter(Boolean).join(' • ') || '—'}
                         </td>
-                        <td className="py-2.5 px-4 text-slate-800">{li.description}</td>
-                        <td className="py-2.5 px-4 text-right font-semibold">
+                        <td className={`py-2.5 px-4 ${isOrdered ? 'line-through text-slate-400' : 'text-slate-800'}`}>{li.description}</td>
+                        <td className={`py-2.5 px-4 text-right font-semibold ${isOrdered ? 'text-slate-400' : ''}`}>
                           {li.unitPrice !== undefined && li.unitPrice !== null
                             ? `$${Number(li.unitPrice).toLocaleString('en-US', {
                                 minimumFractionDigits: 2,
@@ -1074,12 +1114,15 @@ export default function JobViewerPage() {
                             : '—'}
                         </td>
                       </tr>
-                    ))}
+                      );
+                    })}
                   </tbody>
                 </table>
               </div>
             )}
           </div>
+            );
+          })()}
 
           {/* Quick PO & CO Summaries */}
           <div className="grid grid-cols-1 md:grid-cols-2 gap-4">

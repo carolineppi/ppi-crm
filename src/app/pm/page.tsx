@@ -18,7 +18,11 @@ import {
   Users,
   UserCheck,
   DollarSign,
+  CheckCircle2,
+  ChevronDown,
+  ChevronUp,
 } from 'lucide-react';
+import type { LineItemOrderStatus } from '@/lib/jobs/lineItemOrderStatus';
 
 const DEFAULT_PMS = [
   'Lisa Williams',
@@ -53,6 +57,12 @@ interface PMJob {
   line_items: any[] | null;
   po_summary?: { total: number; open: number; totalCost: number };
   co_summary?: { total: number; pending: number; netApproved: number };
+  line_item_order_status?: {
+    byIndex: LineItemOrderStatus[];
+    totalItems: number;
+    orderedItems: number;
+    partialItems: number;
+  };
 }
 
 export default function ProjectManagerDashboardPage() {
@@ -60,6 +70,7 @@ export default function ProjectManagerDashboardPage() {
   const [isLoading, setIsLoading] = useState(true);
   const [selectedPm, setSelectedPm] = useState<string>('ALL');
   const [searchQuery, setSearchQuery] = useState('');
+  const [expandedScopeJobs, setExpandedScopeJobs] = useState<Record<string, boolean>>({});
 
   useEffect(() => {
     const saved = localStorage.getItem('ppi_current_pm');
@@ -328,6 +339,25 @@ export default function ProjectManagerDashboardPage() {
                         <span className="text-[11px] font-bold px-2 py-0.5 rounded-full bg-slate-100 text-slate-700">
                           PM: {job.project_manager || 'Unassigned'}
                         </span>
+                        {job.line_item_order_status && job.line_item_order_status.totalItems > 0 && (
+                          <span
+                            className={`text-[11px] font-bold px-2 py-0.5 rounded-full border inline-flex items-center gap-1 ${
+                              job.line_item_order_status.orderedItems ===
+                              job.line_item_order_status.totalItems
+                                ? 'bg-emerald-50 text-emerald-700 border-emerald-200'
+                                : job.line_item_order_status.orderedItems > 0 ||
+                                  job.line_item_order_status.partialItems > 0
+                                ? 'bg-blue-50 text-blue-700 border-blue-200'
+                                : 'bg-slate-100 text-slate-600 border-slate-200'
+                            }`}
+                          >
+                            <CheckCircle2 className="w-3 h-3" />
+                            <span>
+                              Scope Ordered: {job.line_item_order_status.orderedItems}/
+                              {job.line_item_order_status.totalItems}
+                            </span>
+                          </span>
+                        )}
                       </div>
                       <h2 className="text-base font-black text-slate-900 mt-1">{job.project_name}</h2>
                     </div>
@@ -386,6 +416,90 @@ export default function ProjectManagerDashboardPage() {
                       )}
                     </div>
                   </div>
+
+                  {/* Estimate Line Items Checklist */}
+                  {Array.isArray(job.line_items) && job.line_items.length > 0 && (
+                    <div className="rounded-xl border border-slate-200 bg-slate-50/70 overflow-hidden">
+                      <button
+                        type="button"
+                        onClick={() =>
+                          setExpandedScopeJobs((prev) => ({
+                            ...prev,
+                            [job.id]: !prev[job.id],
+                          }))
+                        }
+                        className="w-full px-3 py-2 flex items-center justify-between text-xs font-bold text-slate-700 hover:bg-slate-100 transition-colors"
+                      >
+                        <span className="flex items-center gap-1.5">
+                          <CheckCircle2 className="w-3.5 h-3.5 text-emerald-600" />
+                          <span>
+                            Estimate Line Items (
+                            {job.line_item_order_status?.orderedItems ?? 0}/
+                            {job.line_items.length} ordered)
+                          </span>
+                        </span>
+                        {expandedScopeJobs[job.id] ? (
+                          <ChevronUp className="w-4 h-4 text-slate-400" />
+                        ) : (
+                          <ChevronDown className="w-4 h-4 text-slate-400" />
+                        )}
+                      </button>
+                      {expandedScopeJobs[job.id] && (
+                        <div className="divide-y divide-slate-200/70 border-t border-slate-200 bg-white max-h-48 overflow-y-auto">
+                          {job.line_items.map((li: any, idx: number) => {
+                            const st = job.line_item_order_status?.byIndex?.[idx];
+                            const isOrdered = st?.status === 'ordered';
+                            const isPartial = st?.status === 'partial';
+                            return (
+                              <div
+                                key={li.id || idx}
+                                className={`px-3 py-1.5 flex items-center justify-between gap-2 text-[11px] ${
+                                  isOrdered ? 'bg-emerald-50/40' : ''
+                                }`}
+                              >
+                                <div className="flex items-center gap-2 min-w-0">
+                                  <span
+                                    className={`w-4 h-4 rounded flex items-center justify-center shrink-0 border ${
+                                      isOrdered
+                                        ? 'bg-emerald-600 border-emerald-600 text-white'
+                                        : isPartial
+                                        ? 'bg-amber-100 border-amber-400 text-amber-800'
+                                        : 'bg-white border-slate-300 text-transparent'
+                                    }`}
+                                  >
+                                    ✓
+                                  </span>
+                                  <span
+                                    className={`truncate ${
+                                      isOrdered
+                                        ? 'line-through text-slate-400'
+                                        : 'text-slate-800 font-medium'
+                                    }`}
+                                  >
+                                    {li.quantity}× {[li.manufacturer, li.sku].filter(Boolean).join(' ')}
+                                    {li.description ? ` — ${li.description}` : ''}
+                                  </span>
+                                </div>
+                                {isOrdered && st?.poNumbers?.length ? (
+                                  <span className="text-[10px] font-bold text-emerald-700 shrink-0">
+                                    {st.poNumbers.join(', ')}
+                                  </span>
+                                ) : isPartial ? (
+                                  <span className="text-[10px] font-bold text-amber-700 shrink-0">
+                                    {st?.orderedQty}/{st?.requiredQty}
+                                  </span>
+                                ) : (
+                                  <span className="text-[10px] text-slate-400 shrink-0">
+                                    Pending
+                                  </span>
+                                )}
+                              </div>
+                            );
+                          })}
+                        </div>
+                      )}
+                    </div>
+                  )}
                 </div>
 
                 {/* Action Links */}

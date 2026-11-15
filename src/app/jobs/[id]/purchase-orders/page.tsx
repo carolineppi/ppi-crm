@@ -11,8 +11,11 @@ import {
   CheckCircle2,
   Truck,
 } from 'lucide-react';
+import { getJobLineItemsOrderStatus } from '@/lib/jobs/lineItemOrderStatus';
 
 interface POItem {
+  sourceLineItemId?: string | null;
+  sourceLineNumber?: number | null;
   manufacturer?: string;
   sku?: string;
   description: string;
@@ -68,23 +71,61 @@ export default function JobPurchaseOrdersPage() {
       .catch(() => {});
   }, [jobId]);
 
-  const loadFromJobScope = (filterVendor?: string) => {
+  const orderStatusSummary = getJobLineItemsOrderStatus(job?.line_items, purchaseOrders);
+  const unorderedCount = orderStatusSummary.byIndex.filter((s) => s.status !== 'ordered').length;
+  const draftPoTotal = items.reduce(
+    (sum, it) => sum + (Number(it.unitCost) || 0) * (Number(it.quantity) || 0),
+    0
+  );
+
+  const loadFromJobScope = (filterVendor?: string, onlyUnordered = false) => {
     const scopeItems = Array.isArray(job?.line_items) ? job.line_items : [];
-    const filtered = filterVendor
-      ? scopeItems.filter((it: any) =>
+    const allZeroPrices =
+      scopeItems.length > 0 && scopeItems.every((it: any) => !(Number(it.unitPrice) > 0));
+    const totalScopeQty = scopeItems.reduce(
+      (s: number, it: any) => s + Math.max(1, Number(it.quantity) || 1),
+      0
+    );
+    const fallbackUnitCost =
+      allZeroPrices && Number(job?.quote_amount) > 0 && totalScopeQty > 0
+        ? Math.round((Number(job.quote_amount) / totalScopeQty) * 100) / 100
+        : 0;
+
+    const indexed: Array<{ it: any; origIdx: number }> = scopeItems.map(
+      (it: any, origIdx: number) => ({ it, origIdx })
+    );
+    const vendorFiltered = filterVendor
+      ? indexed.filter(({ it }) =>
           `${it.manufacturer || ''} ${it.sku || ''}`
             .toLowerCase()
             .includes(filterVendor.toLowerCase())
         )
-      : scopeItems;
+      : indexed;
+    const finalItems = onlyUnordered
+      ? vendorFiltered.filter(
+          ({ origIdx }) => orderStatusSummary.byIndex[origIdx]?.status !== 'ordered'
+        )
+      : vendorFiltered;
+
     setItems(
-      filtered.map((it: any) => ({
-        manufacturer: it.manufacturer || '',
-        sku: it.sku || '',
-        description: it.description || '',
-        quantity: Math.max(1, Number(it.quantity) || 1),
-        unitCost: Number(it.unitPrice) || 0,
-      }))
+      finalItems.map(({ it, origIdx }) => {
+        const statusInfo = orderStatusSummary.byIndex[origIdx];
+        const baseQty = Math.max(1, Number(it.quantity) || 1);
+        const qty =
+          onlyUnordered && statusInfo?.status === 'partial'
+            ? Math.max(1, baseQty - statusInfo.orderedQty)
+            : baseQty;
+        const rawUnitPrice = Number(it.unitPrice) || 0;
+        return {
+          sourceLineItemId: it.id || null,
+          sourceLineNumber: it.lineNumber || origIdx + 1,
+          manufacturer: it.manufacturer || '',
+          sku: it.sku || '',
+          description: it.description || '',
+          quantity: qty,
+          unitCost: rawUnitPrice > 0 ? rawUnitPrice : fallbackUnitCost,
+        };
+      })
     );
   };
 
@@ -185,7 +226,14 @@ export default function JobPurchaseOrdersPage() {
       <form onSubmit={handleCreatePO} className="bg-white rounded-2xl border border-slate-200 p-5 shadow-sm space-y-4 text-xs">
         <div className="flex flex-wrap items-center justify-between gap-2">
           <h2 className="text-sm font-black text-slate-900">Create New Purchase Order</h2>
-          <div className="flex items-center gap-2">
+          <div className="flex flex-wrap items-center gap-2">
+            <button
+              type="button"
+              onClick={() => loadFromJobScope(undefined, true)}
+              className="px-3 py-1.5 rounded-lg bg-emerald-50 hover:bg-emerald-100 text-emerald-800 border border-emerald-200 font-bold"
+            >
+              Load Unordered Items ({unorderedCount})
+            </button>
             <button
               type="button"
               onClick={() => loadFromJobScope()}
@@ -288,7 +336,13 @@ export default function JobPurchaseOrdersPage() {
         {/* PO Items */}
         <div className="rounded-xl border border-slate-200 overflow-hidden">
           <div className="px-3 py-2 bg-slate-50 border-b border-slate-200 flex items-center justify-between">
-            <span className="text-[10px] font-bold uppercase text-slate-600">PO Line Items ({items.length})</span>
+            <span className="text-[10px] font-bold uppercase text-slate-600">
+              PO Line Items ({items.length}) • Total: $
+              {draftPoTotal.toLocaleString('en-US', {
+                minimumFractionDigits: 2,
+                maximumFractionDigits: 2,
+              })}
+            </span>
             <button
               type="button"
               onClick={() =>

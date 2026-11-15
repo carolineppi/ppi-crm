@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { createServerSupabaseClient } from '@/lib/supabase/server';
 import { createOrSyncJobFromBid } from '@/lib/jobs/createJobFromBid';
+import { getJobLineItemsOrderStatus } from '@/lib/jobs/lineItemOrderStatus';
 
 export async function GET(request: NextRequest) {
   try {
@@ -22,7 +23,7 @@ export async function GET(request: NextRequest) {
 
     const [{ data, error }, { data: pos }, { data: cos }] = await Promise.all([
       supabase.from('jobs').select('*').order('created_at', { ascending: false }),
-      supabase.from('job_purchase_orders').select('id, job_id, status, total_cost'),
+      supabase.from('job_purchase_orders').select('id, job_id, po_number, status, total_cost, items'),
       supabase.from('job_change_orders').select('id, job_id, type, amount, status'),
     ]);
 
@@ -31,8 +32,11 @@ export async function GET(request: NextRequest) {
     }
 
     const poMap: Record<string, { total: number; open: number; totalCost: number }> = {};
+    const posByJob: Record<string, any[]> = {};
     (pos || []).forEach((p: any) => {
       if (!poMap[p.job_id]) poMap[p.job_id] = { total: 0, open: 0, totalCost: 0 };
+      if (!posByJob[p.job_id]) posByJob[p.job_id] = [];
+      posByJob[p.job_id].push(p);
       poMap[p.job_id].total += 1;
       if (p.status !== 'received' && p.status !== 'cancelled') poMap[p.job_id].open += 1;
       if (p.status !== 'cancelled') poMap[p.job_id].totalCost += Number(p.total_cost) || 0;
@@ -53,6 +57,10 @@ export async function GET(request: NextRequest) {
       ...job,
       po_summary: poMap[job.id] || { total: 0, open: 0, totalCost: 0 },
       co_summary: coMap[job.id] || { total: 0, pending: 0, netApproved: 0 },
+      line_item_order_status: getJobLineItemsOrderStatus(
+        job.line_items,
+        posByJob[job.id] || []
+      ),
     }));
 
     return NextResponse.json({ jobs: enriched });
