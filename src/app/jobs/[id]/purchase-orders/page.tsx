@@ -18,11 +18,13 @@ import { getJobLineItemsOrderStatus } from '@/lib/jobs/lineItemOrderStatus';
 interface POItem {
   sourceLineItemId?: string | null;
   sourceLineNumber?: number | null;
+  sourceChangeOrderId?: string | null;
   manufacturer?: string;
   sku?: string;
   description: string;
   quantity: number;
   unitCost: number;
+  estimatedUnitCost?: number | null;
 }
 
 export default function JobPurchaseOrdersPage() {
@@ -31,6 +33,7 @@ export default function JobPurchaseOrdersPage() {
 
   const [job, setJob] = useState<any>(null);
   const [purchaseOrders, setPurchaseOrders] = useState<any[]>([]);
+  const [changeOrders, setChangeOrders] = useState<any[]>([]);
   const [isLoading, setIsLoading] = useState(true);
 
   const [poNumber, setPoNumber] = useState('');
@@ -56,6 +59,7 @@ export default function JobPurchaseOrdersPage() {
         setJob(data.job);
         const pos = data.purchaseOrders || [];
         setPurchaseOrders(pos);
+        setChangeOrders(data.changeOrders || []);
         const prefix = data.job.job_number || 'JOB';
         setPoNumber(`${prefix}-PO-${String(pos.length + 1).padStart(2, '0')}`);
       }
@@ -80,6 +84,40 @@ export default function JobPurchaseOrdersPage() {
     (sum, it) => sum + (Number(it.unitCost) || 0) * (Number(it.quantity) || 0),
     0
   );
+  const positiveCOs = changeOrders.filter(
+    (c) => c.type === 'addition' && c.status !== 'rejected'
+  );
+  const draftEstTotal = items.reduce(
+    (sum, it) =>
+      sum +
+      (it.estimatedUnitCost !== null && it.estimatedUnitCost !== undefined
+        ? Number(it.estimatedUnitCost) || 0
+        : Number(it.unitCost) || 0) *
+        (Number(it.quantity) || 0),
+    0
+  );
+
+  const loadPositiveChangeOrders = () => {
+    if (positiveCOs.length === 0) return;
+    setItems((prev) => {
+      const existingCoIds = new Set(prev.map((p) => p.sourceChangeOrderId).filter(Boolean));
+      const toAdd: POItem[] = [];
+      for (const co of positiveCOs) {
+        if (existingCoIds.has(co.id)) continue;
+        const amt = Number(co.amount) || 0;
+        toAdd.push({
+          sourceChangeOrderId: co.id,
+          manufacturer: 'Change Order',
+          sku: co.co_number || 'CO',
+          description: co.title || 'Change Order Addition',
+          quantity: 1,
+          unitCost: amt,
+          estimatedUnitCost: amt,
+        });
+      }
+      return [...prev, ...toAdd];
+    });
+  };
 
   const loadFromJobScope = (filterVendor?: string, onlyUnordered = false) => {
     const scopeItems = Array.isArray(job?.line_items) ? job.line_items : [];
@@ -119,6 +157,7 @@ export default function JobPurchaseOrdersPage() {
             ? Math.max(1, baseQty - statusInfo.orderedQty)
             : baseQty;
         const rawUnitPrice = Number(it.unitPrice) || 0;
+        const estPrice = rawUnitPrice > 0 ? rawUnitPrice : fallbackUnitCost;
         return {
           sourceLineItemId: it.id || null,
           sourceLineNumber: it.lineNumber || origIdx + 1,
@@ -126,7 +165,8 @@ export default function JobPurchaseOrdersPage() {
           sku: it.sku || '',
           description: it.description || '',
           quantity: qty,
-          unitCost: rawUnitPrice > 0 ? rawUnitPrice : fallbackUnitCost,
+          unitCost: estPrice,
+          estimatedUnitCost: estPrice,
         };
       })
     );
@@ -159,11 +199,16 @@ export default function JobPurchaseOrdersPage() {
         ? po.items.map((it: any) => ({
             sourceLineItemId: it.sourceLineItemId ?? null,
             sourceLineNumber: it.sourceLineNumber ?? null,
+            sourceChangeOrderId: it.sourceChangeOrderId ?? null,
             manufacturer: it.manufacturer || '',
             sku: it.sku || '',
             description: it.description || '',
             quantity: Math.max(1, Number(it.quantity) || 1),
             unitCost: Number(it.unitCost) || 0,
+            estimatedUnitCost:
+              it.estimatedUnitCost !== undefined && it.estimatedUnitCost !== null
+                ? Number(it.estimatedUnitCost)
+                : null,
           }))
         : []
     );
@@ -292,6 +337,15 @@ export default function JobPurchaseOrdersPage() {
             >
               Load All Scope Items ({Array.isArray(job?.line_items) ? job.line_items.length : 0})
             </button>
+            {positiveCOs.length > 0 && (
+              <button
+                type="button"
+                onClick={loadPositiveChangeOrders}
+                className="px-3 py-1.5 rounded-lg bg-purple-50 hover:bg-purple-100 text-purple-800 border border-purple-200 font-bold"
+              >
+                + Add Positive COs ({positiveCOs.length})
+              </button>
+            )}
             {vendor.trim() && (
               <button
                 type="button"
@@ -388,11 +442,34 @@ export default function JobPurchaseOrdersPage() {
         <div className="rounded-xl border border-slate-200 overflow-hidden">
           <div className="px-3 py-2 bg-slate-50 border-b border-slate-200 flex items-center justify-between">
             <span className="text-[10px] font-bold uppercase text-slate-600">
-              PO Line Items ({items.length}) • Total: $
+              PO Line Items ({items.length}) • PO Total: $
               {draftPoTotal.toLocaleString('en-US', {
                 minimumFractionDigits: 2,
                 maximumFractionDigits: 2,
               })}
+              {items.some((it) => it.estimatedUnitCost !== null && it.estimatedUnitCost !== undefined) && (
+                <span className="ml-2 text-slate-500">
+                  (Est. Total: $
+                  {draftEstTotal.toLocaleString('en-US', {
+                    minimumFractionDigits: 2,
+                    maximumFractionDigits: 2,
+                  })}
+                  {draftPoTotal !== draftEstTotal && (
+                    <span
+                      className={`ml-1 font-extrabold ${
+                        draftPoTotal <= draftEstTotal ? 'text-emerald-700' : 'text-rose-700'
+                      }`}
+                    >
+                      {draftPoTotal > draftEstTotal ? '+' : '-'}$
+                      {Math.abs(draftPoTotal - draftEstTotal).toLocaleString('en-US', {
+                        minimumFractionDigits: 2,
+                        maximumFractionDigits: 2,
+                      })}
+                    </span>
+                  )}
+                  )
+                </span>
+              )}
             </span>
             <button
               type="button"
@@ -437,7 +514,7 @@ export default function JobPurchaseOrdersPage() {
                         prev.map((row, i) => (i === idx ? { ...row, sku: e.target.value } : row))
                       )
                     }
-                    className="col-span-3 px-2 py-1 rounded border border-slate-300 font-mono"
+                    className="col-span-2 px-2 py-1 rounded border border-slate-300 font-mono"
                   />
                   <input
                     type="text"
@@ -448,12 +525,21 @@ export default function JobPurchaseOrdersPage() {
                         prev.map((row, i) => (i === idx ? { ...row, description: e.target.value } : row))
                       )
                     }
-                    className="col-span-5 px-2 py-1 rounded border border-slate-300"
+                    className="col-span-4 px-2 py-1 rounded border border-slate-300"
                   />
+                  <div
+                    className="col-span-2 px-2 py-1 rounded bg-slate-100 border border-slate-200 text-right text-[11px] font-mono text-slate-600"
+                    title="Unalterable Estimate Unit Price"
+                  >
+                    {it.estimatedUnitCost !== null && it.estimatedUnitCost !== undefined
+                      ? `Est: $${Number(it.estimatedUnitCost).toFixed(2)}`
+                      : 'Est: —'}
+                  </div>
                   <input
                     type="number"
                     step="0.01"
-                    placeholder="Unit $"
+                    placeholder="Actual $"
+                    title="Actual PO Unit Cost"
                     value={it.unitCost}
                     onChange={(e) =>
                       setItems((prev) =>
@@ -603,6 +689,17 @@ export default function JobPurchaseOrdersPage() {
                             {it.description}
                           </span>
                           <span className="font-semibold">
+                            {it.estimatedUnitCost !== null &&
+                              it.estimatedUnitCost !== undefined &&
+                              Number(it.estimatedUnitCost) !== Number(it.unitCost) && (
+                                <span className="text-[10px] text-slate-400 mr-2">
+                                  (Est: $
+                                  {(
+                                    Number(it.estimatedUnitCost) * Number(it.quantity || 1)
+                                  ).toLocaleString('en-US', { minimumFractionDigits: 2 })}
+                                  )
+                                </span>
+                              )}
                             ${(Number(it.unitCost || 0) * Number(it.quantity || 1)).toLocaleString('en-US', {
                               minimumFractionDigits: 2,
                             })}

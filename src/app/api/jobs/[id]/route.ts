@@ -1,5 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { createServerSupabaseClient } from '@/lib/supabase/server';
+import { getCurrentUserContext } from '@/lib/auth/rbac';
 
 export async function GET(
   _request: NextRequest,
@@ -95,6 +96,40 @@ export async function PATCH(
 
     if (body.projectManager !== undefined) {
       updates.pm_assigned_at = body.projectManager ? new Date().toISOString() : null;
+    }
+
+    // Protect confirmed Estimate prices (quote_amount & existing line_items[].unitPrice) from being altered by PMs
+    if (updates.quote_amount !== undefined || updates.line_items !== undefined) {
+      const ctx = await getCurrentUserContext();
+      const isAdmin = Boolean(ctx?.profile?.roles?.includes('admin'));
+      if (!isAdmin) {
+        const { data: existingJob } = await supabase
+          .from('jobs')
+          .select('quote_amount, line_items, won_confirmed_at')
+          .eq('id', id)
+          .maybeSingle();
+
+        if (existingJob?.won_confirmed_at) {
+          if (updates.quote_amount !== undefined && existingJob.quote_amount !== null) {
+            delete updates.quote_amount;
+          }
+          if (Array.isArray(updates.line_items) && Array.isArray(existingJob.line_items)) {
+            const existingById = new Map<string, any>();
+            for (const ex of existingJob.line_items as any[]) {
+              if (ex?.id) existingById.set(String(ex.id), ex);
+            }
+            updates.line_items = updates.line_items.map((item: any, idx: number) => {
+              const matched =
+                (item?.id && existingById.get(String(item.id))) ||
+                (existingJob.line_items as any[])[idx];
+              if (matched && matched.unitPrice !== undefined) {
+                return { ...item, unitPrice: matched.unitPrice };
+              }
+              return item;
+            });
+          }
+        }
+      }
     }
 
     // Keep top-level client_name / client_phone / client_email synced with Primary Contact
