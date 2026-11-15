@@ -13,6 +13,9 @@ export async function GET() {
 
   return NextResponse.json({
     profile: ctx.profile,
+    realProfile: ctx.realProfile,
+    isRealAdmin: ctx.realProfile.roles.includes('admin'),
+    isViewingAs: ctx.isViewingAs,
     navLinks: getAllowedNavLinks(ctx.profile),
     defaultWidgets: getDefaultWidgetsForRoles(ctx.profile.roles),
   });

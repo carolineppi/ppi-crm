@@ -75,6 +75,15 @@ export async function GET(request: NextRequest) {
       .from('bid_requests')
       .select(selectQuery as any, { count: 'exact' });
 
+    // If an Admin is using "View As Estimator", enforce the estimator's assigned scope
+    if (
+      ctx.isViewingAs &&
+      ctx.profile.roles.includes('estimator') &&
+      !ctx.profile.roles.includes('calendar_manager')
+    ) {
+      query = query.eq('raw_payload->>assigned_estimator_name', ctx.profile.full_name);
+    }
+
     if (scope === 'calendar' && !q) {
       // Load recent emails + upcoming/recent due-date bids without scanning years of old archive
       const thirtyDaysAgo = new Date(Date.now() - 30 * 86400000).toISOString();

@@ -1,7 +1,8 @@
+import { cookies } from 'next/headers';
 import { NextResponse } from 'next/server';
 import { createSsrSupabaseClient } from '@/lib/supabase/ssr';
 import { createServerSupabaseClient } from '@/lib/supabase/server';
-import { UserProfile, UserRole } from '@/lib/auth/roles';
+import { ROLE_DEFINITIONS, UserProfile, UserRole } from '@/lib/auth/roles';
 
 export * from '@/lib/auth/roles';
 
@@ -61,7 +62,7 @@ export async function ensureUserProfile(user: {
   return profile as UserProfile;
 }
 
-export async function getCurrentUserContext() {
+export async function getCurrentUserContext(options?: { ignoreViewAs?: boolean }) {
   const ssr = await createSsrSupabaseClient();
   const {
     data: { user },
@@ -70,12 +71,33 @@ export async function getCurrentUserContext() {
 
   if (error || !user) return null;
 
-  const profile = await ensureUserProfile(user);
-  if (!profile) return null;
+  const realProfile = await ensureUserProfile(user);
+  if (!realProfile) return null;
+
+  let effectiveProfile: UserProfile = realProfile;
+  let isViewingAs = false;
+
+  if (!options?.ignoreViewAs && realProfile.roles.includes('admin')) {
+    const cookieStore = await cookies();
+    const viewRole = cookieStore.get('ppi_view_as_role')?.value as UserRole | undefined;
+    const viewName = cookieStore.get('ppi_view_as_name')?.value;
+    if (viewRole && viewRole !== 'admin' && viewRole in ROLE_DEFINITIONS) {
+      isViewingAs = true;
+      effectiveProfile = {
+        ...realProfile,
+        primary_role: viewRole,
+        roles: [viewRole],
+        allowed_pages: null,
+        full_name: viewName?.trim() || realProfile.full_name,
+      };
+    }
+  }
 
   return {
     user,
-    profile,
+    profile: effectiveProfile,
+    realProfile,
+    isViewingAs,
     ssr,
   };
 }

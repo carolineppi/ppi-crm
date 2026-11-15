@@ -1,6 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { createServerClient } from '@supabase/ssr';
-import { canAccessPath, UserProfile } from '@/lib/auth/roles';
+import { canAccessPath, ROLE_DEFINITIONS, UserProfile, UserRole } from '@/lib/auth/roles';
 
 const PUBLIC_PATHS = ['/login', '/auth/callback', '/api/webhooks/email'];
 
@@ -72,7 +72,19 @@ export async function middleware(request: NextRequest) {
         loginUrl.searchParams.set('error', 'inactive');
         return NextResponse.redirect(loginUrl);
       }
-      if (!canAccessPath(profile as UserProfile, pathname)) {
+      let effectiveProfile = profile as UserProfile;
+      if (effectiveProfile.roles.includes('admin')) {
+        const viewRole = request.cookies.get('ppi_view_as_role')?.value as UserRole | undefined;
+        if (viewRole && viewRole !== 'admin' && viewRole in ROLE_DEFINITIONS) {
+          effectiveProfile = {
+            ...effectiveProfile,
+            primary_role: viewRole,
+            roles: [viewRole],
+            allowed_pages: null,
+          };
+        }
+      }
+      if (!canAccessPath(effectiveProfile, pathname)) {
         const dashUrl = request.nextUrl.clone();
         dashUrl.pathname = '/dashboard';
         dashUrl.searchParams.set('denied', '1');
