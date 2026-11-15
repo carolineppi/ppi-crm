@@ -157,6 +157,7 @@ export default function PricingPage() {
   const [customItemQty, setCustomItemQty] = useState('1');
   const [customItemUnitLabel, setCustomItemUnitLabel] = useState('');
   const [customItemCost, setCustomItemCost] = useState('');
+  const [suppliersList, setSuppliersList] = useState<Array<{ id: string; name: string }>>([]);
 
   const fetchBooks = useCallback(async () => {
     const res = await fetch('/api/pricing/books');
@@ -224,6 +225,12 @@ export default function PricingPage() {
     fetchBooks();
     fetchGroups();
     fetchBidsAndCarts();
+    fetch('/api/suppliers')
+      .then((r) => r.json())
+      .then((d) => {
+        if (Array.isArray(d.suppliers)) setSuppliersList(d.suppliers);
+      })
+      .catch(() => {});
     if (typeof window !== 'undefined') {
       const bidIdParam = new URLSearchParams(window.location.search).get('bidId');
       if (bidIdParam) {
@@ -1710,15 +1717,21 @@ export default function PricingPage() {
                     <div className="grid grid-cols-2 gap-2">
                       <div>
                         <label className="block text-[10px] font-bold uppercase text-slate-600 mb-0.5">
-                          Manufacturer / Category
+                          Manufacturer / Supplier
                         </label>
                         <input
                           type="text"
+                          list="custom-item-suppliers-list"
                           value={customItemMfg}
                           onChange={(e) => setCustomItemMfg(e.target.value)}
-                          placeholder="Custom"
+                          placeholder="Select supplier or type custom..."
                           className="w-full px-2.5 py-1.5 rounded-lg border border-slate-300 bg-white text-xs"
                         />
+                        <datalist id="custom-item-suppliers-list">
+                          {suppliersList.map((s) => (
+                            <option key={s.id} value={s.name} />
+                          ))}
+                        </datalist>
                       </div>
                       <div>
                         <label className="block text-[10px] font-bold uppercase text-slate-600 mb-0.5">
