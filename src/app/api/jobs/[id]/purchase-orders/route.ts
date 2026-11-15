@@ -91,6 +91,7 @@ export async function PATCH(
     const updates: Record<string, any> = { updated_at: new Date().toISOString() };
     if (body.poNumber !== undefined) updates.po_number = String(body.poNumber).trim();
     if (body.vendor !== undefined) updates.vendor = String(body.vendor).trim();
+    if (body.supplierId !== undefined) updates.supplier_id = body.supplierId || null;
     if (body.status !== undefined) updates.status = body.status;
     if (body.orderDate !== undefined) updates.order_date = body.orderDate || null;
     if (body.expectedDeliveryDate !== undefined) {

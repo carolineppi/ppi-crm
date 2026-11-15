@@ -155,6 +155,58 @@ export default function JobViewerPage() {
     }
   };
 
+  const [newAddonLabel, setNewAddonLabel] = useState('');
+  const [newAddonAmount, setNewAddonAmount] = useState('');
+  const [isSavingAddons, setIsSavingAddons] = useState(false);
+
+  const saveUpdatedLineItems = async (updatedItems: any[]) => {
+    setIsSavingAddons(true);
+    try {
+      const res = await fetch(`/api/jobs/${jobId}`, {
+        method: 'PATCH',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ lineItems: updatedItems }),
+      });
+      const data = await res.json();
+      if (res.ok && data.job) {
+        setJob(data.job);
+      }
+    } finally {
+      setIsSavingAddons(false);
+    }
+  };
+
+  const updateAddonStatus = async (
+    origIdx: number,
+    addonStatus: 'pending' | 'approved' | 'declined'
+  ) => {
+    const current = Array.isArray(job?.line_items) ? [...job.line_items] : [];
+    if (!current[origIdx]) return;
+    current[origIdx] = { ...current[origIdx], addonStatus };
+    await saveUpdatedLineItems(current);
+  };
+
+  const handleAddContractAddon = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!newAddonLabel.trim()) return;
+    const current = Array.isArray(job?.line_items) ? [...job.line_items] : [];
+    current.push({
+      id: `addon-${Date.now()}`,
+      lineNumber: current.length + 1,
+      manufacturer: 'Optional Add-On',
+      sku: 'ADDON',
+      description: newAddonLabel.trim(),
+      quantity: 1,
+      unit: 'EA',
+      unitPrice: Math.round((Number(newAddonAmount) || 0) * 100) / 100,
+      isAddon: true,
+      addonStatus: 'pending',
+    });
+    setNewAddonLabel('');
+    setNewAddonAmount('');
+    await saveUpdatedLineItems(current);
+  };
+
   const setPrimaryContact = async (contactId: string) => {
     const updated = contacts.map((c) => ({
       ...c,
@@ -1021,19 +1073,168 @@ export default function JobViewerPage() {
           </div>
         </div>
 
-        {/* Right 2 Columns: Scope Line Items + PO & CO Snapshots */}
+        {/* Right 2 Columns: Scope Line Items + Optional Add-Ons + PO & CO Snapshots */}
         <div className="lg:col-span-2 space-y-6">
           {(() => {
             const lineOrderSummary = getJobLineItemsOrderStatus(lineItems, purchaseOrders);
+            const indexedItems = lineItems.map((li: any, origIdx: number) => ({ li, origIdx }));
+            const baseItems = indexedItems.filter(({ li }: any) => !li?.isAddon);
+            const addonItems = indexedItems.filter(({ li }: any) => Boolean(li?.isAddon));
             return (
+          <>
+          {/* Optional Contract Add-Ons / Alternates */}
+          <div className="bg-white rounded-2xl border border-slate-200 shadow-sm overflow-hidden">
+            <div className="p-4 border-b border-slate-200 flex flex-wrap items-center justify-between gap-3">
+              <div>
+                <h2 className="text-sm font-black text-slate-900">
+                  Contract Optional Add-Ons / Alternates ({addonItems.length})
+                </h2>
+                <p className="text-[11px] text-slate-500">
+                  Mark optional add-ons as Approved or Declined. Approved add-ons can be loaded onto POs and crossed off once ordered.
+                </p>
+              </div>
+              {isSavingAddons && (
+                <span className="text-[11px] font-semibold text-blue-600">Saving...</span>
+              )}
+            </div>
+
+            {addonItems.length === 0 ? (
+              <div className="p-4 text-xs text-slate-500">
+                No optional add-ons recorded from the quote. Add one below if applicable.
+              </div>
+            ) : (
+              <div className="divide-y divide-slate-100">
+                {addonItems.map(({ li, origIdx }: { li: any; origIdx: number }) => {
+                  const poSt = lineOrderSummary.byIndex[origIdx];
+                  const isOrdered = poSt?.status === 'ordered';
+                  const addonStatus: 'pending' | 'approved' | 'declined' =
+                    li.addonStatus || 'pending';
+                  return (
+                    <div
+                      key={li.id || origIdx}
+                      className={`p-3 flex flex-wrap items-center justify-between gap-3 text-xs ${
+                        isOrdered
+                          ? 'bg-emerald-50/40'
+                          : addonStatus === 'declined'
+                          ? 'bg-slate-50/70'
+                          : ''
+                      }`}
+                    >
+                      <div className="min-w-0 flex-1 space-y-0.5">
+                        <div className="flex items-center gap-2 flex-wrap">
+                          <span
+                            className={`font-bold ${
+                              isOrdered || addonStatus === 'declined'
+                                ? 'line-through text-slate-400'
+                                : 'text-slate-900'
+                            }`}
+                          >
+                            {li.description}
+                          </span>
+                          {li.section && (
+                            <span className="text-[10px] font-semibold px-2 py-0.5 rounded bg-slate-100 text-slate-600">
+                              {li.section}
+                            </span>
+                          )}
+                          {isOrdered && (
+                            <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full bg-emerald-100 text-emerald-800 border border-emerald-200 text-[10px] font-bold">
+                              <CheckCircle2 className="w-3 h-3" />
+                              <span>
+                                Ordered
+                                {poSt.poNumbers.length > 0 ? ` (${poSt.poNumbers.join(', ')})` : ''}
+                              </span>
+                            </span>
+                          )}
+                        </div>
+                        <div className="text-[11px] font-semibold text-slate-500">
+                          Contract Amount: $
+                          {(Number(li.unitPrice) || 0).toLocaleString('en-US', {
+                            minimumFractionDigits: 2,
+                            maximumFractionDigits: 2,
+                          })}
+                        </div>
+                      </div>
+
+                      <div className="flex items-center gap-1.5 shrink-0">
+                        <button
+                          type="button"
+                          disabled={isSavingAddons}
+                          onClick={() => updateAddonStatus(origIdx, 'approved')}
+                          className={`px-2.5 py-1 rounded-lg text-[11px] font-bold border transition-colors ${
+                            addonStatus === 'approved'
+                              ? 'bg-emerald-600 text-white border-emerald-600'
+                              : 'bg-white text-slate-600 border-slate-300 hover:bg-emerald-50 hover:text-emerald-700'
+                          }`}
+                        >
+                          Approved
+                        </button>
+                        <button
+                          type="button"
+                          disabled={isSavingAddons}
+                          onClick={() => updateAddonStatus(origIdx, 'declined')}
+                          className={`px-2.5 py-1 rounded-lg text-[11px] font-bold border transition-colors ${
+                            addonStatus === 'declined'
+                              ? 'bg-rose-600 text-white border-rose-600'
+                              : 'bg-white text-slate-600 border-slate-300 hover:bg-rose-50 hover:text-rose-700'
+                          }`}
+                        >
+                          Declined
+                        </button>
+                        {addonStatus !== 'pending' && (
+                          <button
+                            type="button"
+                            disabled={isSavingAddons}
+                            onClick={() => updateAddonStatus(origIdx, 'pending')}
+                            className="px-2 py-1 rounded-lg text-[11px] font-semibold text-slate-500 hover:bg-slate-100"
+                          >
+                            Reset
+                          </button>
+                        )}
+                      </div>
+                    </div>
+                  );
+                })}
+              </div>
+            )}
+
+            <form
+              onSubmit={handleAddContractAddon}
+              className="p-3 bg-slate-50 border-t border-slate-200 flex flex-wrap items-center gap-2 text-xs"
+            >
+              <input
+                type="text"
+                placeholder="Add optional add-on description..."
+                value={newAddonLabel}
+                onChange={(e) => setNewAddonLabel(e.target.value)}
+                className="flex-1 min-w-[200px] px-2.5 py-1.5 rounded-lg border border-slate-300 bg-white"
+              />
+              <input
+                type="number"
+                step="0.01"
+                min={0}
+                placeholder="Amount ($)"
+                value={newAddonAmount}
+                onChange={(e) => setNewAddonAmount(e.target.value)}
+                className="w-28 px-2.5 py-1.5 rounded-lg border border-slate-300 bg-white font-mono"
+              />
+              <button
+                type="submit"
+                disabled={isSavingAddons || !newAddonLabel.trim()}
+                className="px-3 py-1.5 rounded-lg bg-slate-800 hover:bg-slate-700 text-white font-bold disabled:opacity-50"
+              >
+                + Add Add-On
+              </button>
+            </form>
+          </div>
+
           <div className="bg-white rounded-2xl border border-slate-200 shadow-sm overflow-hidden">
             <div className="p-4 border-b border-slate-200 flex items-center justify-between gap-3">
               <div>
                 <div className="flex items-center gap-2 flex-wrap">
                   <h2 className="text-sm font-black text-slate-900">
-                    Job Scope Line Items ({lineItems.length})
+                    Job Scope Line Items ({baseItems.length})
                   </h2>
-                  {lineItems.length > 0 && (
+                  {lineOrderSummary.totalItems > 0 && (
                     <span
                       className={`text-[10px] font-bold px-2 py-0.5 rounded-full border ${
                         lineOrderSummary.orderedItems === lineOrderSummary.totalItems
@@ -1059,7 +1260,7 @@ export default function JobViewerPage() {
               </Link>
             </div>
 
-            {lineItems.length === 0 ? (
+            {baseItems.length === 0 ? (
               <div className="p-8 text-center text-xs text-slate-500">
                 No line items recorded on this job yet.
               </div>
@@ -1077,12 +1278,12 @@ export default function JobViewerPage() {
                     </tr>
                   </thead>
                   <tbody className="divide-y divide-slate-100">
-                    {lineItems.map((li: any, idx: number) => {
-                      const st = lineOrderSummary.byIndex[idx];
+                    {baseItems.map(({ li, origIdx }: { li: any; origIdx: number }, displayIdx: number) => {
+                      const st = lineOrderSummary.byIndex[origIdx];
                       const isOrdered = st?.status === 'ordered';
                       const isPartial = st?.status === 'partial';
                       return (
-                      <tr key={li.id || idx} className={isOrdered ? 'bg-emerald-50/40' : ''}>
+                      <tr key={li.id || origIdx} className={isOrdered ? 'bg-emerald-50/40' : ''}>
                         <td className="py-2.5 px-4 whitespace-nowrap">
                           {isOrdered ? (
                             <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full bg-emerald-100 text-emerald-800 border border-emerald-200 text-[10px] font-bold">
@@ -1099,7 +1300,7 @@ export default function JobViewerPage() {
                             </span>
                           )}
                         </td>
-                        <td className="py-2.5 px-4 text-slate-400 font-mono">{idx + 1}</td>
+                        <td className="py-2.5 px-4 text-slate-400 font-mono">{displayIdx + 1}</td>
                         <td className={`py-2.5 px-4 font-bold ${isOrdered ? 'line-through text-slate-400' : ''}`}>{li.quantity}</td>
                         <td className={`py-2.5 px-4 font-mono text-[11px] ${isOrdered ? 'line-through text-slate-400' : ''}`}>
                           {[li.manufacturer, li.sku].filter(Boolean).join(' • ') || '—'}
@@ -1121,6 +1322,7 @@ export default function JobViewerPage() {
               </div>
             )}
           </div>
+          </>
             );
           })()}
 

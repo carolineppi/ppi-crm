@@ -10,6 +10,8 @@ import {
   Trash2,
   CheckCircle2,
   Truck,
+  Pencil,
+  X,
 } from 'lucide-react';
 import { getJobLineItemsOrderStatus } from '@/lib/jobs/lineItemOrderStatus';
 
@@ -42,6 +44,7 @@ export default function JobPurchaseOrdersPage() {
   const [notes, setNotes] = useState('');
   const [items, setItems] = useState<POItem[]>([]);
   const [isSubmitting, setIsSubmitting] = useState(false);
+  const [editingPoId, setEditingPoId] = useState<string | null>(null);
 
   const loadData = async () => {
     if (!jobId) return;
@@ -91,9 +94,9 @@ export default function JobPurchaseOrdersPage() {
         ? Math.round((Number(job.quote_amount) / totalScopeQty) * 100) / 100
         : 0;
 
-    const indexed: Array<{ it: any; origIdx: number }> = scopeItems.map(
-      (it: any, origIdx: number) => ({ it, origIdx })
-    );
+    const indexed: Array<{ it: any; origIdx: number }> = scopeItems
+      .map((it: any, origIdx: number) => ({ it, origIdx }))
+      .filter(({ it }: { it: any; origIdx: number }) => !it?.isAddon || it?.addonStatus === 'approved');
     const vendorFiltered = filterVendor
       ? indexed.filter(({ it }) =>
           `${it.manufacturer || ''} ${it.sku || ''}`
@@ -129,15 +132,55 @@ export default function JobPurchaseOrdersPage() {
     );
   };
 
+  const resetForm = () => {
+    setEditingPoId(null);
+    setVendor('');
+    setSupplierId(null);
+    setStatus('ordered');
+    setOrderDate(new Date().toISOString().slice(0, 10));
+    setExpectedDeliveryDate('');
+    setTrackingNumber('');
+    setNotes('');
+    setItems([]);
+  };
+
+  const startEditingPo = (po: any) => {
+    setEditingPoId(po.id);
+    setPoNumber(po.po_number || '');
+    setVendor(po.vendor || '');
+    setSupplierId(po.supplier_id || null);
+    setStatus(po.status || 'ordered');
+    setOrderDate(po.order_date || '');
+    setExpectedDeliveryDate(po.expected_delivery_date || '');
+    setTrackingNumber(po.tracking_number || '');
+    setNotes(po.notes || '');
+    setItems(
+      Array.isArray(po.items)
+        ? po.items.map((it: any) => ({
+            sourceLineItemId: it.sourceLineItemId ?? null,
+            sourceLineNumber: it.sourceLineNumber ?? null,
+            manufacturer: it.manufacturer || '',
+            sku: it.sku || '',
+            description: it.description || '',
+            quantity: Math.max(1, Number(it.quantity) || 1),
+            unitCost: Number(it.unitCost) || 0,
+          }))
+        : []
+    );
+    window.scrollTo({ top: 0, behavior: 'smooth' });
+  };
+
   const handleCreatePO = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!jobId || !vendor.trim()) return;
     setIsSubmitting(true);
     try {
+      const isEditing = Boolean(editingPoId);
       const res = await fetch(`/api/jobs/${jobId}/purchase-orders`, {
-        method: 'POST',
+        method: isEditing ? 'PATCH' : 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
+          ...(isEditing ? { poId: editingPoId } : {}),
           poNumber,
           vendor,
           supplierId,
@@ -147,16 +190,11 @@ export default function JobPurchaseOrdersPage() {
           trackingNumber: trackingNumber || null,
           notes: notes || null,
           items,
-          createdBy: job?.project_manager || 'PM',
+          ...(isEditing ? {} : { createdBy: job?.project_manager || 'PM' }),
         }),
       });
       if (res.ok) {
-        setVendor('');
-        setSupplierId(null);
-        setExpectedDeliveryDate('');
-        setTrackingNumber('');
-        setNotes('');
-        setItems([]);
+        resetForm();
         await loadData();
       }
     } finally {
@@ -225,7 +263,20 @@ export default function JobPurchaseOrdersPage() {
       {/* Create PO Form */}
       <form onSubmit={handleCreatePO} className="bg-white rounded-2xl border border-slate-200 p-5 shadow-sm space-y-4 text-xs">
         <div className="flex flex-wrap items-center justify-between gap-2">
-          <h2 className="text-sm font-black text-slate-900">Create New Purchase Order</h2>
+          <div className="flex items-center gap-2">
+            <h2 className="text-sm font-black text-slate-900">
+              {editingPoId ? `Edit Purchase Order (${poNumber})` : 'Create New Purchase Order'}
+            </h2>
+            {editingPoId && (
+              <button
+                type="button"
+                onClick={resetForm}
+                className="px-2 py-1 rounded-lg bg-amber-50 hover:bg-amber-100 text-amber-800 border border-amber-200 text-[11px] font-bold inline-flex items-center gap-1"
+              >
+                <X className="w-3 h-3" /> Cancel Edit
+              </button>
+            )}
+          </div>
           <div className="flex flex-wrap items-center gap-2">
             <button
               type="button"
@@ -443,14 +494,31 @@ export default function JobPurchaseOrdersPage() {
           />
         </div>
 
-        <div className="flex justify-end">
+        <div className="flex justify-end gap-2">
+          {editingPoId && (
+            <button
+              type="button"
+              onClick={resetForm}
+              className="px-4 py-2 rounded-xl border border-slate-300 bg-white hover:bg-slate-50 text-slate-700 font-bold"
+            >
+              Cancel
+            </button>
+          )}
           <button
             type="submit"
             disabled={isSubmitting}
             className="px-5 py-2 rounded-xl bg-blue-600 hover:bg-blue-500 text-white font-bold flex items-center gap-1.5 disabled:opacity-50"
           >
             <CheckCircle2 className="w-4 h-4" />
-            <span>{isSubmitting ? 'Creating PO...' : 'Create Purchase Order'}</span>
+            <span>
+              {isSubmitting
+                ? editingPoId
+                  ? 'Saving PO...'
+                  : 'Creating PO...'
+                : editingPoId
+                ? 'Save PO Changes'
+                : 'Create Purchase Order'}
+            </span>
           </button>
         </div>
       </form>
@@ -506,6 +574,14 @@ export default function JobPurchaseOrdersPage() {
                       <option value="received">Received</option>
                       <option value="cancelled">Cancelled</option>
                     </select>
+                    <button
+                      type="button"
+                      onClick={() => startEditingPo(po)}
+                      className="p-1.5 text-slate-500 hover:text-blue-700"
+                      title="Edit PO"
+                    >
+                      <Pencil className="w-4 h-4" />
+                    </button>
                     <button
                       type="button"
                       onClick={() => handleDeletePo(po.id)}

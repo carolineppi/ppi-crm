@@ -98,6 +98,26 @@ export default function ProjectManagerDashboardPage() {
     }
   };
 
+  const handleUpdateAddonStatus = async (
+    jobId: string,
+    itemIdx: number,
+    addonStatus: 'pending' | 'approved' | 'declined'
+  ) => {
+    const targetJob = jobs.find((j) => j.id === jobId);
+    if (!targetJob || !Array.isArray(targetJob.line_items)) return;
+    const updatedItems = targetJob.line_items.map((it: any, idx: number) =>
+      idx === itemIdx ? { ...it, addonStatus } : it
+    );
+    const res = await fetch(`/api/jobs/${jobId}`, {
+      method: 'PATCH',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ lineItems: updatedItems }),
+    });
+    if (res.ok) {
+      await fetchJobs();
+    }
+  };
+
   const pmList = useMemo(() => {
     const set = new Set(DEFAULT_PMS);
     jobs.forEach((j) => {
@@ -435,7 +455,7 @@ export default function ProjectManagerDashboardPage() {
                           <span>
                             Estimate Line Items (
                             {job.line_item_order_status?.orderedItems ?? 0}/
-                            {job.line_items.length} ordered)
+                            {job.line_item_order_status?.totalItems ?? job.line_items.length} ordered)
                           </span>
                         </span>
                         {expandedScopeJobs[job.id] ? (
@@ -445,16 +465,23 @@ export default function ProjectManagerDashboardPage() {
                         )}
                       </button>
                       {expandedScopeJobs[job.id] && (
-                        <div className="divide-y divide-slate-200/70 border-t border-slate-200 bg-white max-h-48 overflow-y-auto">
+                        <div className="divide-y divide-slate-200/70 border-t border-slate-200 bg-white max-h-56 overflow-y-auto">
                           {job.line_items.map((li: any, idx: number) => {
                             const st = job.line_item_order_status?.byIndex?.[idx];
                             const isOrdered = st?.status === 'ordered';
                             const isPartial = st?.status === 'partial';
+                            const isAddon = Boolean(li.isAddon);
+                            const addonStatus: 'pending' | 'approved' | 'declined' =
+                              li.addonStatus || 'pending';
                             return (
                               <div
                                 key={li.id || idx}
                                 className={`px-3 py-1.5 flex items-center justify-between gap-2 text-[11px] ${
-                                  isOrdered ? 'bg-emerald-50/40' : ''
+                                  isOrdered
+                                    ? 'bg-emerald-50/40'
+                                    : isAddon && addonStatus === 'declined'
+                                    ? 'bg-slate-50/70'
+                                    : ''
                                 }`}
                               >
                                 <div className="flex items-center gap-2 min-w-0">
@@ -471,28 +498,73 @@ export default function ProjectManagerDashboardPage() {
                                   </span>
                                   <span
                                     className={`truncate ${
-                                      isOrdered
+                                      isOrdered || (isAddon && addonStatus === 'declined')
                                         ? 'line-through text-slate-400'
                                         : 'text-slate-800 font-medium'
                                     }`}
                                   >
+                                    {isAddon && (
+                                      <span className="inline-block mr-1 px-1.5 py-0.2 rounded bg-purple-100 text-purple-800 text-[9px] font-bold uppercase no-underline">
+                                        Add-On
+                                      </span>
+                                    )}
                                     {li.quantity}× {[li.manufacturer, li.sku].filter(Boolean).join(' ')}
                                     {li.description ? ` — ${li.description}` : ''}
                                   </span>
                                 </div>
-                                {isOrdered && st?.poNumbers?.length ? (
-                                  <span className="text-[10px] font-bold text-emerald-700 shrink-0">
-                                    {st.poNumbers.join(', ')}
-                                  </span>
-                                ) : isPartial ? (
-                                  <span className="text-[10px] font-bold text-amber-700 shrink-0">
-                                    {st?.orderedQty}/{st?.requiredQty}
-                                  </span>
-                                ) : (
-                                  <span className="text-[10px] text-slate-400 shrink-0">
-                                    Pending
-                                  </span>
-                                )}
+                                <div className="flex items-center gap-1.5 shrink-0">
+                                  {isAddon && (
+                                    <div className="flex items-center gap-1">
+                                      <button
+                                        type="button"
+                                        onClick={() =>
+                                          handleUpdateAddonStatus(
+                                            job.id,
+                                            idx,
+                                            addonStatus === 'approved' ? 'pending' : 'approved'
+                                          )
+                                        }
+                                        className={`px-1.5 py-0.5 rounded text-[9px] font-bold border ${
+                                          addonStatus === 'approved'
+                                            ? 'bg-emerald-600 text-white border-emerald-600'
+                                            : 'bg-white text-slate-600 border-slate-300 hover:bg-emerald-50'
+                                        }`}
+                                      >
+                                        {addonStatus === 'approved' ? 'Approved' : 'Approve'}
+                                      </button>
+                                      <button
+                                        type="button"
+                                        onClick={() =>
+                                          handleUpdateAddonStatus(
+                                            job.id,
+                                            idx,
+                                            addonStatus === 'declined' ? 'pending' : 'declined'
+                                          )
+                                        }
+                                        className={`px-1.5 py-0.5 rounded text-[9px] font-bold border ${
+                                          addonStatus === 'declined'
+                                            ? 'bg-rose-600 text-white border-rose-600'
+                                            : 'bg-white text-slate-600 border-slate-300 hover:bg-rose-50'
+                                        }`}
+                                      >
+                                        {addonStatus === 'declined' ? 'Declined' : 'Decline'}
+                                      </button>
+                                    </div>
+                                  )}
+                                  {isOrdered && st?.poNumbers?.length ? (
+                                    <span className="text-[10px] font-bold text-emerald-700 shrink-0">
+                                      {st.poNumbers.join(', ')}
+                                    </span>
+                                  ) : isPartial ? (
+                                    <span className="text-[10px] font-bold text-amber-700 shrink-0">
+                                      {st?.orderedQty}/{st?.requiredQty}
+                                    </span>
+                                  ) : (
+                                    <span className="text-[10px] text-slate-400 shrink-0">
+                                      Pending
+                                    </span>
+                                  )}
+                                </div>
                               </div>
                             );
                           })}

@@ -10,6 +10,8 @@ import {
   CheckCircle2,
   PlusCircle,
   MinusCircle,
+  Pencil,
+  X,
 } from 'lucide-react';
 
 export default function JobChangeOrdersPage() {
@@ -27,6 +29,7 @@ export default function JobChangeOrdersPage() {
   const [status, setStatus] = useState('pending');
   const [reason, setReason] = useState('');
   const [isSubmitting, setIsSubmitting] = useState(false);
+  const [editingCoId, setEditingCoId] = useState<string | null>(null);
 
   const loadData = async () => {
     if (!jobId) return;
@@ -50,28 +53,50 @@ export default function JobChangeOrdersPage() {
     loadData();
   }, [jobId]);
 
+  const resetCoForm = () => {
+    setEditingCoId(null);
+    setTitle('');
+    setType('addition');
+    setAmount('');
+    setStatus('pending');
+    setReason('');
+  };
+
+  const startEditingCo = (co: any) => {
+    setEditingCoId(co.id);
+    setCoNumber(co.co_number || '');
+    setTitle(co.title || '');
+    setType(co.type === 'deduction' ? 'deduction' : 'addition');
+    setAmount(co.amount !== undefined && co.amount !== null ? String(co.amount) : '');
+    setStatus(co.status || 'pending');
+    setReason(co.reason || '');
+    window.scrollTo({ top: 0, behavior: 'smooth' });
+  };
+
   const handleCreateCO = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!jobId || !title.trim()) return;
     setIsSubmitting(true);
     try {
+      const isEditing = Boolean(editingCoId);
       const res = await fetch(`/api/jobs/${jobId}/change-orders`, {
-        method: 'POST',
+        method: isEditing ? 'PATCH' : 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
+          ...(isEditing ? { coId: editingCoId } : {}),
           coNumber,
           title,
           type,
           amount: Number(amount) || 0,
           status,
           reason: reason || null,
-          requestedBy: job?.project_manager || 'PM',
+          ...(isEditing
+            ? { approvedBy: job?.project_manager || 'PM' }
+            : { requestedBy: job?.project_manager || 'PM' }),
         }),
       });
       if (res.ok) {
-        setTitle('');
-        setAmount('');
-        setReason('');
+        resetCoForm();
         await loadData();
       }
     } finally {
@@ -172,7 +197,20 @@ export default function JobChangeOrdersPage() {
 
       {/* Create CO Form */}
       <form onSubmit={handleCreateCO} className="bg-white rounded-2xl border border-slate-200 p-5 shadow-sm space-y-4 text-xs">
-        <h2 className="text-sm font-black text-slate-900">Create Change Order</h2>
+        <div className="flex flex-wrap items-center justify-between gap-2">
+          <h2 className="text-sm font-black text-slate-900">
+            {editingCoId ? `Edit Change Order (${coNumber})` : 'Create Change Order'}
+          </h2>
+          {editingCoId && (
+            <button
+              type="button"
+              onClick={resetCoForm}
+              className="px-2 py-1 rounded-lg bg-amber-50 hover:bg-amber-100 text-amber-800 border border-amber-200 text-[11px] font-bold inline-flex items-center gap-1"
+            >
+              <X className="w-3 h-3" /> Cancel Edit
+            </button>
+          )}
+        </div>
 
         <div className="grid grid-cols-1 sm:grid-cols-6 gap-3">
           <div>
@@ -242,14 +280,29 @@ export default function JobChangeOrdersPage() {
           className="w-full px-2.5 py-1.5 rounded-lg border border-slate-300"
         />
 
-        <div className="flex justify-end">
+        <div className="flex justify-end gap-2">
+          {editingCoId && (
+            <button
+              type="button"
+              onClick={resetCoForm}
+              className="px-4 py-2 rounded-xl border border-slate-300 bg-white hover:bg-slate-50 text-slate-700 font-bold"
+            >
+              Cancel
+            </button>
+          )}
           <button
             type="submit"
             disabled={isSubmitting}
             className="px-5 py-2 rounded-xl bg-purple-600 hover:bg-purple-500 text-white font-bold flex items-center gap-1.5 disabled:opacity-50"
           >
             <CheckCircle2 className="w-4 h-4" />
-            <span>{isSubmitting ? 'Saving...' : 'Create Change Order'}</span>
+            <span>
+              {isSubmitting
+                ? 'Saving...'
+                : editingCoId
+                ? 'Save CO Changes'
+                : 'Create Change Order'}
+            </span>
           </button>
         </div>
       </form>
@@ -307,6 +360,14 @@ export default function JobChangeOrdersPage() {
                   <option value="billed">Billed / Credited</option>
                   <option value="rejected">Rejected</option>
                 </select>
+                <button
+                  type="button"
+                  onClick={() => startEditingCo(co)}
+                  className="p-1.5 text-slate-500 hover:text-purple-700"
+                  title="Edit CO"
+                >
+                  <Pencil className="w-4 h-4" />
+                </button>
                 <button
                   type="button"
                   onClick={() => handleDeleteCo(co.id)}

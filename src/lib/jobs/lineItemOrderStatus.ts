@@ -71,6 +71,7 @@ export function getJobLineItemsOrderStatus(
     }
   }
 
+  let totalItems = 0;
   let orderedItems = 0;
   let partialItems = 0;
 
@@ -89,8 +90,12 @@ export function getJobLineItemsOrderStatus(
     const status: 'ordered' | 'partial' | 'pending' =
       orderedQty >= requiredQty ? 'ordered' : orderedQty > 0 ? 'partial' : 'pending';
 
-    if (status === 'ordered') orderedItems += 1;
-    else if (status === 'partial') partialItems += 1;
+    const countsTowardScope = !li?.isAddon || li?.addonStatus === 'approved';
+    if (countsTowardScope) {
+      totalItems += 1;
+      if (status === 'ordered') orderedItems += 1;
+      else if (status === 'partial') partialItems += 1;
+    }
 
     return {
       orderedQty,
@@ -102,7 +107,7 @@ export function getJobLineItemsOrderStatus(
 
   return {
     byIndex,
-    totalItems: items.length,
+    totalItems,
     orderedItems,
     partialItems,
   };

@@ -167,6 +167,8 @@ export interface JobLineItemFromCart {
   unit: string;
   unitPrice: number;
   section?: string;
+  isAddon?: boolean;
+  addonStatus?: 'pending' | 'approved' | 'declined';
 }
 
 /**
@@ -248,6 +250,23 @@ export function buildJobLineItemsFromQuoteCart(cart: any): {
         unit: it.unitLabel || 'EA',
         unitPrice,
         section: sectionName,
+      });
+    }
+
+    for (const addon of config.addons || []) {
+      if (!addon?.label?.trim()) continue;
+      lineItems.push({
+        id: addon.id || `addon-${lineCounter}`,
+        lineNumber: lineCounter++,
+        manufacturer: 'Optional Add-On',
+        sku: 'ADDON',
+        description: addon.label.trim(),
+        quantity: 1,
+        unit: 'EA',
+        unitPrice: Math.round((Number(addon.amount) || 0) * 100) / 100,
+        section: sectionName,
+        isAddon: true,
+        addonStatus: 'pending',
       });
     }
   }
