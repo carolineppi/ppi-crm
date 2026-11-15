@@ -77,10 +77,10 @@ export async function GET(request: NextRequest) {
 
     if (scope === 'calendar' && !q) {
       // Load recent emails + upcoming/recent due-date bids without scanning years of old archive
-      const thirtyDaysAgo = new Date(Date.now() - 30 * 86400000).toISOString().slice(0, 10);
+      const thirtyDaysAgo = new Date(Date.now() - 30 * 86400000).toISOString();
       const fortyFiveDaysAgo = new Date(Date.now() - 45 * 86400000).toISOString();
       query = query.or(
-        `bid_due_date.gte.${thirtyDaysAgo},triage_status.eq.new_email,created_at.gte.${fortyFiveDaysAgo}`
+        `bid_due_date.gte.${thirtyDaysAgo},triage_status.in.(pending_triage,in_triage,ready_for_assignment),created_at.gte.${fortyFiveDaysAgo}`
       );
     } else if (scope === 'estimator') {
       if (estimatorFilter && estimatorFilter !== 'ALL') {
