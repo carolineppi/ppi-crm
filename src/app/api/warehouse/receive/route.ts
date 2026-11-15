@@ -1,8 +1,11 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { createServerSupabaseClient } from '@/lib/supabase/server';
 import { deriveJobWarehouseStatus } from '@/lib/warehouse/helpers';
+import { requireApiAuth } from '@/lib/auth/rbac';
 
 export async function POST(request: NextRequest) {
+  const { errorResponse } = await requireApiAuth(['warehouse', 'pm']);
+  if (errorResponse) return errorResponse;
   try {
     const supabase = createServerSupabaseClient();
     const body = await request.json();

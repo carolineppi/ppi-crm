@@ -1,5 +1,6 @@
 import type { Metadata } from 'next';
 import './globals.css';
+import AppNavBar from '@/components/AppNavBar';
 
 export const metadata: Metadata = {
   title: 'Job Tracker CRM - Dispatch & Estimating',
@@ -14,6 +15,7 @@ export default function RootLayout({
   return (
     <html lang="en">
       <body className="min-h-screen bg-slate-50 antialiased">
+        <AppNavBar />
         <header className="border-b border-slate-200 bg-white sticky top-0 z-50">
           <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 h-16 flex items-center justify-between">
             <div className="flex items-center space-x-3">

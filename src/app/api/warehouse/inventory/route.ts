@@ -1,7 +1,10 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { createServerSupabaseClient } from '@/lib/supabase/server';
+import { requireApiAuth } from '@/lib/auth/rbac';
 
 export async function GET(request: NextRequest) {
+  const { errorResponse } = await requireApiAuth(['warehouse', 'pm', 'install_coordinator', 'accounting']);
+  if (errorResponse) return errorResponse;
   try {
     const supabase = createServerSupabaseClient();
     const q = (request.nextUrl.searchParams.get('q') || '').trim().toLowerCase();
@@ -47,6 +50,8 @@ export async function GET(request: NextRequest) {
 }
 
 export async function POST(request: NextRequest) {
+  const { errorResponse } = await requireApiAuth(['warehouse', 'pm']);
+  if (errorResponse) return errorResponse;
   try {
     const supabase = createServerSupabaseClient();
     const body = await request.json();
@@ -151,6 +156,8 @@ export async function POST(request: NextRequest) {
 }
 
 export async function PATCH(request: NextRequest) {
+  const { errorResponse } = await requireApiAuth(['warehouse', 'pm']);
+  if (errorResponse) return errorResponse;
   try {
     const supabase = createServerSupabaseClient();
     const body = await request.json();
@@ -192,6 +199,8 @@ export async function PATCH(request: NextRequest) {
 }
 
 export async function DELETE(request: NextRequest) {
+  const { errorResponse } = await requireApiAuth(['warehouse', 'pm']);
+  if (errorResponse) return errorResponse;
   try {
     const id = request.nextUrl.searchParams.get('id');
     if (!id) {

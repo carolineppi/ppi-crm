@@ -1,7 +1,10 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { createServerSupabaseClient } from '@/lib/supabase/server';
+import { requireApiAuth } from '@/lib/auth/rbac';
 
 export async function GET(request: NextRequest) {
+  const { errorResponse } = await requireApiAuth(['accounting', 'pm']);
+  if (errorResponse) return errorResponse;
   try {
     const supabase = createServerSupabaseClient();
     const statusFilter = request.nextUrl.searchParams.get('status') || 'ALL';
