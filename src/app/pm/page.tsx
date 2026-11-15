@@ -71,11 +71,18 @@ export default function ProjectManagerDashboardPage() {
   const [selectedPm, setSelectedPm] = useState<string>('ALL');
   const [searchQuery, setSearchQuery] = useState('');
   const [expandedScopeJobs, setExpandedScopeJobs] = useState<Record<string, boolean>>({});
+  const [employeePms, setEmployeePms] = useState<string[]>([]);
 
   useEffect(() => {
     const saved = localStorage.getItem('ppi_current_pm');
     if (saved) setSelectedPm(saved);
     fetchJobs();
+    fetch('/api/employees')
+      .then((r) => r.json())
+      .then((d) => {
+        if (Array.isArray(d.pms) && d.pms.length > 0) setEmployeePms(d.pms);
+      })
+      .catch(() => {});
   }, []);
 
   const handleSelectPm = (pm: string) => {
@@ -118,13 +125,25 @@ export default function ProjectManagerDashboardPage() {
     }
   };
 
+  const handleAssignPm = async (jobId: string, pmName: string) => {
+    const res = await fetch(`/api/jobs/${jobId}`, {
+      method: 'PATCH',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ projectManager: pmName || null }),
+    });
+    if (res.ok) {
+      await fetchJobs();
+    }
+  };
+
   const pmList = useMemo(() => {
-    const set = new Set(DEFAULT_PMS);
+    const base = employeePms.length > 0 ? employeePms : DEFAULT_PMS;
+    const set = new Set(base);
     jobs.forEach((j) => {
       if (j.project_manager) set.add(j.project_manager);
     });
-    return Array.from(set);
-  }, [jobs]);
+    return Array.from(set).sort((a, b) => a.localeCompare(b));
+  }, [jobs, employeePms]);
 
   const pmScopedJobs = useMemo(() => {
     if (selectedPm === 'ALL') return jobs;
@@ -356,9 +375,21 @@ export default function ProjectManagerDashboardPage() {
                             </span>
                           )}
                         </span>
-                        <span className="text-[11px] font-bold px-2 py-0.5 rounded-full bg-slate-100 text-slate-700">
-                          PM: {job.project_manager || 'Unassigned'}
-                        </span>
+                        <label className="text-[11px] font-bold px-2 py-0.5 rounded-full bg-slate-100 text-slate-700 inline-flex items-center gap-1">
+                          <span>PM:</span>
+                          <select
+                            value={job.project_manager || ''}
+                            onChange={(e) => handleAssignPm(job.id, e.target.value)}
+                            className="bg-transparent font-bold text-slate-800 focus:outline-none cursor-pointer"
+                          >
+                            <option value="">Unassigned</option>
+                            {pmList.map((pm) => (
+                              <option key={pm} value={pm}>
+                                {pm}
+                              </option>
+                            ))}
+                          </select>
+                        </label>
                         {job.line_item_order_status && job.line_item_order_status.totalItems > 0 && (
                           <span
                             className={`text-[11px] font-bold px-2 py-0.5 rounded-full border inline-flex items-center gap-1 ${

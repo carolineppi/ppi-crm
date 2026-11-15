@@ -88,6 +88,9 @@ export default function ConfirmWonJobModal({
   const [addressZip, setAddressZip] = useState('');
   const [scopeOfWork, setScopeOfWork] = useState('');
   const [estimatorName, setEstimatorName] = useState('');
+  const [projectManager, setProjectManager] = useState('');
+  const [estimatorsList, setEstimatorsList] = useState<string[]>(ESTIMATORS);
+  const [pmsList, setPmsList] = useState<string[]>([]);
   const [confirmedBy, setConfirmedBy] = useState('');
   const [notes, setNotes] = useState('');
   const [quoteCarts, setQuoteCarts] = useState<any[]>([]);
@@ -285,7 +288,21 @@ export default function ConfirmWonJobModal({
       });
     setEstimatorName(bid.estimatorName || ESTIMATORS[0] || '');
     setConfirmedBy(bid.estimatorName || ESTIMATORS[0] || '');
+    setProjectManager('');
     setNotes(bid.notes || '');
+
+    fetch('/api/employees')
+      .then((r) => r.json())
+      .then((d) => {
+        if (!active) return;
+        if (Array.isArray(d.estimators) && d.estimators.length > 0) {
+          setEstimatorsList(d.estimators);
+        }
+        if (Array.isArray(d.pms)) {
+          setPmsList(d.pms);
+        }
+      })
+      .catch(() => {});
     setQuoteCarts([]);
     setSelectedQuoteId('');
     setQuoteAmount(null);
@@ -482,6 +499,7 @@ export default function ConfirmWonJobModal({
             contractStatus,
             scopeOfWork: scopeOfWork.trim() || undefined,
             estimatorName: estimatorName.trim() || undefined,
+            projectManager: projectManager.trim() || null,
             notes: notes.trim() || undefined,
             wonConfirmedBy: confirmedBy.trim(),
             quoteAmount: quoteAmount !== null ? quoteAmount : undefined,
@@ -538,27 +556,48 @@ export default function ConfirmWonJobModal({
             </div>
           )}
 
-          {/* Estimator Confirmation Box */}
-          <div className="p-3.5 rounded-xl bg-emerald-50 border border-emerald-200 flex flex-col sm:flex-row sm:items-center justify-between gap-3">
-            <div className="flex items-center gap-2 text-emerald-900 font-bold">
-              <UserCheck className="w-4 h-4 text-emerald-600 flex-shrink-0" />
-              <span>Confirmed Won By (Estimator):</span>
+          {/* Estimator Confirmation & PM Assignment */}
+          <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+            <div className="p-3 rounded-xl bg-emerald-50 border border-emerald-200 flex flex-col gap-1.5">
+              <div className="flex items-center gap-1.5 text-emerald-900 font-bold text-[11px]">
+                <UserCheck className="w-4 h-4 text-emerald-600 flex-shrink-0" />
+                <span>Confirmed Won By (Estimator):</span>
+              </div>
+              <select
+                value={confirmedBy}
+                onChange={(e) => setConfirmedBy(e.target.value)}
+                className="w-full px-2.5 py-1.5 rounded-lg border border-emerald-300 bg-white font-bold text-slate-900"
+              >
+                <option value="">-- Select Estimator --</option>
+                {estimatorsList.map((est) => (
+                  <option key={est} value={est}>
+                    {est}
+                  </option>
+                ))}
+                {confirmedBy && !estimatorsList.includes(confirmedBy) && (
+                  <option value={confirmedBy}>{confirmedBy}</option>
+                )}
+              </select>
             </div>
-            <select
-              value={confirmedBy}
-              onChange={(e) => setConfirmedBy(e.target.value)}
-              className="px-3 py-1.5 rounded-lg border border-emerald-300 bg-white font-bold text-slate-900"
-            >
-              <option value="">-- Select Estimator --</option>
-              {ESTIMATORS.map((est) => (
-                <option key={est} value={est}>
-                  {est}
-                </option>
-              ))}
-              {confirmedBy && !ESTIMATORS.includes(confirmedBy) && (
-                <option value={confirmedBy}>{confirmedBy}</option>
-              )}
-            </select>
+
+            <div className="p-3 rounded-xl bg-blue-50 border border-blue-200 flex flex-col gap-1.5">
+              <div className="flex items-center gap-1.5 text-blue-900 font-bold text-[11px]">
+                <Briefcase className="w-4 h-4 text-blue-600 flex-shrink-0" />
+                <span>Assign Project Manager (PM):</span>
+              </div>
+              <select
+                value={projectManager}
+                onChange={(e) => setProjectManager(e.target.value)}
+                className="w-full px-2.5 py-1.5 rounded-lg border border-blue-300 bg-white font-bold text-slate-900"
+              >
+                <option value="">-- Unassigned (Assign Later) --</option>
+                {pmsList.map((pm) => (
+                  <option key={pm} value={pm}>
+                    {pm}
+                  </option>
+                ))}
+              </select>
+            </div>
           </div>
 
           {/* Core Job Details */}

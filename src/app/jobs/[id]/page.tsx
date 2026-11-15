@@ -96,6 +96,19 @@ export default function JobViewerPage() {
   const [generalNotesSavedMsg, setGeneralNotesSavedMsg] = useState<string | null>(null);
   const [isRequestingBill, setIsRequestingBill] = useState(false);
   const [billRequestMsg, setBillRequestMsg] = useState<string | null>(null);
+  const [pmsList, setPmsList] = useState<string[]>([]);
+
+  const handleAssignPm = async (pmName: string) => {
+    const res = await fetch(`/api/jobs/${jobId}`, {
+      method: 'PATCH',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ projectManager: pmName || null }),
+    });
+    const data = await res.json();
+    if (res.ok && data.job) {
+      setJob(data.job);
+    }
+  };
 
   const loadJob = async () => {
     if (!jobId) return;
@@ -136,6 +149,15 @@ export default function JobViewerPage() {
       setIsLoading(false);
     }
   };
+
+  useEffect(() => {
+    fetch('/api/employees')
+      .then((r) => r.json())
+      .then((d) => {
+        if (Array.isArray(d.pms)) setPmsList(d.pms);
+      })
+      .catch(() => {});
+  }, []);
 
   const saveContacts = async (updatedContacts: JobContact[]) => {
     setIsSavingContacts(true);
@@ -747,11 +769,28 @@ export default function JobViewerPage() {
                 <MapPin className="w-4 h-4 text-slate-400 mt-0.5" />
                 <span>{fullAddress || 'Address not specified'}</span>
               </div>
-              <div className="flex items-center gap-2 pt-1 border-t border-slate-100">
-                <UserCheck className="w-4 h-4 text-teal-600" />
+              <div className="flex items-center gap-2 pt-1 border-t border-slate-100 flex-wrap">
+                <UserCheck className="w-4 h-4 text-teal-600 shrink-0" />
+                <span>PM:</span>
+                <select
+                  value={job.project_manager || ''}
+                  onChange={(e) => handleAssignPm(e.target.value)}
+                  className="px-2 py-1 rounded-lg border border-slate-300 bg-white text-xs font-bold text-slate-800"
+                >
+                  <option value="">-- Unassigned --</option>
+                  {Array.from(
+                    new Set([...(pmsList || []), ...(job.project_manager ? [job.project_manager] : [])])
+                  )
+                    .sort((a, b) => a.localeCompare(b))
+                    .map((pm) => (
+                      <option key={pm} value={pm}>
+                        {pm}
+                      </option>
+                    ))}
+                </select>
+                <span className="text-slate-400">•</span>
                 <span>
-                  PM: <strong>{job.project_manager || 'Unassigned'}</strong> • Estimator:{' '}
-                  <strong>{job.estimator_name || 'N/A'}</strong>
+                  Estimator: <strong>{job.estimator_name || 'N/A'}</strong>
                 </span>
               </div>
               {(job.contract_filename || job.contract_status) && (

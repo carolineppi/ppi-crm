@@ -18,6 +18,7 @@ export interface JobOverrides {
   addressZip?: string | null;
   scopeOfWork?: string | null;
   estimatorName?: string | null;
+  projectManager?: string | null;
   quoteAmount?: number | null;
   estimatedStartDate?: string | null;
   notes?: string | null;
@@ -132,6 +133,16 @@ export async function createOrSyncJobFromBid(
       null,
     estimator_name:
       overrides.estimatorName ?? existingJob?.estimator_name ?? assignedEstimator ?? null,
+    project_manager:
+      overrides.projectManager !== undefined
+        ? overrides.projectManager || null
+        : existingJob?.project_manager ?? null,
+    pm_assigned_at:
+      overrides.projectManager !== undefined
+        ? overrides.projectManager
+          ? now
+          : null
+        : existingJob?.pm_assigned_at ?? null,
     quote_amount: computedQuoteAmount,
     estimated_start_date:
       overrides.estimatedStartDate ??
@@ -225,6 +236,12 @@ export async function createOrSyncJobFromBid(
         phone: payload.client_phone,
       });
     }
+    if (bid?.id && bid.estimator_status !== 'won') {
+      await supabase
+        .from('bid_requests')
+        .update({ estimator_status: 'won', updated_at: now })
+        .eq('id', bid.id);
+    }
     return { job: data, created: false };
   }
 
@@ -238,6 +255,12 @@ export async function createOrSyncJobFromBid(
       email: payload.client_email,
       phone: payload.client_phone,
     });
+  }
+  if (bid?.id && bid.estimator_status !== 'won') {
+    await supabase
+      .from('bid_requests')
+      .update({ estimator_status: 'won', updated_at: now })
+      .eq('id', bid.id);
   }
   return { job: data, created: true };
 }

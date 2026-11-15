@@ -120,6 +120,30 @@ export async function GET(request: NextRequest) {
     const rows = data || [];
     const totalCount = count ?? rows.length;
 
+    if (rows.length > 0) {
+      const bidIds = rows.map((r: any) => r.id);
+      const { data: linkedJobs } = await supabase
+        .from('jobs')
+        .select('bid_request_id')
+        .in('bid_request_id', bidIds);
+      if (linkedJobs && linkedJobs.length > 0) {
+        const wonSet = new Set(linkedJobs.map((j: any) => j.bid_request_id).filter(Boolean));
+        const toSync: string[] = [];
+        for (const r of rows as any[]) {
+          if (wonSet.has(r.id) && r.estimator_status !== 'won') {
+            r.estimator_status = 'won';
+            toSync.push(r.id);
+          }
+        }
+        if (toSync.length > 0) {
+          await supabase
+            .from('bid_requests')
+            .update({ estimator_status: 'won' })
+            .in('id', toSync);
+        }
+      }
+    }
+
     return NextResponse.json({
       bidRequests: rows,
       totalCount,

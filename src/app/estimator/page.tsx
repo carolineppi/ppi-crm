@@ -97,15 +97,24 @@ export default function EstimatorWorkspacePage() {
   const [sortBy, setSortBy] = useState<'dueDate' | 'received' | 'projectName'>('dueDate');
   const [activeJobId, setActiveJobId] = useState<string | null>(null);
   const [isModalOpen, setIsModalOpen] = useState(false);
+  const [estimatorsList, setEstimatorsList] = useState<string[]>(ESTIMATORS);
 
   // Load saved estimator from localStorage or default to ALL
   useEffect(() => {
     const saved = localStorage.getItem('ppi_current_estimator');
-    if (saved && (ESTIMATORS.includes(saved) || saved === 'ALL')) {
+    if (saved) {
       setSelectedEstimator(saved);
     } else {
       setSelectedEstimator('ALL');
     }
+    fetch('/api/employees')
+      .then((r) => r.json())
+      .then((d) => {
+        if (Array.isArray(d.estimators) && d.estimators.length > 0) {
+          setEstimatorsList(d.estimators);
+        }
+      })
+      .catch(() => {});
   }, []);
 
   const handleSelectEstimator = (name: string) => {
@@ -339,7 +348,7 @@ export default function EstimatorWorkspacePage() {
 
   useEffect(() => {
     const saved = localStorage.getItem('ppi_current_estimator');
-    const initialEst = saved && (ESTIMATORS.includes(saved) || saved === 'ALL') ? saved : 'ALL';
+    const initialEst = saved || 'ALL';
     fetchBids(initialEst);
   }, []);
 
@@ -402,12 +411,12 @@ export default function EstimatorWorkspacePage() {
   // Counts per estimator
   const estimatorCounts = useMemo(() => {
     const counts: Record<string, number> = {};
-    ESTIMATORS.forEach((est) => {
+    estimatorsList.forEach((est) => {
       counts[est] = bids.filter((b) => b.assignedEstimator === est).length;
     });
     counts['ALL'] = bids.filter((b) => Boolean(b.assignedEstimator)).length;
     return counts;
-  }, [bids]);
+  }, [bids, estimatorsList]);
 
   // Filter bids by active estimator
   const estimatorBids = bids.filter((b) => {
@@ -564,7 +573,7 @@ export default function EstimatorWorkspacePage() {
             </span>
           </button>
 
-          {ESTIMATORS.map((est) => {
+          {estimatorsList.map((est) => {
             const isSelected = selectedEstimator === est;
             const color = getEstimatorColor(est);
             const count = estimatorCounts[est] || 0;

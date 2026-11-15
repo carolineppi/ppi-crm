@@ -83,6 +83,7 @@ export default function JobsPage() {
   const [pmFilter, setPmFilter] = useState<'ALL' | 'UNASSIGNED' | string>('ALL');
   const [customPmDraft, setCustomPmDraft] = useState<Record<string, string>>({});
   const [showCustomPmInput, setShowCustomPmInput] = useState<Record<string, boolean>>({});
+  const [employeePms, setEmployeePms] = useState<string[]>([]);
 
   const fetchJobs = async () => {
     setIsLoading(true);
@@ -101,15 +102,22 @@ export default function JobsPage() {
 
   useEffect(() => {
     fetchJobs();
+    fetch('/api/employees')
+      .then((r) => r.json())
+      .then((d) => {
+        if (Array.isArray(d.pms) && d.pms.length > 0) setEmployeePms(d.pms);
+      })
+      .catch(() => {});
   }, []);
 
   const pmOptions = useMemo(() => {
-    const set = new Set(DEFAULT_PMS);
+    const base = employeePms.length > 0 ? employeePms : DEFAULT_PMS;
+    const set = new Set(base);
     jobs.forEach((j) => {
       if (j.project_manager) set.add(j.project_manager);
     });
-    return Array.from(set);
-  }, [jobs]);
+    return Array.from(set).sort((a, b) => a.localeCompare(b));
+  }, [jobs, employeePms]);
 
   const handleStatusChange = async (jobId: string, newStatus: JobRecord['status']) => {
     try {

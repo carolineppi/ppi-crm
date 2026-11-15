@@ -235,6 +235,18 @@ export default function DispatchDashboard() {
     setCurrentPage(1);
   }, [activeFilter, triageSubFilter, verificationFilter, feedSearchQuery, showHistorical]);
 
+  const [estimatorsList, setEstimatorsList] = useState<string[]>(ESTIMATORS);
+  useEffect(() => {
+    fetch('/api/employees')
+      .then((r) => r.json())
+      .then((d) => {
+        if (Array.isArray(d.estimators) && d.estimators.length > 0) {
+          setEstimatorsList(d.estimators);
+        }
+      })
+      .catch(() => {});
+  }, []);
+
   // Review & Reclassification Modal State
   const [reviewingBid, setReviewingBid] = useState<DisplayBidRequest | null>(null);
   const [targetSticker, setTargetSticker] = useState<string>('ITB');
@@ -1714,7 +1726,7 @@ export default function DispatchDashboard() {
                     ? `🔄 Reassign (Refused by ${selectedBid.refusedBy || selectedBid.assignedEstimator || 'Estimator'})...`
                     : 'Unassigned...'}
                 </option>
-                {ESTIMATORS.map((est) => (
+                {estimatorsList.map((est) => (
                   <option key={est} value={est}>
                     {est}
                   </option>
@@ -2588,7 +2600,7 @@ export default function DispatchDashboard() {
       {viewMode === 'calendar' ? (
         <CalendarScheduleView
           bids={bids}
-          estimators={ESTIMATORS}
+          estimators={estimatorsList}
           assignmentRules={assignmentRules}
           onOpenRulesModal={() => setShowRulesModal(true)}
           onSelectBid={openReviewModal}
@@ -3507,7 +3519,7 @@ export default function DispatchDashboard() {
                                     className="text-xs border border-slate-300 rounded-lg px-2.5 py-1.5 bg-white text-slate-800 font-medium focus:ring-2 focus:ring-blue-500 shadow-2xs"
                                   >
                                     <option value="">Assign Estimator...</option>
-                                    {ESTIMATORS.map((est) => (
+                                    {estimatorsList.map((est) => (
                                       <option key={est} value={est}>
                                         {est}
                                       </option>
@@ -3766,7 +3778,7 @@ export default function DispatchDashboard() {
                         className="w-full text-xs border border-slate-300 rounded-lg px-2.5 py-2 bg-white text-slate-800"
                       >
                         <option value="">Choose Estimator...</option>
-                        {ESTIMATORS.map((est) => (
+                        {estimatorsList.map((est) => (
                           <option key={est} value={est}>
                             {est}
                           </option>
@@ -3950,7 +3962,7 @@ export default function DispatchDashboard() {
         isOpen={showRulesModal}
         onClose={() => setShowRulesModal(false)}
         rules={assignmentRules}
-        estimators={ESTIMATORS}
+        estimators={estimatorsList}
         onRulesChanged={fetchAssignmentRules}
         onNotify={showToast}
       />
@@ -3958,7 +3970,7 @@ export default function DispatchDashboard() {
       {/* Manual Invitation to Bid Modal */}
       <CalendarAddBidModal
         isOpen={showManualBidModal}
-        estimators={ESTIMATORS}
+        estimators={estimatorsList}
         defaultDueDate={todayYmd}
         assignmentRules={assignmentRules}
         existingBids={bids}
