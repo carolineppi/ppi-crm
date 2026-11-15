@@ -87,7 +87,7 @@ export async function GET(request: NextRequest) {
         query = query.eq('raw_payload->>assigned_estimator_name', estimatorFilter);
       } else {
         query = query.or(
-          'estimator_status.in.(in_progress,quoted,bid_submitted,won,lost,declined),raw_payload->>assigned_estimator_name.neq.'
+          'estimator_status.in.(in_progress,quoted,bid_submitted,won,lost,declined),raw_payload->>assigned_estimator_name.not.is.null'
         );
       }
     }
