@@ -283,7 +283,7 @@ export default function DispatchDashboard() {
   const fetchLiveBids = async () => {
     setIsLoading(true);
     try {
-      const res = await fetch('/api/bid-requests?summary=1');
+      const res = await fetch('/api/bid-requests?summary=1&scope=calendar&limit=400');
       const data = await res.json();
       if (data.bidRequests && Array.isArray(data.bidRequests)) {
         const mapped: DisplayBidRequest[] = data.bidRequests.map((r: any) => {

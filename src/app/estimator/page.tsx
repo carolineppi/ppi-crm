@@ -106,13 +106,23 @@ export default function EstimatorWorkspacePage() {
   const handleSelectEstimator = (name: string) => {
     setSelectedEstimator(name);
     localStorage.setItem('ppi_current_estimator', name);
+    fetchBids(name);
   };
 
-  const fetchBids = async () => {
+  const fetchBids = async (estimatorOverride?: string | unknown) => {
     setIsLoading(true);
     try {
+      const est = typeof estimatorOverride === 'string' ? estimatorOverride : selectedEstimator;
+      const params = new URLSearchParams({
+        summary: '1',
+        scope: 'estimator',
+        limit: '250',
+      });
+      if (est && est !== 'ALL') {
+        params.set('estimator', est);
+      }
       const [res, cartsRes] = await Promise.all([
-        fetch('/api/bid-requests'),
+        fetch(`/api/bid-requests?${params.toString()}`),
         fetch('/api/pricing/cart'),
       ]);
       const data = await res.json();
@@ -302,7 +312,9 @@ export default function EstimatorWorkspacePage() {
   };
 
   useEffect(() => {
-    fetchBids();
+    const saved = localStorage.getItem('ppi_current_estimator');
+    const initialEst = saved && (ESTIMATORS.includes(saved) || saved === 'ALL') ? saved : 'ALL';
+    fetchBids(initialEst);
   }, []);
 
   const [pendingWonBid, setPendingWonBid] = useState<WonBidSeed | null>(null);

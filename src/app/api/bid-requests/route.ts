@@ -1,12 +1,23 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { createServerSupabaseClient } from '@/lib/supabase/server';
+import { requireApiAuth } from '@/lib/auth/rbac';
 
 export async function GET(request: NextRequest) {
-  try {
-    const isSummary = request.nextUrl.searchParams.get('summary') === '1';
-    const supabase = createServerSupabaseClient();
+  const { ctx, errorResponse } = await requireApiAuth();
+  if (errorResponse || !ctx) return errorResponse!;
 
-    // Fast, lightweight column selection that extracts assigned estimator name without scanning heavy binary raw_payload
+  try {
+    const sp = request.nextUrl.searchParams;
+    const isSummary = sp.get('summary') === '1';
+    const scope = sp.get('scope') || 'all'; // 'calendar' | 'estimator' | 'all'
+    const estimatorFilter = (sp.get('estimator') || '').trim();
+    const q = (sp.get('q') || '').trim();
+    const limit = Math.min(1000, Math.max(25, Number(sp.get('limit')) || 300));
+    const offset = Math.max(0, Number(sp.get('offset')) || 0);
+
+    // Use user-scoped SSR client so Postgres RLS automatically scopes estimators to their assigned bids
+    const supabase = ctx.ssr;
+
     const selectQuery = `
       id,
       bid_number,
@@ -60,50 +71,53 @@ export async function GET(request: NextRequest) {
       created_at
     `.replace(/\s+/g, ' ').trim();
 
-    // Fetch page 0 with exact count, then fetch remaining pages in parallel
-    const pageSize = 1000;
-    const { data: firstPage, count, error: firstError } = await supabase
+    let query = supabase
       .from('bid_requests')
-      .select(selectQuery as any, { count: 'exact' })
-      .order('created_at', { ascending: false })
-      .range(0, pageSize - 1);
+      .select(selectQuery as any, { count: 'exact' });
 
-    if (firstError) {
-      console.error('Supabase query error in /api/bid-requests:', firstError);
-      return NextResponse.json({ error: firstError.message }, { status: 500 });
-    }
-
-    const allRows: any[] = firstPage ? [...firstPage] : [];
-    const totalCount = count ?? allRows.length;
-
-    if (totalCount > pageSize && allRows.length === pageSize) {
-      const remainingStarts: number[] = [];
-      for (let from = pageSize; from < totalCount; from += pageSize) {
-        remainingStarts.push(from);
-      }
-
-      const pageResults = await Promise.all(
-        remainingStarts.map((from) =>
-          supabase
-            .from('bid_requests')
-            .select(selectQuery as any)
-            .order('created_at', { ascending: false })
-            .range(from, from + pageSize - 1)
-        )
+    if (scope === 'calendar' && !q) {
+      // Load recent emails + upcoming/recent due-date bids without scanning years of old archive
+      const thirtyDaysAgo = new Date(Date.now() - 30 * 86400000).toISOString().slice(0, 10);
+      const fortyFiveDaysAgo = new Date(Date.now() - 45 * 86400000).toISOString();
+      query = query.or(
+        `bid_due_date.gte.${thirtyDaysAgo},triage_status.eq.new_email,created_at.gte.${fortyFiveDaysAgo}`
       );
-
-      for (const res of pageResults) {
-        if (res.error) {
-          console.error('Supabase parallel page error in /api/bid-requests:', res.error);
-          return NextResponse.json({ error: res.error.message }, { status: 500 });
-        }
-        if (res.data && res.data.length > 0) {
-          allRows.push(...res.data);
-        }
+    } else if (scope === 'estimator') {
+      if (estimatorFilter && estimatorFilter !== 'ALL') {
+        query = query.eq('raw_payload->>assigned_estimator_name', estimatorFilter);
+      } else {
+        query = query.or(
+          'estimator_status.in.(in_progress,quoted,bid_submitted,won,lost,declined),raw_payload->>assigned_estimator_name.neq.'
+        );
       }
     }
 
-    return NextResponse.json({ bidRequests: allRows });
+    if (q) {
+      const escaped = q.replace(/,/g, ' ');
+      query = query.or(
+        `project_name.ilike.%${escaped}%,email_subject.ilike.%${escaped}%,client_company.ilike.%${escaped}%,bid_number.ilike.%${escaped}%,sender_name.ilike.%${escaped}%`
+      );
+    }
+
+    const { data, count, error } = await query
+      .order('created_at', { ascending: false })
+      .range(offset, offset + limit - 1);
+
+    if (error) {
+      console.error('Supabase query error in /api/bid-requests:', error);
+      return NextResponse.json({ error: error.message }, { status: 500 });
+    }
+
+    const rows = data || [];
+    const totalCount = count ?? rows.length;
+
+    return NextResponse.json({
+      bidRequests: rows,
+      totalCount,
+      hasMore: offset + rows.length < totalCount,
+      limit,
+      offset,
+    });
   } catch (err: any) {
     console.error('Exception in /api/bid-requests:', err);
     return NextResponse.json(
