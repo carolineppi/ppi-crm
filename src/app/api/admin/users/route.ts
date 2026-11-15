@@ -3,13 +3,12 @@ import { requireApiAuth } from '@/lib/auth/rbac';
 import { createServerSupabaseClient } from '@/lib/supabase/server';
 
 export async function GET() {
-  const { errorResponse } = await requireApiAuth(['admin']);
-  if (errorResponse) return errorResponse;
+  const { ctx, errorResponse } = await requireApiAuth(['admin']);
+  if (errorResponse || !ctx) return errorResponse!;
 
-  const service = createServerSupabaseClient();
   const [usersRes, installersRes] = await Promise.all([
-    service.from('user_profiles').select('*').order('full_name', { ascending: true }),
-    service.from('installers').select('id, name, crew_name').order('name', { ascending: true }),
+    ctx.ssr.from('user_profiles').select('*').order('full_name', { ascending: true }),
+    ctx.ssr.from('installers').select('id, name, crew_name').order('name', { ascending: true }),
   ]);
 
   if (usersRes.error) {
@@ -23,8 +22,8 @@ export async function GET() {
 }
 
 export async function POST(request: NextRequest) {
-  const { errorResponse } = await requireApiAuth(['admin']);
-  if (errorResponse) return errorResponse;
+  const { ctx, errorResponse } = await requireApiAuth(['admin']);
+  if (errorResponse || !ctx) return errorResponse!;
 
   const body = await request.json();
   const email = String(body.email || '').trim().toLowerCase();
@@ -36,11 +35,10 @@ export async function POST(request: NextRequest) {
     return NextResponse.json({ error: 'email and fullName are required' }, { status: 400 });
   }
 
-  const service = createServerSupabaseClient();
-
   // Optional: create Supabase Auth user with password (great for Field Installers without Google)
   let authUserId: string | null = null;
   if (body.password && String(body.password).length >= 6) {
+    const service = createServerSupabaseClient();
     const { data: createdAuth, error: authErr } = await service.auth.admin.createUser({
       email,
       password: String(body.password),
@@ -53,7 +51,7 @@ export async function POST(request: NextRequest) {
     authUserId = createdAuth?.user?.id || null;
   }
 
-  const { data, error } = await service
+  const { data, error } = await ctx.ssr
     .from('user_profiles')
     .upsert(
       {
@@ -80,8 +78,8 @@ export async function POST(request: NextRequest) {
 }
 
 export async function PATCH(request: NextRequest) {
-  const { errorResponse } = await requireApiAuth(['admin']);
-  if (errorResponse) return errorResponse;
+  const { ctx, errorResponse } = await requireApiAuth(['admin']);
+  if (errorResponse || !ctx) return errorResponse!;
 
   const body = await request.json();
   if (!body.id) {
@@ -100,8 +98,7 @@ export async function PATCH(request: NextRequest) {
   if (body.installerId !== undefined) updates.installer_id = body.installerId || null;
   if (body.isActive !== undefined) updates.is_active = Boolean(body.isActive);
 
-  const service = createServerSupabaseClient();
-  const { data, error } = await service
+  const { data, error } = await ctx.ssr
     .from('user_profiles')
     .update(updates)
     .eq('id', body.id)
