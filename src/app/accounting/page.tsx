@@ -247,6 +247,30 @@ export default function AccountingPage() {
     }
   };
 
+  const handleDeletePayApp = async (payAppId: string, appNumber: number | string) => {
+    if (!selectedJobId) return;
+    if (
+      typeof window !== 'undefined' &&
+      !window.confirm(`Delete Pay Application #${appNumber}? This cannot be undone.`)
+    ) {
+      return;
+    }
+    setIsBusy(true);
+    try {
+      const res = await fetch(
+        `/api/jobs/${selectedJobId}/pay-applications?payAppId=${encodeURIComponent(payAppId)}`,
+        { method: 'DELETE' }
+      );
+      if (res.ok) {
+        setStatusMsg(`Deleted Pay Application #${appNumber}.`);
+        await loadJobWorkspace(selectedJobId);
+        await fetchAccounting();
+      }
+    } finally {
+      setIsBusy(false);
+    }
+  };
+
   const handleExportQuickBooksCsv = () => {
     const rows = [
       ['Customer', 'Job Number', 'Project', 'App #', 'Period To', 'Status', 'Current Payment Due', 'Retainage', 'Accountant'],
@@ -706,18 +730,32 @@ export default function AccountingPage() {
                         Pay Applications:
                       </span>
                       {jobPayApps.map((a) => (
-                        <button
-                          key={a.id}
-                          type="button"
-                          onClick={() => selectPayAppForEditing(a)}
-                          className={`px-2.5 py-1 rounded-lg text-xs font-bold border ${
-                            activePayApp?.id === a.id
-                              ? 'bg-blue-600 text-white border-blue-600'
-                              : 'bg-slate-50 text-slate-700 border-slate-300'
-                          }`}
-                        >
-                          App #{a.application_number} ({a.status})
-                        </button>
+                        <div key={a.id} className="inline-flex items-center">
+                          <button
+                            type="button"
+                            onClick={() => selectPayAppForEditing(a)}
+                            className={`px-2.5 py-1 rounded-l-lg text-xs font-bold border ${
+                              activePayApp?.id === a.id
+                                ? 'bg-blue-600 text-white border-blue-600'
+                                : 'bg-slate-50 text-slate-700 border-slate-300'
+                            }`}
+                          >
+                            App #{a.application_number} ({a.status})
+                          </button>
+                          <button
+                            type="button"
+                            disabled={isBusy}
+                            onClick={() => handleDeletePayApp(a.id, a.application_number)}
+                            title={`Delete Pay Application #${a.application_number}`}
+                            className={`px-1.5 py-1 rounded-r-lg border-y border-r text-xs transition-colors disabled:opacity-50 ${
+                              activePayApp?.id === a.id
+                                ? 'bg-blue-700 hover:bg-rose-600 text-white border-blue-600'
+                                : 'bg-slate-100 hover:bg-rose-100 text-slate-500 hover:text-rose-700 border-slate-300'
+                            }`}
+                          >
+                            <Trash2 className="w-3.5 h-3.5" />
+                          </button>
+                        </div>
                       ))}
                     </div>
                   </div>
