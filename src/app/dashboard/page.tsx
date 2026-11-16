@@ -110,7 +110,43 @@ function DashboardContent() {
     }
   };
 
-  const myName = (profile?.full_name || '').toLowerCase();
+  const myName = (profile?.full_name || '').toLowerCase().trim();
+  const myFirstName = myName.split(/\s+/)[0] || '';
+  const matchesMyAccountant = (assigned: string | null | undefined) => {
+    const a = (assigned || '').toLowerCase().trim();
+    if (!a || !myName) return false;
+    return a === myName || (myFirstName && a === myFirstName) || myName.startsWith(`${a} `);
+  };
+
+  const allPayApps: any[] = Array.isArray(data.payApps) ? data.payApps : [];
+  const uncompletedPayApps = allPayApps.filter(
+    (a) => a.status === 'requested' || a.status === 'draft'
+  );
+  const myUncompletedPayApps = uncompletedPayApps.filter((a) =>
+    matchesMyAccountant(a.assigned_accountant)
+  );
+  const unassignedPayApps = uncompletedPayApps.filter(
+    (a) => !a.assigned_accountant || !String(a.assigned_accountant).trim()
+  );
+
+  const nowDate = new Date();
+  const curYearMonth = `${nowDate.getFullYear()}-${String(nowDate.getMonth() + 1).padStart(2, '0')}`;
+  const billedPayApps = allPayApps.filter(
+    (a) => a.status === 'submitted' || a.status === 'paid'
+  );
+  const myBilledThisMonth = billedPayApps
+    .filter((a) => {
+      if (!matchesMyAccountant(a.assigned_accountant)) return false;
+      const dt = String(a.submitted_at || a.paid_at || a.period_to || a.requested_at || '');
+      return dt.startsWith(curYearMonth);
+    })
+    .reduce((s, a) => s + (Number(a.current_payment_due) || 0), 0);
+  const totalBilledAllTime = billedPayApps.reduce(
+    (s, a) => s + (Number(a.current_payment_due) || 0),
+    0
+  );
+
+  const openCoAlerts: any[] = Array.isArray(data.openCoAlerts) ? data.openCoAlerts : [];
 
   if (isLoading) {
     return <div className="p-12 text-center text-sm text-slate-500">Loading your workspace...</div>;
@@ -118,7 +154,7 @@ function DashboardContent() {
 
   return (
     <div className="min-h-screen bg-slate-100 text-slate-900 p-4 sm:p-6">
-      <div className="max-w-7xl mx-auto space-y-5">
+      <div className="max-w-7xl mx-auto space-y-4">
         {denied && (
           <div className="bg-amber-50 border border-amber-300 text-amber-900 px-4 py-3 rounded-xl text-xs font-bold flex items-center gap-2">
             <AlertTriangle className="w-4 h-4 shrink-0" />
@@ -134,36 +170,204 @@ function DashboardContent() {
           </div>
         )}
 
-        {/* Welcome Header */}
-        <div className="bg-white rounded-2xl border border-slate-200 p-5 flex flex-wrap items-center justify-between gap-4 shadow-2xs">
-          <div>
-            <h1 className="text-xl font-black text-slate-900">
-              Welcome back, {profile?.full_name || 'User'}
-            </h1>
-            <p className="text-xs text-slate-500 mt-0.5">
-              Roles:{' '}
-              <span className="font-bold text-slate-700">
-                {(profile?.roles || []).join(', ')}
-              </span>{' '}
-              • Personalized Partition Plus Workspace
-            </p>
+        {/* Top 10-Wide Row: Welcome (5x1) + Alerts Box (5x1) */}
+        <div className="grid grid-cols-1 lg:grid-cols-10 gap-4">
+          <div className="lg:col-span-5 bg-white rounded-2xl border border-slate-200 p-4 flex flex-wrap items-center justify-between gap-3 shadow-2xs">
+            <div>
+              <h1 className="text-lg font-black text-slate-900">
+                Welcome back, {profile?.full_name || 'User'}
+              </h1>
+              <p className="text-xs text-slate-500 mt-0.5">
+                Roles:{' '}
+                <span className="font-bold text-slate-700">
+                  {(profile?.roles || []).join(', ')}
+                </span>{' '}
+                • Partition Plus Workspace
+              </p>
+            </div>
+            <button
+              type="button"
+              onClick={() => setShowCustomize(true)}
+              className="px-3 py-1.5 rounded-xl bg-slate-900 hover:bg-slate-800 text-white text-xs font-bold flex items-center gap-1.5 cursor-pointer"
+            >
+              <SlidersHorizontal className="w-3.5 h-3.5" />
+              <span>Customize</span>
+            </button>
           </div>
-          <button
-            type="button"
-            onClick={() => setShowCustomize(true)}
-            className="px-3.5 py-2 rounded-xl bg-slate-900 hover:bg-slate-800 text-white text-xs font-bold flex items-center gap-1.5 cursor-pointer"
-          >
-            <SlidersHorizontal className="w-4 h-4" />
-            <span>Customize Dashboard</span>
-          </button>
+
+          <div className="lg:col-span-5 bg-white rounded-2xl border border-slate-200 p-4 flex items-center justify-between gap-3 shadow-2xs">
+            <div className="min-w-0 flex-1">
+              <div className="text-[11px] font-extrabold uppercase text-amber-700 flex items-center gap-1.5">
+                <AlertTriangle className="w-3.5 h-3.5 shrink-0" />
+                <span>Alerts</span>
+              </div>
+              {openCoAlerts.length > 0 ? (
+                <div className="text-xs text-slate-700 mt-1 truncate">
+                  <strong>{openCoAlerts.length}</strong> pending Change Order
+                  {openCoAlerts.length === 1 ? '' : 's'} awaiting approval —{' '}
+                  {openCoAlerts[0]?.job?.job_number || ''} {openCoAlerts[0]?.title}
+                </div>
+              ) : unassignedPayApps.length > 0 && profile?.roles?.includes('accounting') ? (
+                <div className="text-xs text-slate-700 mt-1 truncate">
+                  <strong>{unassignedPayApps.length}</strong> unassigned bill
+                  {unassignedPayApps.length === 1 ? '' : 's'} waiting in queue.
+                </div>
+              ) : (
+                <div className="text-xs text-slate-500 mt-1">
+                  All clear — no urgent alerts right now.
+                </div>
+              )}
+            </div>
+            {profile?.roles?.includes('accounting') && (
+              <Link
+                href="/accounting"
+                className="px-3 py-1.5 rounded-lg bg-amber-50 hover:bg-amber-100 text-amber-800 border border-amber-200 text-xs font-bold shrink-0"
+              >
+                Open Accounting →
+              </Link>
+            )}
+          </div>
         </div>
 
-        {/* Customizable Widget Grid */}
-        <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
+        {/* Customizable 10-Wide Widget Grid */}
+        <div className="grid grid-cols-1 lg:grid-cols-10 gap-4">
           {widgets
             .filter((w) => w.enabled)
-            .map((w) => {
-              const spanClass = w.span === 'full' ? 'lg:col-span-2' : 'lg:col-span-1';
+            .map((w, idx, enabledArr) => {
+              const cols = w.cols ?? (w.span === 'full' ? 10 : 5);
+              const prevCols = idx > 0 ? enabledArr[idx - 1].cols ?? (enabledArr[idx - 1].span === 'full' ? 10 : 5) : 0;
+              const forceNewRow = cols === 5 && prevCols === 2 ? 'lg:col-start-1' : '';
+              const spanClass = `${
+                cols === 2 ? 'lg:col-span-2' : cols === 5 ? 'lg:col-span-5' : 'lg:col-span-10'
+              } ${forceNewRow}`.trim();
+
+              if (w.id === 'acct_my_uncompleted_count') {
+                return (
+                  <div
+                    key={w.id}
+                    className={`${spanClass} bg-white rounded-xl border border-slate-200 p-4 flex flex-col justify-between`}
+                  >
+                    <div className="text-[11px] font-bold text-slate-500 uppercase">
+                      My Uncompleted Bills
+                    </div>
+                    <div className="text-2xl font-black text-blue-700 mt-1">
+                      {myUncompletedPayApps.length}
+                    </div>
+                  </div>
+                );
+              }
+
+              if (w.id === 'acct_unassigned_count') {
+                return (
+                  <div
+                    key={w.id}
+                    className={`${spanClass} bg-white rounded-xl border border-slate-200 p-4 flex flex-col justify-between`}
+                  >
+                    <div className="text-[11px] font-bold text-slate-500 uppercase">
+                      Unassigned Queue
+                    </div>
+                    <div className="text-2xl font-black text-amber-700 mt-1">
+                      {unassignedPayApps.length}
+                    </div>
+                  </div>
+                );
+              }
+
+              if (w.id === 'acct_my_billed_month') {
+                return (
+                  <div
+                    key={w.id}
+                    className={`${spanClass} bg-white rounded-xl border border-slate-200 p-4 flex flex-col justify-between`}
+                  >
+                    <div className="text-[11px] font-bold text-slate-500 uppercase">
+                      My Billed This Month
+                    </div>
+                    <div className="text-xl font-black text-emerald-700 mt-1 font-mono">
+                      ${myBilledThisMonth.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
+                    </div>
+                  </div>
+                );
+              }
+
+              if (w.id === 'acct_total_billed') {
+                return (
+                  <div
+                    key={w.id}
+                    className={`${spanClass} bg-white rounded-xl border border-slate-200 p-4 flex flex-col justify-between`}
+                  >
+                    <div className="text-[11px] font-bold text-slate-500 uppercase">
+                      Total Billed So Far
+                    </div>
+                    <div className="text-xl font-black text-slate-900 mt-1 font-mono">
+                      ${totalBilledAllTime.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
+                    </div>
+                  </div>
+                );
+              }
+
+              if (
+                w.id === 'acct_my_queue' ||
+                w.id === 'acct_unassigned_queue' ||
+                w.id === 'acct_all_uncompleted'
+              ) {
+                const queueList =
+                  w.id === 'acct_my_queue'
+                    ? myUncompletedPayApps
+                    : w.id === 'acct_unassigned_queue'
+                    ? unassignedPayApps
+                    : uncompletedPayApps;
+                return (
+                  <div
+                    key={w.id}
+                    className={`${spanClass} bg-white rounded-xl border border-slate-200 p-4 flex flex-col space-y-3 min-h-[280px]`}
+                  >
+                    <div className="flex items-center justify-between">
+                      <h2 className="text-xs font-extrabold uppercase text-slate-600 flex items-center gap-1.5">
+                        <DollarSign className="w-4 h-4 text-emerald-600" />
+                        <span>
+                          {w.title} ({queueList.length})
+                        </span>
+                      </h2>
+                      <Link href="/accounting" className="text-xs font-bold text-blue-700 hover:underline">
+                        Accounting →
+                      </Link>
+                    </div>
+                    <div className="divide-y divide-slate-100 text-xs flex-1 overflow-y-auto max-h-72">
+                      {queueList.map((a: any) => (
+                        <Link
+                          key={a.id}
+                          href={`/accounting?jobId=${encodeURIComponent(a.job_id)}&payAppId=${encodeURIComponent(a.id)}`}
+                          className="py-2.5 px-1.5 -mx-1.5 rounded-lg hover:bg-slate-50 flex items-center justify-between gap-2 transition-colors"
+                        >
+                          <div className="min-w-0">
+                            <div className="font-bold text-slate-900 truncate">
+                              {a.job?.job_number ? `[${a.job.job_number}] ` : ''}
+                              {a.job?.project_name || 'Job'} — App #{a.application_number}
+                            </div>
+                            <div className="text-[11px] text-slate-500 truncate">
+                              {a.job?.client_company || '—'}
+                              {a.assigned_accountant ? ` • ${a.assigned_accountant}` : ' • Unassigned'}
+                            </div>
+                          </div>
+                          <div className="text-right shrink-0">
+                            <div className="font-mono font-bold text-slate-900">
+                              ${Number(a.current_payment_due || 0).toLocaleString('en-US', { minimumFractionDigits: 2 })}
+                            </div>
+                            <div className="text-[10px] font-bold uppercase text-amber-700">
+                              {a.status}
+                            </div>
+                          </div>
+                        </Link>
+                      ))}
+                      {queueList.length === 0 && (
+                        <div className="py-8 text-slate-400 text-center">
+                          No uncompleted bills in this queue.
+                        </div>
+                      )}
+                    </div>
+                  </div>
+                );
+              }
 
               if (w.id === 'kpis') {
                 return (

@@ -63,6 +63,11 @@ export default function AccountingPage() {
   const [isBusy, setIsBusy] = useState(false);
   const [statusMsg, setStatusMsg] = useState<string | null>(null);
   const [showPrintModal, setShowPrintModal] = useState(false);
+  const [isAccountingOnly, setIsAccountingOnly] = useState(false);
+  const [jobDetails, setJobDetails] = useState<any>(null);
+  const [jobPOs, setJobPOs] = useState<any[]>([]);
+  const [jobCOs, setJobCOs] = useState<any[]>([]);
+  const [refTab, setRefTab] = useState<'sov' | 'warehouse_install' | 'pos' | 'cos'>('sov');
 
   const fetchAccounting = useCallback(async () => {
     setIsLoading(true);
@@ -86,15 +91,43 @@ export default function AccountingPage() {
     fetchAccounting();
   }, [fetchAccounting]);
 
+  useEffect(() => {
+    fetch('/api/me')
+      .then((r) => r.json())
+      .then((d) => {
+        const roles: string[] = Array.isArray(d?.profile?.roles) ? d.profile.roles : [];
+        setIsAccountingOnly(roles.includes('accounting') && !roles.includes('admin'));
+      })
+      .catch(() => {});
+
+    if (typeof window !== 'undefined') {
+      const sp = new URLSearchParams(window.location.search);
+      const qJobId = sp.get('jobId');
+      const qPayAppId = sp.get('payAppId');
+      if (qJobId) {
+        loadJobWorkspace(qJobId, qPayAppId || undefined);
+      }
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+
   const loadJobWorkspace = async (jobId: string, openPayAppId?: string) => {
     setSelectedJobId(jobId);
     if (!jobId) return;
-    const [sovRes, appsRes] = await Promise.all([
+    const [sovRes, appsRes, jobRes] = await Promise.all([
       fetch(`/api/jobs/${jobId}/sov`),
       fetch(`/api/jobs/${jobId}/pay-applications`),
+      fetch(`/api/jobs/${jobId}`),
     ]);
-    const [sovData, appsData] = await Promise.all([sovRes.json(), appsRes.json()]);
+    const [sovData, appsData, jobData] = await Promise.all([
+      sovRes.json(),
+      appsRes.json(),
+      jobRes.json(),
+    ]);
     setSovItems(sovData.sovItems || []);
+    setJobDetails(jobData?.job || null);
+    setJobPOs(Array.isArray(jobData?.purchaseOrders) ? jobData.purchaseOrders : []);
+    setJobCOs(Array.isArray(jobData?.changeOrders) ? jobData.changeOrders : []);
     const apps = appsData.payApplications || [];
     setJobPayApps(apps);
 
@@ -605,15 +638,17 @@ export default function AccountingPage() {
                     </p>
                   </div>
                   <div className="flex flex-wrap items-center gap-2 text-xs">
-                    <button
-                      type="button"
-                      disabled={isBusy}
-                      onClick={handleImportSovFromQuote}
-                      className="px-3 py-1.5 rounded-lg bg-indigo-600 hover:bg-indigo-700 text-white font-bold flex items-center gap-1"
-                    >
-                      <FileSpreadsheet className="w-3.5 h-3.5" />
-                      <span>Import SOV from Quote / Scope</span>
-                    </button>
+                    {!isAccountingOnly && (
+                      <button
+                        type="button"
+                        disabled={isBusy}
+                        onClick={handleImportSovFromQuote}
+                        className="px-3 py-1.5 rounded-lg bg-indigo-600 hover:bg-indigo-700 text-white font-bold flex items-center gap-1"
+                      >
+                        <FileSpreadsheet className="w-3.5 h-3.5" />
+                        <span>Import SOV from Quote / Scope</span>
+                      </button>
+                    )}
                     <button
                       type="button"
                       disabled={isBusy}
@@ -634,92 +669,288 @@ export default function AccountingPage() {
                   </div>
                 </div>
 
-                {/* Schedule of Values */}
-                <div className="space-y-2">
-                  <div className="flex items-center justify-between">
-                    <h3 className="text-xs font-extrabold uppercase text-slate-700">
-                      Schedule of Values ({sovItems.length} lines — Total:{' '}
-                      {fmt(sovItems.reduce((s, i) => s + (Number(i.scheduled_value) || 0), 0))})
-                    </h3>
-                    <Link
-                      href={`/jobs/${selectedJob.id}/change-orders`}
-                      className="text-[11px] font-bold text-blue-700 hover:underline"
-                    >
-                      Manage Change Orders →
-                    </Link>
+                {/* Uneditable Job Reference Tabs: Original SOV, Warehouse & Install, POs, COs */}
+                <div className="space-y-3">
+                  <div className="flex flex-wrap items-center justify-between gap-2">
+                    <div className="flex flex-wrap items-center gap-1.5 text-xs">
+                      <button
+                        type="button"
+                        onClick={() => setRefTab('sov')}
+                        className={`px-3 py-1.5 rounded-lg font-bold border ${
+                          refTab === 'sov'
+                            ? 'bg-slate-900 text-white border-slate-900'
+                            : 'bg-slate-50 text-slate-700 border-slate-300 hover:bg-slate-100'
+                        }`}
+                      >
+                        Original SOV ({sovItems.length})
+                      </button>
+                      <button
+                        type="button"
+                        onClick={() => setRefTab('warehouse_install')}
+                        className={`px-3 py-1.5 rounded-lg font-bold border ${
+                          refTab === 'warehouse_install'
+                            ? 'bg-slate-900 text-white border-slate-900'
+                            : 'bg-slate-50 text-slate-700 border-slate-300 hover:bg-slate-100'
+                        }`}
+                      >
+                        Warehouse &amp; Install (Read-Only)
+                      </button>
+                      <button
+                        type="button"
+                        onClick={() => setRefTab('pos')}
+                        className={`px-3 py-1.5 rounded-lg font-bold border ${
+                          refTab === 'pos'
+                            ? 'bg-slate-900 text-white border-slate-900'
+                            : 'bg-slate-50 text-slate-700 border-slate-300 hover:bg-slate-100'
+                        }`}
+                      >
+                        Purchase Orders ({jobPOs.length})
+                      </button>
+                      <button
+                        type="button"
+                        onClick={() => setRefTab('cos')}
+                        className={`px-3 py-1.5 rounded-lg font-bold border ${
+                          refTab === 'cos'
+                            ? 'bg-slate-900 text-white border-slate-900'
+                            : 'bg-slate-50 text-slate-700 border-slate-300 hover:bg-slate-100'
+                        }`}
+                      >
+                        Change Orders ({jobCOs.length})
+                      </button>
+                    </div>
+                    {!isAccountingOnly && (
+                      <Link
+                        href={`/jobs/${selectedJob.id}/change-orders`}
+                        className="text-[11px] font-bold text-blue-700 hover:underline"
+                      >
+                        Manage Change Orders →
+                      </Link>
+                    )}
                   </div>
 
-                  <div className="rounded-xl border border-slate-200 overflow-hidden text-xs">
-                    <table className="w-full text-left border-collapse">
-                      <thead className="bg-slate-50 text-[10px] uppercase text-slate-500 border-b border-slate-200">
-                        <tr>
-                          <th className="p-2 w-16">#</th>
-                          <th className="p-2">Description</th>
-                          <th className="p-2 w-28">Source</th>
-                          <th className="p-2 w-32 text-right">Scheduled Value</th>
-                          <th className="p-2 w-10"></th>
-                        </tr>
-                      </thead>
-                      <tbody className="divide-y divide-slate-100">
-                        {sovItems.map((it) => (
-                          <tr key={it.id}>
-                            <td className="p-2 font-mono">{it.item_number}</td>
-                            <td className="p-2 font-semibold">{it.description}</td>
-                            <td className="p-2">
-                              <span
-                                className={`px-2 py-0.5 rounded-full text-[10px] font-bold uppercase ${
-                                  it.source === 'change_order'
-                                    ? 'bg-amber-100 text-amber-800'
-                                    : 'bg-slate-100 text-slate-700'
+                  {refTab === 'sov' && (
+                    <div className="space-y-2">
+                      <div className="flex items-center justify-between">
+                        <h3 className="text-xs font-extrabold uppercase text-slate-700">
+                          Original Schedule of Values — Uneditable ({sovItems.length} lines • Total:{' '}
+                          {fmt(sovItems.reduce((s, i) => s + (Number(i.scheduled_value) || 0), 0))})
+                        </h3>
+                      </div>
+
+                      <div className="rounded-xl border border-slate-200 overflow-hidden text-xs">
+                        <table className="w-full text-left border-collapse">
+                          <thead className="bg-slate-50 text-[10px] uppercase text-slate-500 border-b border-slate-200">
+                            <tr>
+                              <th className="p-2 w-16">#</th>
+                              <th className="p-2">Description</th>
+                              <th className="p-2 w-28">Source</th>
+                              <th className="p-2 w-32 text-right">Scheduled Value</th>
+                              {!isAccountingOnly && <th className="p-2 w-10"></th>}
+                            </tr>
+                          </thead>
+                          <tbody className="divide-y divide-slate-100">
+                            {sovItems.map((it) => (
+                              <tr key={it.id}>
+                                <td className="p-2 font-mono">{it.item_number}</td>
+                                <td className="p-2 font-semibold">{it.description}</td>
+                                <td className="p-2">
+                                  <span
+                                    className={`px-2 py-0.5 rounded-full text-[10px] font-bold uppercase ${
+                                      it.source === 'change_order'
+                                        ? 'bg-amber-100 text-amber-800'
+                                        : 'bg-slate-100 text-slate-700'
+                                    }`}
+                                  >
+                                    {it.source === 'change_order' ? 'Change Order' : 'Contract'}
+                                  </span>
+                                </td>
+                                <td className="p-2 text-right font-mono font-bold">
+                                  {fmt(it.scheduled_value)}
+                                </td>
+                                {!isAccountingOnly && (
+                                  <td className="p-2 text-right">
+                                    {it.source !== 'change_order' && (
+                                      <button
+                                        type="button"
+                                        onClick={() => handleDeleteSovRow(it.id)}
+                                        className="text-slate-400 hover:text-rose-600"
+                                      >
+                                        <Trash2 className="w-3.5 h-3.5" />
+                                      </button>
+                                    )}
+                                  </td>
+                                )}
+                              </tr>
+                            ))}
+                          </tbody>
+                        </table>
+                      </div>
+
+                      {!isAccountingOnly && (
+                        <form onSubmit={handleAddSovRow} className="flex items-center gap-2 text-xs">
+                          <input
+                            type="text"
+                            value={newSovDesc}
+                            onChange={(e) => setNewSovDesc(e.target.value)}
+                            placeholder="Add SOV line description (e.g. Toilet Partitions - Furnish & Install)..."
+                            className="flex-1 px-2.5 py-1.5 rounded-lg border border-slate-300"
+                          />
+                          <input
+                            type="number"
+                            step="0.01"
+                            value={newSovVal}
+                            onChange={(e) => setNewSovVal(e.target.value)}
+                            placeholder="Scheduled $"
+                            className="w-32 px-2.5 py-1.5 rounded-lg border border-slate-300 font-mono"
+                          />
+                          <button
+                            type="submit"
+                            disabled={isBusy || !newSovDesc.trim()}
+                            className="px-3 py-1.5 rounded-lg bg-slate-900 hover:bg-slate-800 text-white font-bold disabled:opacity-50"
+                          >
+                            + Add Line
+                          </button>
+                        </form>
+                      )}
+                    </div>
+                  )}
+
+                  {refTab === 'warehouse_install' && (
+                    <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 text-xs">
+                      <div className="p-3.5 rounded-xl bg-slate-50 border border-slate-200 space-y-1.5">
+                        <div className="text-[10px] font-bold uppercase text-slate-500">
+                          Warehouse Updates (Uneditable)
+                        </div>
+                        <div>
+                          Status:{' '}
+                          <strong className="uppercase">
+                            {jobDetails?.warehouse_status || 'pending'}
+                          </strong>
+                        </div>
+                        <div>
+                          Staging Bay / Location:{' '}
+                          <strong>{jobDetails?.warehouse_location || '—'}</strong>
+                        </div>
+                        <div>
+                          Material ETA: <strong>{jobDetails?.material_eta || '—'}</strong>
+                        </div>
+                        <div>
+                          Staged At:{' '}
+                          <strong>
+                            {jobDetails?.material_staged_at
+                              ? new Date(jobDetails.material_staged_at).toLocaleDateString()
+                              : '—'}
+                          </strong>
+                        </div>
+                        <div>
+                          Loaded At:{' '}
+                          <strong>
+                            {jobDetails?.material_loaded_at
+                              ? new Date(jobDetails.material_loaded_at).toLocaleDateString()
+                              : '—'}
+                          </strong>
+                        </div>
+                        {jobDetails?.warehouse_notes && (
+                          <div className="text-slate-600 pt-1 border-t border-slate-200">
+                            Notes: {jobDetails.warehouse_notes}
+                          </div>
+                        )}
+                      </div>
+
+                      <div className="p-3.5 rounded-xl bg-slate-50 border border-slate-200 space-y-1.5">
+                        <div className="text-[10px] font-bold uppercase text-slate-500">
+                          Install Updates (Uneditable)
+                        </div>
+                        <div>
+                          Install Status:{' '}
+                          <strong className="uppercase">
+                            {jobDetails?.install_request_status || 'not_requested'}
+                          </strong>
+                        </div>
+                        <div>
+                          Requested Install Date:{' '}
+                          <strong>{jobDetails?.requested_install_date || '—'}</strong>
+                        </div>
+                        <div>
+                          Site Available Range:{' '}
+                          <strong>{jobDetails?.site_available_range || '—'}</strong>
+                        </div>
+                        {jobDetails?.install_availability_notes && (
+                          <div className="text-slate-600 pt-1 border-t border-slate-200">
+                            Notes: {jobDetails.install_availability_notes}
+                          </div>
+                        )}
+                      </div>
+                    </div>
+                  )}
+
+                  {refTab === 'pos' && (
+                    <div className="rounded-xl border border-slate-200 overflow-hidden text-xs">
+                      {jobPOs.length === 0 ? (
+                        <div className="p-4 text-center text-slate-400">
+                          No purchase orders for this job.
+                        </div>
+                      ) : (
+                        <div className="divide-y divide-slate-100">
+                          {jobPOs.map((po) => (
+                            <div key={po.id} className="p-3 flex flex-wrap items-center justify-between gap-2">
+                              <div>
+                                <span className="font-mono font-bold px-2 py-0.5 rounded bg-blue-50 text-blue-800 border border-blue-200 mr-2">
+                                  {po.po_number}
+                                </span>
+                                <span className="font-bold text-slate-900">{po.vendor}</span>
+                                <span className="ml-2 text-[10px] font-bold uppercase px-2 py-0.5 rounded-full bg-slate-100 text-slate-700">
+                                  {po.status}
+                                </span>
+                                {po.expected_delivery_date && (
+                                  <span className="ml-2 text-slate-500">
+                                    ETA: {po.expected_delivery_date}
+                                  </span>
+                                )}
+                              </div>
+                              <div className="font-mono font-bold text-slate-900">
+                                {fmt(po.total_cost)}
+                              </div>
+                            </div>
+                          ))}
+                        </div>
+                      )}
+                    </div>
+                  )}
+
+                  {refTab === 'cos' && (
+                    <div className="rounded-xl border border-slate-200 overflow-hidden text-xs">
+                      {jobCOs.length === 0 ? (
+                        <div className="p-4 text-center text-slate-400">
+                          No change orders for this job.
+                        </div>
+                      ) : (
+                        <div className="divide-y divide-slate-100">
+                          {jobCOs.map((co) => (
+                            <div key={co.id} className="p-3 flex flex-wrap items-center justify-between gap-2">
+                              <div>
+                                <span className="font-mono font-bold px-2 py-0.5 rounded bg-purple-50 text-purple-800 border border-purple-200 mr-2">
+                                  {co.co_number}
+                                </span>
+                                <span className="font-bold text-slate-900">{co.title}</span>
+                                <span className="ml-2 text-[10px] font-bold uppercase px-2 py-0.5 rounded-full bg-slate-100 text-slate-700">
+                                  {co.status}
+                                </span>
+                              </div>
+                              <div
+                                className={`font-mono font-bold ${
+                                  co.type === 'deduction' ? 'text-rose-700' : 'text-emerald-700'
                                 }`}
                               >
-                                {it.source === 'change_order' ? 'Change Order' : 'Contract'}
-                              </span>
-                            </td>
-                            <td className="p-2 text-right font-mono font-bold">
-                              {fmt(it.scheduled_value)}
-                            </td>
-                            <td className="p-2 text-right">
-                              {it.source !== 'change_order' && (
-                                <button
-                                  type="button"
-                                  onClick={() => handleDeleteSovRow(it.id)}
-                                  className="text-slate-400 hover:text-rose-600"
-                                >
-                                  <Trash2 className="w-3.5 h-3.5" />
-                                </button>
-                              )}
-                            </td>
-                          </tr>
-                        ))}
-                      </tbody>
-                    </table>
-                  </div>
-
-                  <form onSubmit={handleAddSovRow} className="flex items-center gap-2 text-xs">
-                    <input
-                      type="text"
-                      value={newSovDesc}
-                      onChange={(e) => setNewSovDesc(e.target.value)}
-                      placeholder="Add SOV line description (e.g. Toilet Partitions - Furnish & Install)..."
-                      className="flex-1 px-2.5 py-1.5 rounded-lg border border-slate-300"
-                    />
-                    <input
-                      type="number"
-                      step="0.01"
-                      value={newSovVal}
-                      onChange={(e) => setNewSovVal(e.target.value)}
-                      placeholder="Scheduled $"
-                      className="w-32 px-2.5 py-1.5 rounded-lg border border-slate-300 font-mono"
-                    />
-                    <button
-                      type="submit"
-                      disabled={isBusy || !newSovDesc.trim()}
-                      className="px-3 py-1.5 rounded-lg bg-slate-900 hover:bg-slate-800 text-white font-bold disabled:opacity-50"
-                    >
-                      + Add Line
-                    </button>
-                  </form>
+                                {co.type === 'deduction' ? '-' : '+'}
+                                {fmt(co.amount)}
+                              </div>
+                            </div>
+                          ))}
+                        </div>
+                      )}
+                    </div>
+                  )}
                 </div>
 
                 {/* Pay Application Selector & G702/G703 Editor */}

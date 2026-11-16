@@ -167,6 +167,11 @@ export async function POST(
       isRetainageRelease,
     });
 
+    const prevAssignedAccountant =
+      existingApps.find((a: any) => a.assigned_accountant)?.assigned_accountant || null;
+    const resolvedAccountant =
+      body?.assignedAccountant || prevAssignedAccountant || job.assigned_accountant || null;
+
     const now = new Date().toISOString();
     const { data: created, error } = await supabase
       .from('job_pay_applications')
@@ -179,7 +184,7 @@ export async function POST(
         is_retainage_release: isRetainageRelease,
         status: body?.status || 'requested',
         requested_by: body?.requestedBy || job.project_manager || 'PM',
-        assigned_accountant: body?.assignedAccountant || job.assigned_accountant || null,
+        assigned_accountant: resolvedAccountant,
         notes: body?.notes || null,
         original_contract_sum: summary.originalContractSum,
         net_change_orders: summary.netChangeOrders,
@@ -196,6 +201,12 @@ export async function POST(
       .single();
 
     if (error) return NextResponse.json({ error: error.message }, { status: 500 });
+    if (resolvedAccountant && job.assigned_accountant !== resolvedAccountant) {
+      await supabase
+        .from('jobs')
+        .update({ assigned_accountant: resolvedAccountant })
+        .eq('id', id);
+    }
     return NextResponse.json({ payApplication: created });
   } catch (err: any) {
     return NextResponse.json(
@@ -301,6 +312,12 @@ export async function PATCH(
       .single();
 
     if (error) return NextResponse.json({ error: error.message }, { status: 500 });
+    if (body.assignedAccountant) {
+      await supabase
+        .from('jobs')
+        .update({ assigned_accountant: body.assignedAccountant })
+        .eq('id', id);
+    }
     return NextResponse.json({ payApplication: updated });
   } catch (err: any) {
     return NextResponse.json(

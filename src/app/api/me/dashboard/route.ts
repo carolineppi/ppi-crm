@@ -24,7 +24,7 @@ export async function GET() {
   const today = new Date().toISOString().slice(0, 10);
 
   // Query via user-scoped SSR client so Postgres RLS also enforces row visibility
-  const [bidsRes, jobsRes, payAppsRes, posRes, ticketsRes] = await Promise.all([
+  const [bidsRes, jobsRes, payAppsRes, posRes, ticketsRes, coAlertsRes] = await Promise.all([
     roles.includes('admin') || roles.includes('calendar_manager') || roles.includes('estimator')
       ? ssr
           .from('bid_requests')
@@ -41,10 +41,9 @@ export async function GET() {
     roles.includes('admin') || roles.includes('accounting') || roles.includes('pm')
       ? ssr
           .from('job_pay_applications')
-          .select('id, job_id, application_number, status, current_payment_due, assigned_accountant, requested_at')
-          .in('status', ['requested', 'draft'])
+          .select('id, job_id, application_number, status, current_payment_due, assigned_accountant, requested_at, submitted_at, paid_at, period_to, job:jobs(job_number, project_name, client_company)')
           .order('requested_at', { ascending: false })
-          .limit(20)
+          .limit(200)
       : Promise.resolve({ data: [] as any[] }),
     roles.includes('admin') || roles.includes('warehouse') || roles.includes('pm')
       ? ssr
@@ -65,6 +64,14 @@ export async function GET() {
           .order('confirmed_install_date', { ascending: true, nullsFirst: false })
           .limit(20)
       : Promise.resolve({ data: [] as any[] }),
+    roles.includes('admin') || roles.includes('accounting')
+      ? ssr
+          .from('job_change_orders')
+          .select('id, job_id, co_number, title, type, amount, status, job:jobs(job_number, project_name)')
+          .eq('status', 'pending')
+          .order('created_at', { ascending: false })
+          .limit(10)
+      : Promise.resolve({ data: [] as any[] }),
   ]);
 
   return NextResponse.json({
@@ -77,6 +84,7 @@ export async function GET() {
       payApps: payAppsRes.data || [],
       incomingPOs: posRes.data || [],
       upcomingInstalls: ticketsRes.data || [],
+      openCoAlerts: coAlertsRes.data || [],
     },
   });
 }

@@ -49,8 +49,8 @@ export const ROLE_DEFINITIONS: Record<UserRole, RoleMeta> = {
     key: 'accounting',
     label: 'Accounting / Billing',
     scope: 'full',
-    description: 'SOV, AIA G702/G703 pay apps, billing queue, customers, and jobs.',
-    allowedRoutes: ['/dashboard', '/accounting', '/jobs', '/customers', '/suppliers'],
+    description: 'SOV, AIA G702/G703 pay apps, billing queue, and read-only job reference.',
+    allowedRoutes: ['/dashboard', '/accounting', '/settings'],
   },
   warehouse: {
     key: 'warehouse',
@@ -80,6 +80,8 @@ export interface DashboardWidgetConfig {
   title: string;
   enabled: boolean;
   span: 'half' | 'full';
+  cols?: number;
+  rows?: number;
   scope?: 'mine' | 'all';
 }
 
@@ -102,6 +104,27 @@ export interface UserProfile {
 }
 
 export function getDefaultWidgetsForRoles(roles: string[]): DashboardWidgetConfig[] {
+  const isPureAccounting =
+    roles.includes('accounting') &&
+    !roles.includes('admin') &&
+    !roles.includes('pm') &&
+    !roles.includes('estimator') &&
+    !roles.includes('calendar_manager') &&
+    !roles.includes('warehouse') &&
+    !roles.includes('install_coordinator');
+
+  if (isPureAccounting) {
+    return [
+      { id: 'acct_my_uncompleted_count', title: 'My Uncompleted Bills', enabled: true, span: 'half', cols: 2, rows: 1, scope: 'mine' },
+      { id: 'acct_unassigned_count', title: 'Unassigned Bills', enabled: true, span: 'half', cols: 2, rows: 1, scope: 'all' },
+      { id: 'acct_my_billed_month', title: 'Billed This Month (Mine)', enabled: false, span: 'half', cols: 2, rows: 1, scope: 'mine' },
+      { id: 'acct_total_billed', title: 'Total Billed So Far', enabled: false, span: 'half', cols: 2, rows: 1, scope: 'all' },
+      { id: 'acct_my_queue', title: 'My Billing Queue', enabled: true, span: 'half', cols: 5, rows: 4, scope: 'mine' },
+      { id: 'acct_unassigned_queue', title: 'Unassigned Billing Queue', enabled: true, span: 'half', cols: 5, rows: 4, scope: 'all' },
+      { id: 'acct_all_uncompleted', title: 'All Uncompleted Apps', enabled: false, span: 'half', cols: 5, rows: 4, scope: 'all' },
+    ];
+  }
+
   const has = (r: UserRole) => roles.includes('admin') || roles.includes(r);
   const widgets: DashboardWidgetConfig[] = [
     { id: 'kpis', title: 'My Workspace Summary', enabled: true, span: 'full', scope: 'mine' },
@@ -159,7 +182,14 @@ export function canAccessPath(profile: UserProfile | null, pathname: string): bo
   if (!profile || !profile.is_active) return false;
   if (profile.roles.includes('admin')) return true;
 
-  if (pathname === '/dashboard' || pathname.startsWith('/dashboard/')) return true;
+  if (
+    pathname === '/dashboard' ||
+    pathname.startsWith('/dashboard/') ||
+    pathname === '/settings' ||
+    pathname.startsWith('/settings/')
+  ) {
+    return true;
+  }
 
   const extra = Array.isArray(profile.allowed_pages) ? profile.allowed_pages : [];
   for (const allowed of extra) {
@@ -199,6 +229,7 @@ export function getAllowedNavLinks(profile: UserProfile | null) {
     { href: '/suppliers', label: 'Suppliers', key: 'suppliers' },
     { href: '/pricing', label: 'Price Book', key: 'pricing' },
     { href: '/admin/users', label: 'Admin Users', key: 'admin' },
+    { href: '/settings', label: 'User Settings', key: 'settings' },
   ];
   return allLinks.filter((l) => canAccessPath(profile, l.href));
 }
