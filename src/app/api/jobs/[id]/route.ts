@@ -20,7 +20,7 @@ export async function GET(
     const { id } = await params;
     const supabase = createServerSupabaseClient();
 
-    const [jobRes, poRes, coRes] = await Promise.all([
+    const [jobRes, poRes, coRes, payAppsRes] = await Promise.all([
       supabase.from('jobs').select('*').eq('id', id).single(),
       supabase
         .from('job_purchase_orders')
@@ -32,6 +32,11 @@ export async function GET(
         .select('*')
         .eq('job_id', id)
         .order('created_at', { ascending: false }),
+      supabase
+        .from('job_pay_applications')
+        .select('id, application_number, status, current_payment_due, total_completed_and_stored, retainage_amount, total_earned_less_retainage, submitted_at, paid_at')
+        .eq('job_id', id)
+        .order('application_number', { ascending: false }),
     ]);
 
     if (jobRes.error || !jobRes.data) {
@@ -42,6 +47,7 @@ export async function GET(
       job: jobRes.data,
       purchaseOrders: poRes.data || [],
       changeOrders: coRes.data || [],
+      payApplications: payAppsRes.data || [],
     });
   } catch (err: any) {
     return NextResponse.json(

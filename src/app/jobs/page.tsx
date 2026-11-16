@@ -64,6 +64,9 @@ interface JobRecord {
     unit?: string;
     unitPrice?: number;
   }> | null;
+  po_summary?: { total: number; open: number; totalCost: number };
+  co_summary?: { total: number; pending: number; netApproved: number };
+  pay_summary?: { billed: number; paid: number };
   created_at: string;
 }
 
@@ -430,6 +433,42 @@ export default function JobsPage() {
                         {job.project_name} →
                       </h2>
                     </Link>
+                    {(() => {
+                      const adjContract =
+                        (Number(job.quote_amount) || 0) + (job.co_summary?.netApproved || 0);
+                      const poCost = job.po_summary?.totalCost || 0;
+                      const billed = job.pay_summary?.billed || 0;
+                      const estMargin = adjContract - poCost;
+                      const estMarginPct =
+                        adjContract > 0 ? Math.round((estMargin / adjContract) * 1000) / 10 : null;
+                      return (
+                        <div className="flex flex-wrap items-center gap-2 mt-1.5 text-[11px] text-slate-600">
+                          <span>
+                            Adj. Contract: <strong className="font-mono text-slate-800">${adjContract.toLocaleString('en-US', { minimumFractionDigits: 2 })}</strong>
+                          </span>
+                          <span>•</span>
+                          <span>
+                            POs: <strong className="font-mono text-slate-800">${poCost.toLocaleString('en-US', { minimumFractionDigits: 2 })}</strong>
+                          </span>
+                          <span>•</span>
+                          <span>
+                            Billed: <strong className="font-mono text-slate-800">${billed.toLocaleString('en-US', { minimumFractionDigits: 2 })}</strong>
+                          </span>
+                          {estMarginPct !== null && (
+                            <>
+                              <span>•</span>
+                              <span
+                                className={`font-bold ${
+                                  estMarginPct >= 20 ? 'text-emerald-700' : estMarginPct >= 0 ? 'text-blue-700' : 'text-rose-700'
+                                }`}
+                              >
+                                Margin (less POs): {estMarginPct.toFixed(1)}%
+                              </span>
+                            </>
+                          )}
+                        </div>
+                      );
+                    })()}
                   </div>
 
                   <select

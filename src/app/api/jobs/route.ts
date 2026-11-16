@@ -32,10 +32,11 @@ export async function GET(request: NextRequest) {
       return NextResponse.json({ job: data });
     }
 
-    const [{ data, error }, { data: pos }, { data: cos }] = await Promise.all([
+    const [{ data, error }, { data: pos }, { data: cos }, { data: payApps }] = await Promise.all([
       supabase.from('jobs').select('*').order('created_at', { ascending: false }),
       supabase.from('job_purchase_orders').select('id, job_id, po_number, status, total_cost, items'),
       supabase.from('job_change_orders').select('id, job_id, type, amount, status'),
+      supabase.from('job_pay_applications').select('id, job_id, status, current_payment_due'),
     ]);
 
     if (error) {
@@ -64,10 +65,19 @@ export async function GET(request: NextRequest) {
       }
     });
 
+    const payMap: Record<string, { billed: number; paid: number }> = {};
+    (payApps || []).forEach((pa: any) => {
+      if (!payMap[pa.job_id]) payMap[pa.job_id] = { billed: 0, paid: 0 };
+      const amt = Number(pa.current_payment_due) || 0;
+      if (pa.status === 'submitted' || pa.status === 'paid') payMap[pa.job_id].billed += amt;
+      if (pa.status === 'paid') payMap[pa.job_id].paid += amt;
+    });
+
     const enriched = (data || []).map((job: any) => ({
       ...job,
       po_summary: poMap[job.id] || { total: 0, open: 0, totalCost: 0 },
       co_summary: coMap[job.id] || { total: 0, pending: 0, netApproved: 0 },
+      pay_summary: payMap[job.id] || { billed: 0, paid: 0 },
       line_item_order_status: getJobLineItemsOrderStatus(
         job.line_items,
         posByJob[job.id] || []

@@ -39,6 +39,7 @@ import {
   SUBMITTAL_STATUS_META,
   getSubmittalSummary,
 } from '@/lib/jobs/submittals';
+import { computeJobProfitability } from '@/lib/jobs/profitability';
 
 export default function JobViewerPage() {
   const params = useParams<{ id: string }>();
@@ -47,6 +48,7 @@ export default function JobViewerPage() {
   const [job, setJob] = useState<any>(null);
   const [purchaseOrders, setPurchaseOrders] = useState<any[]>([]);
   const [changeOrders, setChangeOrders] = useState<any[]>([]);
+  const [payApplications, setPayApplications] = useState<any[]>([]);
   const [isLoading, setIsLoading] = useState(true);
 
   const [materialEta, setMaterialEta] = useState('');
@@ -128,6 +130,7 @@ export default function JobViewerPage() {
         setJob(data.job);
         setPurchaseOrders(data.purchaseOrders || []);
         setChangeOrders(data.changeOrders || []);
+        setPayApplications(data.payApplications || []);
         setMaterialEta(data.job.material_eta || '');
         setSiteAvailableRange(data.job.site_available_range || '');
         setRequestedInstallDate(data.job.requested_install_date || '');
@@ -1252,6 +1255,122 @@ export default function JobViewerPage() {
             const addonItems = indexedItems.filter(({ li }: any) => Boolean(li?.isAddon));
             return (
           <>
+          {/* Job Profitability & Cost-to-Complete Summary */}
+          {(() => {
+            const prof = computeJobProfitability({
+              job,
+              purchaseOrders,
+              changeOrders,
+              payApplications,
+            });
+            const fmtUsd = (n: number) =>
+              `$${n.toLocaleString('en-US', {
+                minimumFractionDigits: 2,
+                maximumFractionDigits: 2,
+              })}`;
+            return (
+              <div className="bg-white rounded-2xl border border-slate-200 shadow-sm p-4 space-y-3">
+                <div className="flex flex-wrap items-center justify-between gap-2">
+                  <h2 className="text-sm font-black text-slate-900 flex items-center gap-1.5">
+                    <DollarSign className="w-4 h-4 text-emerald-600" />
+                    <span>Job Profitability &amp; Cost-to-Complete</span>
+                  </h2>
+                  {prof.projectedMarginPercent !== null && (
+                    <span
+                      className={`text-[11px] font-black px-2.5 py-0.5 rounded-full border ${
+                        prof.projectedMarginPercent >= 20
+                          ? 'bg-emerald-50 text-emerald-800 border-emerald-200'
+                          : prof.projectedMarginPercent >= 0
+                          ? 'bg-blue-50 text-blue-800 border-blue-200'
+                          : 'bg-rose-50 text-rose-800 border-rose-200'
+                      }`}
+                    >
+                      Projected Margin: {prof.projectedMarginPercent.toFixed(1)}% (
+                      {fmtUsd(prof.projectedGrossProfit)})
+                    </span>
+                  )}
+                </div>
+
+                <div className="grid grid-cols-2 sm:grid-cols-4 gap-2.5 text-xs">
+                  <div className="p-3 rounded-xl bg-slate-50 border border-slate-200">
+                    <div className="text-[10px] font-bold uppercase text-slate-500">
+                      Adjusted Contract
+                    </div>
+                    <div className="text-base font-black text-slate-900 mt-0.5 font-mono">
+                      {fmtUsd(prof.adjustedContract)}
+                    </div>
+                    <div className="text-[10px] text-slate-500 mt-0.5">
+                      Base {fmtUsd(prof.baseContract)}
+                      {prof.approvedAdditions - prof.approvedDeductions !== 0 &&
+                        ` • CO ${prof.approvedAdditions - prof.approvedDeductions > 0 ? '+' : ''}${fmtUsd(
+                          prof.approvedAdditions - prof.approvedDeductions
+                        )}`}
+                    </div>
+                  </div>
+
+                  <div className="p-3 rounded-xl bg-slate-50 border border-slate-200">
+                    <div className="text-[10px] font-bold uppercase text-slate-500">
+                      Committed POs
+                    </div>
+                    <div className="text-base font-black text-slate-900 mt-0.5 font-mono">
+                      {fmtUsd(prof.committedPoTotal)}
+                    </div>
+                    <div
+                      className={`text-[10px] font-semibold mt-0.5 ${
+                        prof.poVariance <= 0 ? 'text-emerald-700' : 'text-rose-700'
+                      }`}
+                    >
+                      {prof.poVariance === 0
+                        ? 'On Estimate'
+                        : `${prof.poVariance < 0 ? 'Under' : 'Over'} Est. by ${fmtUsd(
+                            Math.abs(prof.poVariance)
+                          )}`}
+                    </div>
+                  </div>
+
+                  <div className="p-3 rounded-xl bg-slate-50 border border-slate-200">
+                    <div className="text-[10px] font-bold uppercase text-slate-500">
+                      Est. Cost-to-Complete
+                    </div>
+                    <div className="text-base font-black text-slate-900 mt-0.5 font-mono">
+                      {fmtUsd(prof.costToCompleteEstimate)}
+                    </div>
+                    <div className="text-[10px] text-slate-500 mt-0.5">
+                      Projected Total Cost: {fmtUsd(prof.projectedTotalCost)}
+                    </div>
+                  </div>
+
+                  <div className="p-3 rounded-xl bg-slate-50 border border-slate-200">
+                    <div className="text-[10px] font-bold uppercase text-slate-500">
+                      Billed / Collected
+                    </div>
+                    <div className="text-base font-black text-slate-900 mt-0.5 font-mono">
+                      {fmtUsd(prof.billedToDate)}
+                    </div>
+                    <div className="text-[10px] text-slate-500 mt-0.5">
+                      Paid: {fmtUsd(prof.paidToDate)} • Rem: {fmtUsd(prof.remainingContractToBill)}
+                    </div>
+                  </div>
+                </div>
+
+                {prof.adjustedContract > 0 && (
+                  <div className="space-y-1">
+                    <div className="flex justify-between text-[10px] font-bold text-slate-500">
+                      <span>Billing Progress ({prof.billedPercent.toFixed(1)}% of Contract)</span>
+                      <span>Remaining to Bill: {fmtUsd(prof.remainingContractToBill)}</span>
+                    </div>
+                    <div className="w-full h-2 rounded-full bg-slate-200 overflow-hidden">
+                      <div
+                        className="h-full bg-emerald-600 rounded-full transition-all"
+                        style={{ width: `${Math.min(100, prof.billedPercent)}%` }}
+                      />
+                    </div>
+                  </div>
+                )}
+              </div>
+            );
+          })()}
+
           {/* Submittals & Shop Drawings Tracker */}
           {(() => {
             const submittalsList: JobSubmittal[] = Array.isArray(job?.submittals)
