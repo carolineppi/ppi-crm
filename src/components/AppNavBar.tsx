@@ -6,6 +6,7 @@ import { usePathname, useRouter } from 'next/navigation';
 import { LogOut, LayoutDashboard, Shield, Eye } from 'lucide-react';
 import { createBrowserSupabaseClient } from '@/lib/supabase/client';
 import { ROLE_DEFINITIONS, UserRole } from '@/lib/auth/roles';
+import { applyTheme } from '@/lib/theme/themes';
 
 interface NavLinkItem {
   href: string;
@@ -35,6 +36,9 @@ export default function AppNavBar() {
           setNavLinks(d.navLinks || []);
           if (d.isViewingAs) {
             setPreviewName(d.profile.full_name || '');
+          }
+          if (d.profile?.dashboard_config?.theme) {
+            applyTheme(d.profile.dashboard_config.theme);
           }
         }
       })

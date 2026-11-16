@@ -13,7 +13,14 @@ export default function RootLayout({
   children: React.ReactNode;
 }>) {
   return (
-    <html lang="en">
+    <html lang="en" suppressHydrationWarning>
+      <head>
+        <script
+          dangerouslySetInnerHTML={{
+            __html: `try{var t=localStorage.getItem('ppi_ui_theme');if(t){document.documentElement.setAttribute('data-theme',t);}}catch(e){}`,
+          }}
+        />
+      </head>
       <body className="min-h-screen bg-slate-50 antialiased">
         <AppNavBar />
         <header className="border-b border-slate-200 bg-white sticky top-0 z-50">

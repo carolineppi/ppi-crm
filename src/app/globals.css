@@ -14,3 +14,238 @@ body {
   margin: 0;
   padding: 0;
 }
+
+/* ============================================================
+   THEME: DARK MODE
+   ============================================================ */
+html[data-theme='dark'] {
+  --background: #0b1120;
+  --foreground: #f1f5f9;
+  color-scheme: dark;
+}
+
+html[data-theme='dark'] body,
+html[data-theme='dark'] .bg-slate-50,
+html[data-theme='dark'] .bg-slate-100,
+html[data-theme='dark'] .bg-slate-100\/70 {
+  background-color: #0b1120 !important;
+  color: #f1f5f9;
+}
+
+html[data-theme='dark'] .bg-white,
+html[data-theme='dark'] .bg-slate-50\/70 {
+  background-color: #162032 !important;
+  color: #f1f5f9;
+}
+
+html[data-theme='dark'] .bg-slate-200 {
+  background-color: #1e293b !important;
+}
+
+html[data-theme='dark'] .bg-slate-900 {
+  background-color: #020617 !important;
+  color: #f8fafc !important;
+}
+
+html[data-theme='dark'] .border-slate-100,
+html[data-theme='dark'] .border-slate-200,
+html[data-theme='dark'] .border-slate-300 {
+  border-color: #2c3a4f !important;
+}
+
+html[data-theme='dark'] .divide-slate-100 > :not([hidden]) ~ :not([hidden]),
+html[data-theme='dark'] .divide-slate-200 > :not([hidden]) ~ :not([hidden]) {
+  border-color: #243145 !important;
+}
+
+html[data-theme='dark'] .text-slate-900,
+html[data-theme='dark'] .text-slate-800 {
+  color: #f1f5f9 !important;
+}
+
+html[data-theme='dark'] .text-slate-700,
+html[data-theme='dark'] .text-slate-600 {
+  color: #cbd5e1 !important;
+}
+
+html[data-theme='dark'] .text-slate-500,
+html[data-theme='dark'] .text-slate-400 {
+  color: #94a3b8 !important;
+}
+
+html[data-theme='dark'] input,
+html[data-theme='dark'] select,
+html[data-theme='dark'] textarea {
+  background-color: #0f172a !important;
+  color: #f1f5f9 !important;
+  border-color: #334155 !important;
+}
+
+html[data-theme='dark'] input::placeholder,
+html[data-theme='dark'] textarea::placeholder {
+  color: #64748b !important;
+}
+
+html[data-theme='dark'] .hover\:bg-slate-50:hover,
+html[data-theme='dark'] .hover\:bg-slate-100:hover {
+  background-color: #1e293b !important;
+}
+
+/* ============================================================
+   THEME: LOW BLUE LIGHT (WARM CREAM)
+   ============================================================ */
+html[data-theme='low-blue-light'] {
+  --background: #f5efe2;
+  --foreground: #2d2418;
+}
+
+html[data-theme='low-blue-light'] body,
+html[data-theme='low-blue-light'] .bg-slate-50,
+html[data-theme='low-blue-light'] .bg-slate-100,
+html[data-theme='low-blue-light'] .bg-slate-100\/70 {
+  background-color: #f5efe2 !important;
+  color: #2d2418;
+}
+
+html[data-theme='low-blue-light'] .bg-white,
+html[data-theme='low-blue-light'] .bg-slate-50\/70 {
+  background-color: #fffdf7 !important;
+  color: #2d2418;
+}
+
+html[data-theme='low-blue-light'] .bg-slate-200 {
+  background-color: #ebe2d0 !important;
+}
+
+html[data-theme='low-blue-light'] .bg-slate-900 {
+  background-color: #3d2e1e !important;
+  color: #fdf8ee !important;
+}
+
+html[data-theme='low-blue-light'] .border-slate-100,
+html[data-theme='low-blue-light'] .border-slate-200,
+html[data-theme='low-blue-light'] .border-slate-300 {
+  border-color: #e2d6bf !important;
+}
+
+html[data-theme='low-blue-light'] .divide-slate-100 > :not([hidden]) ~ :not([hidden]),
+html[data-theme='low-blue-light'] .divide-slate-200 > :not([hidden]) ~ :not([hidden]) {
+  border-color: #ebe0cb !important;
+}
+
+html[data-theme='low-blue-light'] .text-slate-900,
+html[data-theme='low-blue-light'] .text-slate-800 {
+  color: #2d2418 !important;
+}
+
+html[data-theme='low-blue-light'] .text-slate-700,
+html[data-theme='low-blue-light'] .text-slate-600 {
+  color: #574835 !important;
+}
+
+html[data-theme='low-blue-light'] .text-slate-500,
+html[data-theme='low-blue-light'] .text-slate-400 {
+  color: #7c6b54 !important;
+}
+
+html[data-theme='low-blue-light'] .bg-blue-600 {
+  background-color: #b45309 !important;
+}
+
+html[data-theme='low-blue-light'] .hover\:bg-blue-500:hover,
+html[data-theme='low-blue-light'] .hover\:bg-blue-700:hover {
+  background-color: #92400e !important;
+}
+
+html[data-theme='low-blue-light'] .text-blue-700,
+html[data-theme='low-blue-light'] .text-blue-600 {
+  color: #b45309 !important;
+}
+
+html[data-theme='low-blue-light'] input,
+html[data-theme='low-blue-light'] select,
+html[data-theme='low-blue-light'] textarea {
+  background-color: #fffcf4 !important;
+  color: #2d2418 !important;
+  border-color: #dccdb2 !important;
+}
+
+html[data-theme='low-blue-light'] .hover\:bg-slate-50:hover,
+html[data-theme='low-blue-light'] .hover\:bg-slate-100:hover {
+  background-color: #f3ead8 !important;
+}
+
+/* ============================================================
+   THEME: PARTITION PLUS MODE
+   #F1F4FD canvas | #FFFFFF boxes | #142543 dark bars & text
+   #2563EB blue & #B70020 crimson red accents/icons/highlights
+   ============================================================ */
+html[data-theme='partition-plus'] {
+  --background: #F1F4FD;
+  --foreground: #142543;
+}
+
+html[data-theme='partition-plus'] body,
+html[data-theme='partition-plus'] .bg-slate-50,
+html[data-theme='partition-plus'] .bg-slate-100,
+html[data-theme='partition-plus'] .bg-slate-100\/70 {
+  background-color: #F1F4FD !important;
+  color: #142543;
+}
+
+html[data-theme='partition-plus'] .bg-white {
+  background-color: #FFFFFF !important;
+  color: #142543;
+}
+
+html[data-theme='partition-plus'] .bg-slate-900,
+html[data-theme='partition-plus'] .from-slate-900 {
+  background-color: #142543 !important;
+  color: #F1F4FD !important;
+}
+
+html[data-theme='partition-plus'] .bg-slate-900 *,
+html[data-theme='partition-plus'] header.bg-slate-900 * {
+  --tw-text-opacity: 1;
+}
+
+html[data-theme='partition-plus'] .text-slate-900,
+html[data-theme='partition-plus'] .text-slate-800 {
+  color: #142543 !important;
+}
+
+html[data-theme='partition-plus'] .bg-slate-900 .text-white,
+html[data-theme='partition-plus'] .bg-slate-900.text-white,
+html[data-theme='partition-plus'] .bg-gradient-to-r.text-white {
+  color: #FFFFFF !important;
+}
+
+html[data-theme='partition-plus'] .border-slate-200,
+html[data-theme='partition-plus'] .border-slate-300 {
+  border-color: #d6dff5 !important;
+}
+
+html[data-theme='partition-plus'] .bg-blue-600 {
+  background-color: #2563EB !important;
+}
+
+html[data-theme='partition-plus'] .text-blue-700,
+html[data-theme='partition-plus'] .text-blue-600 {
+  color: #2563EB !important;
+}
+
+html[data-theme='partition-plus'] .text-amber-700,
+html[data-theme='partition-plus'] .text-rose-700,
+html[data-theme='partition-plus'] .text-rose-600 {
+  color: #B70020 !important;
+}
+
+html[data-theme='partition-plus'] .bg-rose-600,
+html[data-theme='partition-plus'] .bg-amber-600 {
+  background-color: #B70020 !important;
+}
+
+html[data-theme='partition-plus'] .hover\:bg-slate-50:hover,
+html[data-theme='partition-plus'] .hover\:bg-slate-100:hover {
+  background-color: #e8eeff !important;
+}
