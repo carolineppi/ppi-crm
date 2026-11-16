@@ -12,7 +12,9 @@ import {
   MinusCircle,
   Pencil,
   X,
+  Printer,
 } from 'lucide-react';
+import ChangeOrderPrintModal from '@/components/ChangeOrderPrintModal';
 
 export default function JobChangeOrdersPage() {
   const params = useParams<{ id: string }>();
@@ -30,6 +32,7 @@ export default function JobChangeOrdersPage() {
   const [reason, setReason] = useState('');
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [editingCoId, setEditingCoId] = useState<string | null>(null);
+  const [printingCo, setPrintingCo] = useState<any | null>(null);
 
   const loadData = async () => {
     if (!jobId) return;
@@ -362,6 +365,14 @@ export default function JobChangeOrdersPage() {
                 </select>
                 <button
                   type="button"
+                  onClick={() => setPrintingCo(co)}
+                  className="p-1.5 text-slate-500 hover:text-slate-900"
+                  title="Print / Save PDF"
+                >
+                  <Printer className="w-4 h-4" />
+                </button>
+                <button
+                  type="button"
                   onClick={() => startEditingCo(co)}
                   className="p-1.5 text-slate-500 hover:text-purple-700"
                   title="Edit CO"
@@ -381,6 +392,13 @@ export default function JobChangeOrdersPage() {
           ))
         )}
       </div>
+
+      <ChangeOrderPrintModal
+        isOpen={Boolean(printingCo)}
+        onClose={() => setPrintingCo(null)}
+        job={job}
+        co={printingCo}
+      />
     </div>
   );
 }

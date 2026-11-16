@@ -12,9 +12,11 @@ import {
   Truck,
   Pencil,
   X,
+  Printer,
 } from 'lucide-react';
 import { getJobLineItemsOrderStatus } from '@/lib/jobs/lineItemOrderStatus';
 import { getSubmittalSummary } from '@/lib/jobs/submittals';
+import PurchaseOrderPrintModal from '@/components/PurchaseOrderPrintModal';
 
 interface POItem {
   sourceLineItemId?: string | null;
@@ -49,6 +51,7 @@ export default function JobPurchaseOrdersPage() {
   const [items, setItems] = useState<POItem[]>([]);
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [editingPoId, setEditingPoId] = useState<string | null>(null);
+  const [printingPo, setPrintingPo] = useState<any | null>(null);
 
   const loadData = async () => {
     if (!jobId) return;
@@ -688,6 +691,14 @@ export default function JobPurchaseOrdersPage() {
                     </select>
                     <button
                       type="button"
+                      onClick={() => setPrintingPo(po)}
+                      className="p-1.5 text-slate-500 hover:text-slate-900"
+                      title="Print / Save PDF"
+                    >
+                      <Printer className="w-4 h-4" />
+                    </button>
+                    <button
+                      type="button"
                       onClick={() => startEditingPo(po)}
                       className="p-1.5 text-slate-500 hover:text-blue-700"
                       title="Edit PO"
@@ -742,6 +753,18 @@ export default function JobPurchaseOrdersPage() {
           })
         )}
       </div>
+
+      <PurchaseOrderPrintModal
+        isOpen={Boolean(printingPo)}
+        onClose={() => setPrintingPo(null)}
+        job={job}
+        po={printingPo}
+        supplier={suppliersList.find(
+          (s) =>
+            (printingPo?.supplier_id && s.id === printingPo.supplier_id) ||
+            (printingPo?.vendor && s.name.toLowerCase() === String(printingPo.vendor).toLowerCase())
+        )}
+      />
     </div>
   );
 }
