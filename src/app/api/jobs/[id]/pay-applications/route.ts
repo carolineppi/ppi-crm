@@ -62,13 +62,7 @@ export async function POST(
       existingApps.find((a: any) => a.status === 'submitted' || a.status === 'paid') ||
       existingApps[0] ||
       null;
-
-    const prevLineBySovId = new Map<string, any>();
-    if (lastBilledApp && Array.isArray(lastBilledApp.g703_lines)) {
-      for (const l of lastBilledApp.g703_lines) {
-        if (l.sovItemId) prevLineBySovId.set(l.sovItemId, l);
-      }
-    }
+    const prevTemplateApp = existingApps[0] || null;
 
     const isRetainageRelease = Boolean(body?.isRetainageRelease);
     const completedRetPct =
@@ -84,39 +78,86 @@ export async function POST(
       ? round2(Number(lastBilledApp.total_earned_less_retainage) || 0)
       : 0;
 
-    const baseSov =
-      sovItems && sovItems.length > 0
-        ? sovItems
-        : [
-            {
-              id: `contract-${id}`,
-              item_number: '01',
-              description: job.scope_of_work || job.project_name || 'Contract Scope',
-              scheduled_value: Number(job.quote_amount) || 0,
-              source: 'contract',
-            },
-          ];
+    let initialLines: G703Line[];
 
-    const initialLines: G703Line[] = baseSov.map((s: any) => {
-      const prev = prevLineBySovId.get(s.id);
-      const prevCompleted = prev
-        ? round2((Number(prev.previousCompleted) || 0) + (Number(prev.thisPeriod) || 0))
+    if (prevTemplateApp && Array.isArray(prevTemplateApp.g703_lines)) {
+      // Carry over the accountant's customized line items, descriptions, and scheduled values
+      const prevLines = prevTemplateApp.g703_lines as any[];
+      const existingSovIds = new Set(prevLines.map((l) => l?.sovItemId).filter(Boolean));
+
+      initialLines = prevLines.map((l: any) => {
+        const prevCompleted = round2(
+          (Number(l.previousCompleted) || 0) + (Number(l.thisPeriod) || 0)
+        );
+        const prevStored = round2(Number(l.storedMaterials) || 0);
+        return {
+          sovItemId: l.sovItemId || `custom-${Date.now()}-${Math.random().toString(36).slice(2, 6)}`,
+          itemNumber: String(l.itemNumber ?? '01'),
+          description: String(l.description ?? 'Scope Item'),
+          source: l.source === 'change_order' ? 'change_order' : 'contract',
+          scheduledValue: round2(Number(l.scheduledValue) || 0),
+          previousCompleted: prevCompleted,
+          thisPeriod: 0,
+          storedMaterials: isRetainageRelease ? prevStored : 0,
+          totalCompletedAndStored: round2(prevCompleted + (isRetainageRelease ? prevStored : 0)),
+          percentComplete: 0,
+          balanceToFinish: 0,
+        };
+      });
+
+      // Also append any newly-approved change order SOV items created after the previous application
+      const prevCreatedAt = prevTemplateApp.created_at
+        ? new Date(prevTemplateApp.created_at).getTime()
         : 0;
-      const prevStored = prev ? round2(Number(prev.storedMaterials) || 0) : 0;
-      return {
+      for (const s of sovItems || []) {
+        if (
+          s.source === 'change_order' &&
+          !existingSovIds.has(s.id) &&
+          (!prevCreatedAt || (s.created_at && new Date(s.created_at).getTime() > prevCreatedAt))
+        ) {
+          initialLines.push({
+            sovItemId: s.id,
+            itemNumber: s.item_number || 'CO',
+            description: s.description || 'Change Order',
+            source: 'change_order',
+            scheduledValue: round2(Number(s.scheduled_value) || 0),
+            previousCompleted: 0,
+            thisPeriod: 0,
+            storedMaterials: 0,
+            totalCompletedAndStored: 0,
+            percentComplete: 0,
+            balanceToFinish: round2(Number(s.scheduled_value) || 0),
+          });
+        }
+      }
+    } else {
+      const baseSov =
+        sovItems && sovItems.length > 0
+          ? sovItems
+          : [
+              {
+                id: `contract-${id}`,
+                item_number: '01',
+                description: job.scope_of_work || job.project_name || 'Contract Scope',
+                scheduled_value: Number(job.quote_amount) || 0,
+                source: 'contract',
+              },
+            ];
+
+      initialLines = baseSov.map((s: any) => ({
         sovItemId: s.id,
         itemNumber: s.item_number || '01',
         description: s.description || 'Scope Item',
         source: s.source === 'change_order' ? 'change_order' : 'contract',
         scheduledValue: round2(Number(s.scheduled_value) || 0),
-        previousCompleted: prevCompleted,
+        previousCompleted: 0,
         thisPeriod: 0,
-        storedMaterials: isRetainageRelease ? prevStored : 0,
-        totalCompletedAndStored: round2(prevCompleted + (isRetainageRelease ? prevStored : 0)),
+        storedMaterials: 0,
+        totalCompletedAndStored: 0,
         percentComplete: 0,
         balanceToFinish: 0,
-      };
-    });
+      }));
+    }
 
     const summary = calculateG702AndG703({
       lines: initialLines,

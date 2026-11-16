@@ -55,6 +55,11 @@ export default function AccountingPage() {
   // Add SOV row inline
   const [newSovDesc, setNewSovDesc] = useState('');
   const [newSovVal, setNewSovVal] = useState('');
+  // Add Pay App G703 line item inline
+  const [newPayLineNum, setNewPayLineNum] = useState('');
+  const [newPayLineDesc, setNewPayLineDesc] = useState('');
+  const [newPayLineScheduled, setNewPayLineScheduled] = useState('');
+  const [newPayLineSource, setNewPayLineSource] = useState<'contract' | 'change_order'>('contract');
   const [isBusy, setIsBusy] = useState(false);
   const [statusMsg, setStatusMsg] = useState<string | null>(null);
   const [showPrintModal, setShowPrintModal] = useState(false);
@@ -269,12 +274,83 @@ export default function AccountingPage() {
     URL.revokeObjectURL(url);
   };
 
-  const updateG703LineField = (idx: number, field: 'thisPeriod' | 'storedMaterials', val: number) => {
+  const updateG703LineField = (
+    idx: number,
+    field: 'scheduledValue' | 'thisPeriod' | 'storedMaterials',
+    val: number
+  ) => {
     setG703Lines((prev) => {
       const next = [...prev];
       next[idx] = { ...next[idx], [field]: round2(val) };
       return next;
     });
+  };
+
+  const updateG703LineText = (
+    idx: number,
+    field: 'itemNumber' | 'description',
+    val: string
+  ) => {
+    setG703Lines((prev) => {
+      const next = [...prev];
+      next[idx] = { ...next[idx], [field]: val };
+      return next;
+    });
+  };
+
+  const removeG703Line = (idx: number) => {
+    setG703Lines((prev) => prev.filter((_, i) => i !== idx));
+  };
+
+  const clearAllG703Lines = () => {
+    setG703Lines([]);
+  };
+
+  const addCustomG703Line = () => {
+    const desc = newPayLineDesc.trim();
+    if (!desc) return;
+    const itemNum =
+      newPayLineNum.trim() || String(g703Lines.length + 1).padStart(2, '0');
+    const scheduled = round2(Number(newPayLineScheduled) || 0);
+    setG703Lines((prev) => [
+      ...prev,
+      {
+        sovItemId: `custom-${Date.now()}-${Math.random().toString(36).slice(2, 6)}`,
+        itemNumber: itemNum,
+        description: desc,
+        source: newPayLineSource,
+        scheduledValue: scheduled,
+        previousCompleted: 0,
+        thisPeriod: 0,
+        storedMaterials: 0,
+        totalCompletedAndStored: 0,
+        percentComplete: 0,
+        balanceToFinish: scheduled,
+      },
+    ]);
+    setNewPayLineNum('');
+    setNewPayLineDesc('');
+    setNewPayLineScheduled('');
+    setNewPayLineSource('contract');
+  };
+
+  const pullG703FromOriginalSov = () => {
+    if (!sovItems || sovItems.length === 0) return;
+    setG703Lines(
+      sovItems.map((s: any) => ({
+        sovItemId: s.id,
+        itemNumber: s.item_number || '01',
+        description: s.description || 'Scope Item',
+        source: s.source === 'change_order' ? 'change_order' : 'contract',
+        scheduledValue: round2(Number(s.scheduled_value) || 0),
+        previousCompleted: 0,
+        thisPeriod: 0,
+        storedMaterials: 0,
+        totalCompletedAndStored: 0,
+        percentComplete: 0,
+        balanceToFinish: round2(Number(s.scheduled_value) || 0),
+      }))
+    );
   };
 
   const setG703LinePercent = (idx: number, targetPct: number) => {
@@ -715,6 +791,30 @@ export default function AccountingPage() {
                         </div>
                       </div>
 
+                      {/* G703 Customization Toolbar */}
+                      <div className="flex flex-wrap items-center justify-between gap-2 text-[11px]">
+                        <span className="text-slate-500">
+                          Customize items &amp; scheduled amounts for this pay app &amp; future apps (original SOV &amp; POs stay unchanged).
+                        </span>
+                        <div className="flex flex-wrap items-center gap-1.5">
+                          <button
+                            type="button"
+                            onClick={pullG703FromOriginalSov}
+                            className="px-2.5 py-1 rounded-lg bg-slate-100 hover:bg-slate-200 text-slate-700 font-bold"
+                          >
+                            Pull Original SOV
+                          </button>
+                          <button
+                            type="button"
+                            onClick={clearAllG703Lines}
+                            disabled={g703Lines.length === 0}
+                            className="px-2.5 py-1 rounded-lg bg-rose-50 hover:bg-rose-100 text-rose-700 border border-rose-200 font-bold disabled:opacity-40"
+                          >
+                            Remove All Items
+                          </button>
+                        </div>
+                      </div>
+
                       {/* G703 Editable Table */}
                       <div className="overflow-x-auto rounded-xl border border-slate-200 bg-white">
                         <table className="w-full text-left border-collapse text-[11px]">
@@ -722,63 +822,161 @@ export default function AccountingPage() {
                             <tr>
                               <th className="p-2">Item</th>
                               <th className="p-2">Description</th>
-                              <th className="p-2 text-right">Scheduled</th>
+                              <th className="p-2 text-right">Scheduled ($)</th>
                               <th className="p-2 text-right">Prev. App</th>
                               <th className="p-2 text-right">This Period ($)</th>
                               <th className="p-2 text-right">Stored Matl ($)</th>
                               <th className="p-2 text-right">% Done</th>
+                              <th className="p-2 text-center">Del</th>
                             </tr>
                           </thead>
                           <tbody className="divide-y divide-slate-100">
-                            {liveSummary.lines.map((l, idx) => (
-                              <tr key={l.sovItemId || idx}>
-                                <td className="p-2 font-mono">{l.itemNumber}</td>
-                                <td className="p-2">{l.description}</td>
-                                <td className="p-2 text-right font-mono">{fmt(l.scheduledValue)}</td>
-                                <td className="p-2 text-right font-mono">{fmt(l.previousCompleted)}</td>
-                                <td className="p-2 text-right">
-                                  <input
-                                    type="number"
-                                    step="0.01"
-                                    value={g703Lines[idx]?.thisPeriod ?? 0}
-                                    onChange={(e) =>
-                                      updateG703LineField(idx, 'thisPeriod', Number(e.target.value))
-                                    }
-                                    className="w-24 px-1.5 py-1 rounded border border-slate-300 text-right font-mono"
-                                  />
-                                </td>
-                                <td className="p-2 text-right">
-                                  <input
-                                    type="number"
-                                    step="0.01"
-                                    value={g703Lines[idx]?.storedMaterials ?? 0}
-                                    onChange={(e) =>
-                                      updateG703LineField(
-                                        idx,
-                                        'storedMaterials',
-                                        Number(e.target.value)
-                                      )
-                                    }
-                                    className="w-24 px-1.5 py-1 rounded border border-slate-300 text-right font-mono"
-                                  />
-                                </td>
-                                <td className="p-2 text-right">
-                                  <input
-                                    type="number"
-                                    step="1"
-                                    min={0}
-                                    max={100}
-                                    value={Math.round(l.percentComplete)}
-                                    onChange={(e) =>
-                                      setG703LinePercent(idx, Number(e.target.value) || 0)
-                                    }
-                                    className="w-16 px-1.5 py-1 rounded border border-slate-300 text-right font-mono"
-                                  />
+                            {liveSummary.lines.length === 0 ? (
+                              <tr>
+                                <td colSpan={8} className="p-4 text-center text-slate-400">
+                                  No items in this pay application. Add custom line items below or click Pull Original SOV.
                                 </td>
                               </tr>
-                            ))}
+                            ) : (
+                              liveSummary.lines.map((l, idx) => (
+                                <tr key={l.sovItemId || idx}>
+                                  <td className="p-2">
+                                    <input
+                                      type="text"
+                                      value={g703Lines[idx]?.itemNumber ?? ''}
+                                      onChange={(e) =>
+                                        updateG703LineText(idx, 'itemNumber', e.target.value)
+                                      }
+                                      className="w-16 px-1.5 py-1 rounded border border-slate-300 font-mono"
+                                    />
+                                  </td>
+                                  <td className="p-2">
+                                    <input
+                                      type="text"
+                                      value={g703Lines[idx]?.description ?? ''}
+                                      onChange={(e) =>
+                                        updateG703LineText(idx, 'description', e.target.value)
+                                      }
+                                      className="w-full min-w-[180px] px-1.5 py-1 rounded border border-slate-300"
+                                    />
+                                  </td>
+                                  <td className="p-2 text-right">
+                                    <input
+                                      type="number"
+                                      step="0.01"
+                                      value={g703Lines[idx]?.scheduledValue ?? 0}
+                                      onChange={(e) =>
+                                        updateG703LineField(
+                                          idx,
+                                          'scheduledValue',
+                                          Number(e.target.value)
+                                        )
+                                      }
+                                      className="w-24 px-1.5 py-1 rounded border border-slate-300 text-right font-mono font-semibold"
+                                    />
+                                  </td>
+                                  <td className="p-2 text-right font-mono">{fmt(l.previousCompleted)}</td>
+                                  <td className="p-2 text-right">
+                                    <input
+                                      type="number"
+                                      step="0.01"
+                                      value={g703Lines[idx]?.thisPeriod ?? 0}
+                                      onChange={(e) =>
+                                        updateG703LineField(idx, 'thisPeriod', Number(e.target.value))
+                                      }
+                                      className="w-24 px-1.5 py-1 rounded border border-slate-300 text-right font-mono"
+                                    />
+                                  </td>
+                                  <td className="p-2 text-right">
+                                    <input
+                                      type="number"
+                                      step="0.01"
+                                      value={g703Lines[idx]?.storedMaterials ?? 0}
+                                      onChange={(e) =>
+                                        updateG703LineField(
+                                          idx,
+                                          'storedMaterials',
+                                          Number(e.target.value)
+                                        )
+                                      }
+                                      className="w-24 px-1.5 py-1 rounded border border-slate-300 text-right font-mono"
+                                    />
+                                  </td>
+                                  <td className="p-2 text-right">
+                                    <input
+                                      type="number"
+                                      step="1"
+                                      min={0}
+                                      max={100}
+                                      value={Math.round(l.percentComplete)}
+                                      onChange={(e) =>
+                                        setG703LinePercent(idx, Number(e.target.value) || 0)
+                                      }
+                                      className="w-16 px-1.5 py-1 rounded border border-slate-300 text-right font-mono"
+                                    />
+                                  </td>
+                                  <td className="p-2 text-center">
+                                    <button
+                                      type="button"
+                                      onClick={() => removeG703Line(idx)}
+                                      className="p-1 text-slate-400 hover:text-rose-600"
+                                      title="Remove item from pay app"
+                                    >
+                                      <Trash2 className="w-3.5 h-3.5" />
+                                    </button>
+                                  </td>
+                                </tr>
+                              ))
+                            )}
                           </tbody>
                         </table>
+
+                        {/* Add Custom Pay App Line Item */}
+                        <div className="p-2.5 bg-slate-50 border-t border-slate-200 flex flex-wrap items-center gap-2 text-[11px]">
+                          <input
+                            type="text"
+                            placeholder="Item # / Name"
+                            value={newPayLineNum}
+                            onChange={(e) => setNewPayLineNum(e.target.value)}
+                            className="w-24 px-2 py-1 rounded border border-slate-300 bg-white font-mono"
+                          />
+                          <input
+                            type="text"
+                            placeholder="Custom line description (e.g. Toilet Partitions — Labor Breakout)..."
+                            value={newPayLineDesc}
+                            onChange={(e) => setNewPayLineDesc(e.target.value)}
+                            className="flex-1 min-w-[200px] px-2 py-1 rounded border border-slate-300 bg-white"
+                          />
+                          <input
+                            type="number"
+                            step="0.01"
+                            placeholder="Scheduled ($)"
+                            value={newPayLineScheduled}
+                            onChange={(e) => setNewPayLineScheduled(e.target.value)}
+                            className="w-28 px-2 py-1 rounded border border-slate-300 bg-white font-mono"
+                          />
+                          <select
+                            value={newPayLineSource}
+                            onChange={(e) =>
+                              setNewPayLineSource(
+                                e.target.value === 'change_order' ? 'change_order' : 'contract'
+                              )
+                            }
+                            className="px-2 py-1 rounded border border-slate-300 bg-white font-semibold"
+                          >
+                            <option value="contract">Contract</option>
+                            <option value="change_order">Change Order</option>
+                          </select>
+                          <button
+                            type="button"
+                            onClick={addCustomG703Line}
+                            disabled={!newPayLineDesc.trim()}
+                            className="px-3 py-1 rounded-lg bg-slate-900 hover:bg-slate-800 text-white font-bold inline-flex items-center gap-1 disabled:opacity-40"
+                          >
+                            <Plus className="w-3.5 h-3.5" />
+                            <span>Add Line</span>
+                          </button>
+                        </div>
                       </div>
 
                       {/* G702 Summary Strip */}
