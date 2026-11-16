@@ -229,6 +229,7 @@ export function getAllowedNavLinks(profile: UserProfile | null) {
     { href: '/suppliers', label: 'Suppliers', key: 'suppliers' },
     { href: '/pricing', label: 'Price Book', key: 'pricing' },
     { href: '/admin/users', label: 'Admin Users', key: 'admin' },
+    { href: '/admin/feedback', label: 'Bug Reports', key: 'admin_feedback' },
     { href: '/settings', label: 'User Settings', key: 'settings' },
   ];
   return allLinks.filter((l) => canAccessPath(profile, l.href));

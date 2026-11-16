@@ -3,10 +3,12 @@
 import React, { useEffect, useState } from 'react';
 import Link from 'next/link';
 import { usePathname, useRouter } from 'next/navigation';
-import { LogOut, LayoutDashboard, Shield, Eye } from 'lucide-react';
+import { LogOut, LayoutDashboard, Shield, Eye, Flag } from 'lucide-react';
 import { createBrowserSupabaseClient } from '@/lib/supabase/client';
 import { ROLE_DEFINITIONS, UserRole } from '@/lib/auth/roles';
 import { applyTheme } from '@/lib/theme/themes';
+import { initDiagnosticsCapture } from '@/lib/feedback/diagnostics';
+import FlagIssueModal from '@/components/FlagIssueModal';
 
 interface NavLinkItem {
   href: string;
@@ -24,6 +26,17 @@ export default function AppNavBar() {
   const [isViewingAs, setIsViewingAs] = useState(false);
   const [navLinks, setNavLinks] = useState<NavLinkItem[]>([]);
   const [previewName, setPreviewName] = useState('');
+  const [showFlagModal, setShowFlagModal] = useState(false);
+  const [openFlagCount, setOpenFlagCount] = useState(0);
+
+  const loadOpenFlagsCount = () => {
+    fetch('/api/feedback?status=open')
+      .then((r) => (r.ok ? r.json() : null))
+      .then((d) => {
+        if (typeof d?.openCount === 'number') setOpenFlagCount(d.openCount);
+      })
+      .catch(() => {});
+  };
 
   const loadMe = () => {
     fetch('/api/me')
@@ -40,10 +53,17 @@ export default function AppNavBar() {
           if (d.profile?.dashboard_config?.theme) {
             applyTheme(d.profile.dashboard_config.theme);
           }
+          if (d.isRealAdmin && !d.isViewingAs) {
+            loadOpenFlagsCount();
+          }
         }
       })
       .catch(() => {});
   };
+
+  useEffect(() => {
+    initDiagnosticsCapture();
+  }, []);
 
   useEffect(() => {
     if (pathname === '/login') return;
@@ -110,13 +130,18 @@ export default function AppNavBar() {
                 <Link
                   key={item.key}
                   href={item.href}
-                  className={`px-2.5 py-1 rounded-lg font-semibold transition ${
+                  className={`px-2.5 py-1 rounded-lg font-semibold transition inline-flex items-center gap-1 ${
                     active
                       ? 'bg-slate-800 text-white'
                       : 'text-slate-400 hover:text-white hover:bg-slate-900'
                   }`}
                 >
-                  {item.label}
+                  <span>{item.label}</span>
+                  {item.key === 'admin_feedback' && openFlagCount > 0 && (
+                    <span className="px-1.5 py-0.2 rounded-full bg-amber-500 text-slate-950 text-[10px] font-black">
+                      {openFlagCount}
+                    </span>
+                  )}
                 </Link>
               );
             })}
@@ -170,6 +195,15 @@ export default function AppNavBar() {
             </span>
             <button
               type="button"
+              onClick={() => setShowFlagModal(true)}
+              title="Flag a bug or suggest an improvement"
+              className="px-2.5 py-1 rounded-lg bg-amber-500/20 hover:bg-amber-500/30 text-amber-300 border border-amber-500/40 font-bold flex items-center gap-1 cursor-pointer"
+            >
+              <Flag className="w-3 h-3" />
+              <span>Flag Issue</span>
+            </button>
+            <button
+              type="button"
               onClick={handleSignOut}
               className="px-2.5 py-1 rounded-lg bg-slate-800 hover:bg-rose-900/60 text-slate-300 hover:text-white font-semibold flex items-center gap-1 cursor-pointer"
             >
@@ -179,6 +213,13 @@ export default function AppNavBar() {
           </div>
         </div>
       </nav>
+      <FlagIssueModal
+        isOpen={showFlagModal}
+        onClose={() => setShowFlagModal(false)}
+        onSubmitted={() => {
+          if (isRealAdmin) loadOpenFlagsCount();
+        }}
+      />
     </div>
   );
 }
