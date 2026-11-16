@@ -23,6 +23,7 @@ import {
   ChevronUp,
 } from 'lucide-react';
 import type { LineItemOrderStatus } from '@/lib/jobs/lineItemOrderStatus';
+import { getSubmittalSummary, JobSubmittal } from '@/lib/jobs/submittals';
 
 const DEFAULT_PMS = [
   'Lisa Williams',
@@ -57,6 +58,7 @@ interface PMJob {
   line_items: any[] | null;
   po_summary?: { total: number; open: number; totalCost: number };
   co_summary?: { total: number; pending: number; netApproved: number };
+  submittals?: JobSubmittal[] | null;
   line_item_order_status?: {
     byIndex: LineItemOrderStatus[];
     totalItems: number;
@@ -409,6 +411,26 @@ export default function ProjectManagerDashboardPage() {
                             </span>
                           </span>
                         )}
+                        {(() => {
+                          const sub = getSubmittalSummary(job.submittals);
+                          if (sub.total === 0) return null;
+                          return (
+                            <Link
+                              href={`/jobs/${job.id}#submittals`}
+                              className={`text-[11px] font-bold px-2 py-0.5 rounded-full border inline-flex items-center gap-1 ${
+                                sub.allApproved
+                                  ? 'bg-emerald-50 text-emerald-700 border-emerald-200'
+                                  : sub.needsRevision > 0
+                                  ? 'bg-rose-50 text-rose-700 border-rose-200'
+                                  : 'bg-indigo-50 text-indigo-700 border-indigo-200'
+                              }`}
+                            >
+                              <span>
+                                Submittals: {sub.approved}/{sub.total}
+                              </span>
+                            </Link>
+                          );
+                        })()}
                       </div>
                       <h2 className="text-base font-black text-slate-900 mt-1">{job.project_name}</h2>
                     </div>

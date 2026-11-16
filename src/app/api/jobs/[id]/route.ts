@@ -101,6 +101,7 @@ export async function PATCH(
       installRequestStatus: 'install_request_status',
       contacts: 'contacts',
       pmNotesLog: 'pm_notes_log',
+      submittals: 'submittals',
     };
 
     const updates: Record<string, any> = {

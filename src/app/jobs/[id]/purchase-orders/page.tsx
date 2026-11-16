@@ -14,6 +14,7 @@ import {
   X,
 } from 'lucide-react';
 import { getJobLineItemsOrderStatus } from '@/lib/jobs/lineItemOrderStatus';
+import { getSubmittalSummary } from '@/lib/jobs/submittals';
 
 interface POItem {
   sourceLineItemId?: string | null;
@@ -304,6 +305,31 @@ export default function JobPurchaseOrdersPage() {
           Go to Change Orders →
         </Link>
       </div>
+
+      {/* Submittal Gate Notice */}
+      {(() => {
+        const subSummary = getSubmittalSummary(job?.submittals);
+        if (subSummary.unapprovedList.length === 0) return null;
+        return (
+          <div className="bg-amber-50 border border-amber-300 text-amber-900 rounded-2xl px-4 py-3 text-xs flex flex-wrap items-center justify-between gap-2">
+            <div>
+              <strong>Submittal Approval Notice:</strong> {subSummary.unapprovedList.length}{' '}
+              submittal{subSummary.unapprovedList.length === 1 ? ' is' : 's are'} not yet approved (
+              {subSummary.unapprovedList
+                .slice(0, 2)
+                .map((s) => `${s.submittalNumber}: ${s.title}`)
+                .join(', ')}
+              ). Verify approval before releasing custom material POs.
+            </div>
+            <Link
+              href={`/jobs/${jobId}#submittals`}
+              className="px-3 py-1 rounded-lg bg-amber-600 hover:bg-amber-700 text-white font-bold shrink-0"
+            >
+              View Submittals →
+            </Link>
+          </div>
+        );
+      })()}
 
       {/* Create PO Form */}
       <form onSubmit={handleCreatePO} className="bg-white rounded-2xl border border-slate-200 p-5 shadow-sm space-y-4 text-xs">

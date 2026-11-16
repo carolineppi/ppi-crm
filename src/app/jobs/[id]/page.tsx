@@ -25,12 +25,20 @@ import {
   AlertTriangle,
   Sun,
   Moon,
+  FileCheck2,
+  Pencil,
 } from 'lucide-react';
 import InstallCalendarMicroView, {
   CalendarDaySummary,
 } from '@/components/InstallCalendarMicroView';
 import { getWarehouseStatusMeta } from '@/lib/warehouse/helpers';
 import { getJobLineItemsOrderStatus } from '@/lib/jobs/lineItemOrderStatus';
+import {
+  JobSubmittal,
+  SubmittalStatus,
+  SUBMITTAL_STATUS_META,
+  getSubmittalSummary,
+} from '@/lib/jobs/submittals';
 
 export default function JobViewerPage() {
   const params = useParams<{ id: string }>();
@@ -150,6 +158,8 @@ export default function JobViewerPage() {
     }
   };
 
+  const [suppliersList, setSuppliersList] = useState<Array<{ id: string; name: string }>>([]);
+
   useEffect(() => {
     fetch('/api/employees')
       .then((r) => r.json())
@@ -157,7 +167,128 @@ export default function JobViewerPage() {
         if (Array.isArray(d.pms)) setPmsList(d.pms);
       })
       .catch(() => {});
+    fetch('/api/suppliers')
+      .then((r) => r.json())
+      .then((d) => {
+        if (Array.isArray(d.suppliers)) setSuppliersList(d.suppliers);
+      })
+      .catch(() => {});
   }, []);
+
+  const [newSubmittalTitle, setNewSubmittalTitle] = useState('');
+  const [newSubmittalMfg, setNewSubmittalMfg] = useState('');
+  const [newSubmittalSpec, setNewSubmittalSpec] = useState('');
+  const [newSubmittalDueDate, setNewSubmittalDueDate] = useState('');
+  const [newSubmittalReviewer, setNewSubmittalReviewer] = useState('');
+  const [newSubmittalNotes, setNewSubmittalNotes] = useState('');
+  const [editingSubmittalId, setEditingSubmittalId] = useState<string | null>(null);
+  const [isSavingSubmittals, setIsSavingSubmittals] = useState(false);
+
+  const saveSubmittals = async (updated: JobSubmittal[]) => {
+    setIsSavingSubmittals(true);
+    try {
+      const res = await fetch(`/api/jobs/${jobId}`, {
+        method: 'PATCH',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ submittals: updated }),
+      });
+      const data = await res.json();
+      if (res.ok && data.job) {
+        setJob(data.job);
+      }
+    } finally {
+      setIsSavingSubmittals(false);
+    }
+  };
+
+  const handleSaveSubmittalForm = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!newSubmittalTitle.trim()) return;
+    const current: JobSubmittal[] = Array.isArray(job?.submittals) ? [...job.submittals] : [];
+    const nowIso = new Date().toISOString();
+
+    if (editingSubmittalId) {
+      const next = current.map((s) =>
+        s.id === editingSubmittalId
+          ? {
+              ...s,
+              title: newSubmittalTitle.trim(),
+              manufacturer: newSubmittalMfg.trim() || null,
+              specSection: newSubmittalSpec.trim() || null,
+              dueDate: newSubmittalDueDate || null,
+              reviewer: newSubmittalReviewer.trim() || null,
+              notes: newSubmittalNotes.trim() || null,
+              updatedAt: nowIso,
+            }
+          : s
+      );
+      setEditingSubmittalId(null);
+      setNewSubmittalTitle('');
+      setNewSubmittalMfg('');
+      setNewSubmittalSpec('');
+      setNewSubmittalDueDate('');
+      setNewSubmittalReviewer('');
+      setNewSubmittalNotes('');
+      await saveSubmittals(next);
+      return;
+    }
+
+    const nextNum = `SUB-${String(current.length + 1).padStart(2, '0')}`;
+    const created: JobSubmittal = {
+      id: `sub-${Date.now()}`,
+      submittalNumber: nextNum,
+      title: newSubmittalTitle.trim(),
+      manufacturer: newSubmittalMfg.trim() || null,
+      specSection: newSubmittalSpec.trim() || null,
+      status: 'pending',
+      revision: 0,
+      submittedDate: null,
+      dueDate: newSubmittalDueDate || null,
+      approvedDate: null,
+      submittedBy: job?.project_manager || 'PM',
+      reviewer: newSubmittalReviewer.trim() || null,
+      notes: newSubmittalNotes.trim() || null,
+      updatedAt: nowIso,
+    };
+    setNewSubmittalTitle('');
+    setNewSubmittalMfg('');
+    setNewSubmittalSpec('');
+    setNewSubmittalDueDate('');
+    setNewSubmittalReviewer('');
+    setNewSubmittalNotes('');
+    await saveSubmittals([...current, created]);
+  };
+
+  const handleSubmittalStatusChange = async (subId: string, newStatus: SubmittalStatus) => {
+    const current: JobSubmittal[] = Array.isArray(job?.submittals) ? [...job.submittals] : [];
+    const todayYmd = new Date().toISOString().slice(0, 10);
+    const nowIso = new Date().toISOString();
+    const next = current.map((s) => {
+      if (s.id !== subId) return s;
+      const bumpedRev =
+        s.status === 'revise_resubmit' && newStatus === 'submitted'
+          ? (Number(s.revision) || 0) + 1
+          : Number(s.revision) || 0;
+      return {
+        ...s,
+        status: newStatus,
+        revision: bumpedRev,
+        submittedDate:
+          newStatus === 'submitted' && !s.submittedDate ? todayYmd : s.submittedDate,
+        approvedDate:
+          newStatus === 'approved' || newStatus === 'approved_as_noted'
+            ? s.approvedDate || todayYmd
+            : null,
+        updatedAt: nowIso,
+      };
+    });
+    await saveSubmittals(next);
+  };
+
+  const handleDeleteSubmittal = async (subId: string) => {
+    const current: JobSubmittal[] = Array.isArray(job?.submittals) ? [...job.submittals] : [];
+    await saveSubmittals(current.filter((s) => s.id !== subId));
+  };
 
   const saveContacts = async (updatedContacts: JobContact[]) => {
     setIsSavingContacts(true);
@@ -1121,6 +1252,222 @@ export default function JobViewerPage() {
             const addonItems = indexedItems.filter(({ li }: any) => Boolean(li?.isAddon));
             return (
           <>
+          {/* Submittals & Shop Drawings Tracker */}
+          {(() => {
+            const submittalsList: JobSubmittal[] = Array.isArray(job?.submittals)
+              ? job.submittals
+              : [];
+            const subSummary = getSubmittalSummary(submittalsList);
+            return (
+              <div id="submittals" className="bg-white rounded-2xl border border-slate-200 shadow-sm overflow-hidden">
+                <div className="p-4 border-b border-slate-200 flex flex-wrap items-center justify-between gap-3">
+                  <div>
+                    <div className="flex items-center gap-2 flex-wrap">
+                      <h2 className="text-sm font-black text-slate-900 flex items-center gap-1.5">
+                        <FileCheck2 className="w-4 h-4 text-indigo-600" />
+                        <span>Submittals &amp; Shop Drawings ({subSummary.total})</span>
+                      </h2>
+                      {subSummary.total > 0 && (
+                        <span
+                          className={`text-[10px] font-bold px-2 py-0.5 rounded-full border ${
+                            subSummary.allApproved
+                              ? 'bg-emerald-50 text-emerald-700 border-emerald-200'
+                              : subSummary.needsRevision > 0
+                              ? 'bg-rose-50 text-rose-700 border-rose-200'
+                              : 'bg-blue-50 text-blue-700 border-blue-200'
+                          }`}
+                        >
+                          {subSummary.approved} / {subSummary.total} Approved
+                        </span>
+                      )}
+                    </div>
+                    <p className="text-[11px] text-slate-500">
+                      Track shop drawings, color samples, and GC/Architect approvals before releasing custom material POs.
+                    </p>
+                  </div>
+                  {isSavingSubmittals && (
+                    <span className="text-[11px] font-semibold text-blue-600">Saving...</span>
+                  )}
+                </div>
+
+                {submittalsList.length === 0 ? (
+                  <div className="p-4 text-xs text-slate-500">
+                    No submittals logged for this job yet. Add one below if shop drawings or product submittals are required.
+                  </div>
+                ) : (
+                  <div className="divide-y divide-slate-100">
+                    {submittalsList.map((sub) => {
+                      const meta = SUBMITTAL_STATUS_META[sub.status] || SUBMITTAL_STATUS_META.pending;
+                      return (
+                        <div
+                          key={sub.id}
+                          className="p-3 flex flex-wrap items-start justify-between gap-3 text-xs"
+                        >
+                          <div className="min-w-0 flex-1 space-y-1">
+                            <div className="flex items-center gap-2 flex-wrap">
+                              <span className="font-mono font-extrabold px-2 py-0.5 rounded bg-indigo-50 text-indigo-800 border border-indigo-200 text-[10px]">
+                                {sub.submittalNumber} • Rev {sub.revision || 0}
+                              </span>
+                              <span className="font-bold text-slate-900">{sub.title}</span>
+                              <span
+                                className={`px-2 py-0.5 rounded-full border text-[10px] font-bold ${meta.badgeClass}`}
+                              >
+                                {meta.label}
+                              </span>
+                            </div>
+                            <div className="text-[11px] text-slate-500 flex flex-wrap gap-3">
+                              {sub.manufacturer && <span>Mfr: <strong>{sub.manufacturer}</strong></span>}
+                              {sub.specSection && <span>Spec: <strong className="font-mono">{sub.specSection}</strong></span>}
+                              {sub.reviewer && <span>Reviewer: {sub.reviewer}</span>}
+                              {sub.dueDate && <span>Due: {sub.dueDate}</span>}
+                              {sub.submittedDate && <span>Submitted: {sub.submittedDate}</span>}
+                              {sub.approvedDate && (
+                                <span className="text-emerald-700 font-semibold">
+                                  Approved: {sub.approvedDate}
+                                </span>
+                              )}
+                            </div>
+                            {sub.notes && (
+                              <div className="text-[11px] text-slate-600">{sub.notes}</div>
+                            )}
+                          </div>
+
+                          <div className="flex items-center gap-1.5 shrink-0">
+                            <select
+                              value={sub.status}
+                              disabled={isSavingSubmittals}
+                              onChange={(e) =>
+                                handleSubmittalStatusChange(
+                                  sub.id,
+                                  e.target.value as SubmittalStatus
+                                )
+                              }
+                              className="px-2 py-1 rounded-lg border border-slate-300 bg-slate-50 font-bold text-[11px]"
+                            >
+                              <option value="pending">Pending Prep</option>
+                              <option value="submitted">Submitted / In Review</option>
+                              <option value="approved">Approved</option>
+                              <option value="approved_as_noted">Approved as Noted</option>
+                              <option value="revise_resubmit">Revise &amp; Resubmit</option>
+                              <option value="rejected">Rejected</option>
+                            </select>
+                            <button
+                              type="button"
+                              onClick={() => {
+                                setEditingSubmittalId(sub.id);
+                                setNewSubmittalTitle(sub.title);
+                                setNewSubmittalMfg(sub.manufacturer || '');
+                                setNewSubmittalSpec(sub.specSection || '');
+                                setNewSubmittalDueDate(sub.dueDate || '');
+                                setNewSubmittalReviewer(sub.reviewer || '');
+                                setNewSubmittalNotes(sub.notes || '');
+                              }}
+                              className="p-1 text-slate-400 hover:text-blue-700"
+                              title="Edit submittal"
+                            >
+                              <Pencil className="w-3.5 h-3.5" />
+                            </button>
+                            <button
+                              type="button"
+                              onClick={() => handleDeleteSubmittal(sub.id)}
+                              className="p-1 text-slate-400 hover:text-rose-600"
+                              title="Delete submittal"
+                            >
+                              <Trash2 className="w-3.5 h-3.5" />
+                            </button>
+                          </div>
+                        </div>
+                      );
+                    })}
+                  </div>
+                )}
+
+                <form
+                  onSubmit={handleSaveSubmittalForm}
+                  className="p-3 bg-slate-50 border-t border-slate-200 space-y-2 text-xs"
+                >
+                  <div className="grid grid-cols-1 sm:grid-cols-6 gap-2">
+                    <input
+                      type="text"
+                      required
+                      placeholder="Submittal / Shop Drawing title *"
+                      value={newSubmittalTitle}
+                      onChange={(e) => setNewSubmittalTitle(e.target.value)}
+                      className="sm:col-span-2 px-2.5 py-1.5 rounded-lg border border-slate-300 bg-white"
+                    />
+                    <input
+                      type="text"
+                      list="submittal-suppliers-list"
+                      placeholder="Manufacturer"
+                      value={newSubmittalMfg}
+                      onChange={(e) => setNewSubmittalMfg(e.target.value)}
+                      className="px-2.5 py-1.5 rounded-lg border border-slate-300 bg-white"
+                    />
+                    <datalist id="submittal-suppliers-list">
+                      {suppliersList.map((s) => (
+                        <option key={s.id} value={s.name} />
+                      ))}
+                    </datalist>
+                    <input
+                      type="text"
+                      placeholder="Spec # (e.g. 10 21 13)"
+                      value={newSubmittalSpec}
+                      onChange={(e) => setNewSubmittalSpec(e.target.value)}
+                      className="px-2.5 py-1.5 rounded-lg border border-slate-300 bg-white font-mono"
+                    />
+                    <input
+                      type="text"
+                      placeholder="Reviewer (GC/Arch)"
+                      value={newSubmittalReviewer}
+                      onChange={(e) => setNewSubmittalReviewer(e.target.value)}
+                      className="px-2.5 py-1.5 rounded-lg border border-slate-300 bg-white"
+                    />
+                    <input
+                      type="date"
+                      title="Due date"
+                      value={newSubmittalDueDate}
+                      onChange={(e) => setNewSubmittalDueDate(e.target.value)}
+                      className="px-2.5 py-1.5 rounded-lg border border-slate-300 bg-white"
+                    />
+                  </div>
+                  <div className="flex flex-wrap items-center gap-2">
+                    <input
+                      type="text"
+                      placeholder="Submittal notes (colors, hardware finish, lead time)..."
+                      value={newSubmittalNotes}
+                      onChange={(e) => setNewSubmittalNotes(e.target.value)}
+                      className="flex-1 min-w-[200px] px-2.5 py-1.5 rounded-lg border border-slate-300 bg-white"
+                    />
+                    {editingSubmittalId && (
+                      <button
+                        type="button"
+                        onClick={() => {
+                          setEditingSubmittalId(null);
+                          setNewSubmittalTitle('');
+                          setNewSubmittalMfg('');
+                          setNewSubmittalSpec('');
+                          setNewSubmittalDueDate('');
+                          setNewSubmittalReviewer('');
+                          setNewSubmittalNotes('');
+                        }}
+                        className="px-3 py-1.5 rounded-lg border border-slate-300 bg-white text-slate-700 font-bold"
+                      >
+                        Cancel
+                      </button>
+                    )}
+                    <button
+                      type="submit"
+                      disabled={isSavingSubmittals || !newSubmittalTitle.trim()}
+                      className="px-3 py-1.5 rounded-lg bg-indigo-600 hover:bg-indigo-700 text-white font-bold disabled:opacity-50"
+                    >
+                      {editingSubmittalId ? 'Save Submittal' : '+ Add Submittal'}
+                    </button>
+                  </div>
+                </form>
+              </div>
+            );
+          })()}
+
           {/* Optional Contract Add-Ons / Alternates */}
           <div className="bg-white rounded-2xl border border-slate-200 shadow-sm overflow-hidden">
             <div className="p-4 border-b border-slate-200 flex flex-wrap items-center justify-between gap-3">
