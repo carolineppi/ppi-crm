@@ -5,6 +5,14 @@ export async function PATCH(
   request: NextRequest,
   { params }: { params: Promise<{ id: string }> }
 ) {
+  const { requireApiAuth } = await import('@/lib/auth/rbac');
+  const { errorResponse } = await requireApiAuth([
+    'admin',
+    'pm',
+    'install_coordinator',
+    'installer',
+  ]);
+  if (errorResponse) return errorResponse;
   try {
     const { id } = await params;
     const supabase = createServerSupabaseClient();
@@ -113,6 +121,9 @@ export async function DELETE(
   _request: NextRequest,
   { params }: { params: Promise<{ id: string }> }
 ) {
+  const { requireApiAuth } = await import('@/lib/auth/rbac');
+  const { errorResponse } = await requireApiAuth(['admin', 'install_coordinator']);
+  if (errorResponse) return errorResponse;
   try {
     const { id } = await params;
     const supabase = createServerSupabaseClient();

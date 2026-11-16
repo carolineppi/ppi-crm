@@ -3,6 +3,14 @@ import { createServerSupabaseClient } from '@/lib/supabase/server';
 import { findBestCustomerMatches } from '@/lib/customers/matchCustomer';
 
 export async function GET(request: NextRequest) {
+  const { requireApiAuth } = await import('@/lib/auth/rbac');
+  const { errorResponse } = await requireApiAuth([
+    'admin',
+    'calendar_manager',
+    'estimator',
+    'pm',
+  ]);
+  if (errorResponse) return errorResponse;
   try {
     const supabase = createServerSupabaseClient();
     const companyName = request.nextUrl.searchParams.get('company');

@@ -7,6 +7,9 @@ import {
 import { classifyPreliminaryGroup } from '@/lib/pricing/auto-tagger';
 
 export async function POST(request: NextRequest) {
+  const { requireApiAuth } = await import('@/lib/auth/rbac');
+  const { errorResponse } = await requireApiAuth(['admin', 'calendar_manager', 'estimator']);
+  if (errorResponse) return errorResponse;
   try {
     const formData = await request.formData();
     const file = formData.get('file') as File | null;

@@ -3,6 +3,14 @@ import { createServerSupabaseClient } from '@/lib/supabase/server';
 import { DEFAULT_WEEKLY_AVAILABILITY } from '@/lib/installers/availability';
 
 export async function GET() {
+  const { requireApiAuth } = await import('@/lib/auth/rbac');
+  const { errorResponse } = await requireApiAuth([
+    'admin',
+    'install_coordinator',
+    'pm',
+    'installer',
+  ]);
+  if (errorResponse) return errorResponse;
   try {
     const supabase = createServerSupabaseClient();
 
@@ -94,6 +102,9 @@ export async function GET() {
 }
 
 export async function POST(request: NextRequest) {
+  const { requireApiAuth } = await import('@/lib/auth/rbac');
+  const { errorResponse } = await requireApiAuth(['admin', 'install_coordinator']);
+  if (errorResponse) return errorResponse;
   try {
     const supabase = createServerSupabaseClient();
     const body = await request.json();

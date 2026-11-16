@@ -1,11 +1,20 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { createServerSupabaseClient } from '@/lib/supabase/server';
 import { normalizeCompanyName, upsertCustomerContact } from '@/lib/customers/matchCustomer';
+import { requireApiAuth } from '@/lib/auth/rbac';
 
 export async function GET(
   _request: NextRequest,
   context: { params: Promise<{ id: string }> }
 ) {
+  const { errorResponse } = await requireApiAuth([
+    'admin',
+    'calendar_manager',
+    'estimator',
+    'pm',
+    'accounting',
+  ]);
+  if (errorResponse) return errorResponse;
   try {
     const { id } = await context.params;
     const supabase = createServerSupabaseClient();
@@ -48,6 +57,13 @@ export async function PATCH(
   request: NextRequest,
   context: { params: Promise<{ id: string }> }
 ) {
+  const { errorResponse } = await requireApiAuth([
+    'admin',
+    'calendar_manager',
+    'estimator',
+    'pm',
+  ]);
+  if (errorResponse) return errorResponse;
   try {
     const { id } = await context.params;
     const supabase = createServerSupabaseClient();
@@ -169,6 +185,13 @@ export async function DELETE(
   _request: NextRequest,
   context: { params: Promise<{ id: string }> }
 ) {
+  const { errorResponse } = await requireApiAuth([
+    'admin',
+    'calendar_manager',
+    'estimator',
+    'pm',
+  ]);
+  if (errorResponse) return errorResponse;
   try {
     const { id } = await context.params;
     const supabase = createServerSupabaseClient();

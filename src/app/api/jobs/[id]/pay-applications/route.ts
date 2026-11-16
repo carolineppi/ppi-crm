@@ -5,11 +5,14 @@ import {
   calculateG702AndG703,
   round2,
 } from '@/lib/accounting/aia-helpers';
+import { requireApiAuth } from '@/lib/auth/rbac';
 
 export async function GET(
   _request: NextRequest,
   { params }: { params: Promise<{ id: string }> }
 ) {
+  const { errorResponse } = await requireApiAuth(['admin', 'pm', 'accounting']);
+  if (errorResponse) return errorResponse;
   try {
     const { id } = await params;
     const supabase = createServerSupabaseClient();
@@ -33,6 +36,8 @@ export async function POST(
   request: NextRequest,
   { params }: { params: Promise<{ id: string }> }
 ) {
+  const { errorResponse } = await requireApiAuth(['admin', 'pm', 'accounting']);
+  if (errorResponse) return errorResponse;
   try {
     const { id } = await params;
     const supabase = createServerSupabaseClient();
@@ -220,6 +225,8 @@ export async function PATCH(
   request: NextRequest,
   { params }: { params: Promise<{ id: string }> }
 ) {
+  const { errorResponse } = await requireApiAuth(['admin', 'accounting']);
+  if (errorResponse) return errorResponse;
   try {
     const { id } = await params;
     const supabase = createServerSupabaseClient();
@@ -331,6 +338,8 @@ export async function DELETE(
   request: NextRequest,
   { params }: { params: Promise<{ id: string }> }
 ) {
+  const { errorResponse } = await requireApiAuth(['admin', 'accounting']);
+  if (errorResponse) return errorResponse;
   try {
     const { id } = await params;
     const payAppId = request.nextUrl.searchParams.get('payAppId');

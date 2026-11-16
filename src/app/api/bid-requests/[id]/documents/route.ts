@@ -25,6 +25,9 @@ export async function POST(
   request: NextRequest,
   { params }: { params: Promise<{ id: string }> }
 ) {
+  const { requireApiAuth } = await import('@/lib/auth/rbac');
+  const { errorResponse } = await requireApiAuth(['admin', 'calendar_manager', 'estimator']);
+  if (errorResponse) return errorResponse;
   try {
     const { id } = await params;
     const supabase = createServerSupabaseClient();
@@ -251,6 +254,9 @@ export async function DELETE(
   request: NextRequest,
   { params }: { params: Promise<{ id: string }> }
 ) {
+  const { requireApiAuth } = await import('@/lib/auth/rbac');
+  const { errorResponse } = await requireApiAuth(['admin', 'calendar_manager', 'estimator']);
+  if (errorResponse) return errorResponse;
   try {
     const { id } = await params;
     const body = await request.json();

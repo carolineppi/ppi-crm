@@ -1,7 +1,10 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { createServerSupabaseClient } from '@/lib/supabase/server';
+import { requireApiAuth } from '@/lib/auth/rbac';
 
 export async function GET() {
+  const { errorResponse } = await requireApiAuth(['admin', 'calendar_manager', 'estimator']);
+  if (errorResponse) return errorResponse;
   try {
     const supabase = createServerSupabaseClient();
     const { data, error } = await supabase
@@ -24,6 +27,8 @@ export async function GET() {
 }
 
 export async function POST(request: NextRequest) {
+  const { errorResponse } = await requireApiAuth(['admin', 'calendar_manager']);
+  if (errorResponse) return errorResponse;
   try {
     const body = await request.json();
     const note = (body.note || '').trim();
@@ -63,6 +68,8 @@ export async function POST(request: NextRequest) {
 }
 
 export async function PATCH(request: NextRequest) {
+  const { errorResponse } = await requireApiAuth(['admin', 'calendar_manager']);
+  if (errorResponse) return errorResponse;
   try {
     const body = await request.json();
     if (!body.id) {
@@ -107,6 +114,8 @@ export async function PATCH(request: NextRequest) {
 }
 
 export async function DELETE(request: NextRequest) {
+  const { errorResponse } = await requireApiAuth(['admin', 'calendar_manager']);
+  if (errorResponse) return errorResponse;
   try {
     const idFromQuery = request.nextUrl.searchParams.get('id');
     let id = idFromQuery;

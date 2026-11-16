@@ -1,7 +1,10 @@
 import { NextResponse } from 'next/server';
 import { createServerSupabaseClient } from '@/lib/supabase/server';
+import { requireApiAuth } from '@/lib/auth/rbac';
 
 export async function GET() {
+  const { errorResponse } = await requireApiAuth();
+  if (errorResponse) return errorResponse;
   try {
     const supabase = createServerSupabaseClient();
     const { data, error } = await supabase

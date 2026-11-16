@@ -164,6 +164,14 @@ ${truncated}`,
 }
 
 export async function POST(request: NextRequest) {
+  const { requireApiAuth } = await import('@/lib/auth/rbac');
+  const { errorResponse } = await requireApiAuth([
+    'admin',
+    'calendar_manager',
+    'estimator',
+    'pm',
+  ]);
+  if (errorResponse) return errorResponse;
   try {
     let buffer: Buffer | null = null;
     let filename = 'scope.pdf';

@@ -37,6 +37,9 @@ export async function GET(
   request: NextRequest,
   { params }: { params: Promise<{ id: string }> }
 ) {
+  const { requireApiAuth } = await import('@/lib/auth/rbac');
+  const { errorResponse } = await requireApiAuth(['admin', 'calendar_manager', 'estimator', 'pm']);
+  if (errorResponse) return errorResponse;
   try {
     const { id } = await params;
     const supabase = createServerSupabaseClient();
@@ -64,6 +67,9 @@ export async function PATCH(
   request: NextRequest,
   { params }: { params: Promise<{ id: string }> }
 ) {
+  const { requireApiAuth } = await import('@/lib/auth/rbac');
+  const { errorResponse } = await requireApiAuth(['admin', 'calendar_manager', 'estimator']);
+  if (errorResponse) return errorResponse;
   try {
     const { id } = await params;
     const body: UpdatePayload = await request.json();

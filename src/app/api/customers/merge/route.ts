@@ -1,7 +1,15 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { createServerSupabaseClient } from '@/lib/supabase/server';
+import { requireApiAuth } from '@/lib/auth/rbac';
 
 export async function POST(request: NextRequest) {
+  const { errorResponse } = await requireApiAuth([
+    'admin',
+    'calendar_manager',
+    'estimator',
+    'pm',
+  ]);
+  if (errorResponse) return errorResponse;
   try {
     const supabase = createServerSupabaseClient();
     const body = await request.json();

@@ -2,6 +2,15 @@ import { NextRequest, NextResponse } from 'next/server';
 import { createServerSupabaseClient } from '@/lib/supabase/server';
 
 export async function GET(request: NextRequest) {
+  const { requireApiAuth } = await import('@/lib/auth/rbac');
+  const { errorResponse } = await requireApiAuth([
+    'admin',
+    'install_coordinator',
+    'installer',
+    'pm',
+    'warehouse',
+  ]);
+  if (errorResponse) return errorResponse;
   try {
     const supabase = createServerSupabaseClient();
     const { searchParams } = new URL(request.url);
@@ -159,6 +168,9 @@ export async function GET(request: NextRequest) {
 }
 
 export async function POST(request: NextRequest) {
+  const { requireApiAuth } = await import('@/lib/auth/rbac');
+  const { errorResponse } = await requireApiAuth(['admin', 'pm', 'install_coordinator']);
+  if (errorResponse) return errorResponse;
   try {
     const supabase = createServerSupabaseClient();
     const body = await request.json();

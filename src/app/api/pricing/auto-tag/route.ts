@@ -6,6 +6,9 @@ import {
 } from '@/lib/pricing/auto-tagger';
 
 export async function GET() {
+  const { requireApiAuth } = await import('@/lib/auth/rbac');
+  const { errorResponse } = await requireApiAuth(['admin', 'calendar_manager', 'estimator', 'pm']);
+  if (errorResponse) return errorResponse;
   try {
     const supabase = createServerSupabaseClient();
     const counts = new Map<string, number>();
@@ -50,6 +53,9 @@ export async function GET() {
 }
 
 export async function POST(request: NextRequest) {
+  const { requireApiAuth } = await import('@/lib/auth/rbac');
+  const { errorResponse } = await requireApiAuth(['admin', 'calendar_manager', 'estimator']);
+  if (errorResponse) return errorResponse;
   try {
     const body = await request.json().catch(() => ({}));
     const useAi = body.useAi !== false;

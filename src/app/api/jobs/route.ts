@@ -2,8 +2,19 @@ import { NextRequest, NextResponse } from 'next/server';
 import { createServerSupabaseClient } from '@/lib/supabase/server';
 import { createOrSyncJobFromBid } from '@/lib/jobs/createJobFromBid';
 import { getJobLineItemsOrderStatus } from '@/lib/jobs/lineItemOrderStatus';
+import { requireApiAuth } from '@/lib/auth/rbac';
 
 export async function GET(request: NextRequest) {
+  const { errorResponse } = await requireApiAuth([
+    'admin',
+    'calendar_manager',
+    'estimator',
+    'pm',
+    'accounting',
+    'warehouse',
+    'install_coordinator',
+  ]);
+  if (errorResponse) return errorResponse;
   try {
     const supabase = createServerSupabaseClient();
     const bidId = request.nextUrl.searchParams.get('bidId');
@@ -73,6 +84,13 @@ export async function GET(request: NextRequest) {
 }
 
 export async function POST(request: NextRequest) {
+  const { errorResponse } = await requireApiAuth([
+    'admin',
+    'calendar_manager',
+    'estimator',
+    'pm',
+  ]);
+  if (errorResponse) return errorResponse;
   try {
     const supabase = createServerSupabaseClient();
     const body = await request.json();

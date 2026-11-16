@@ -1,8 +1,11 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { createServerSupabaseClient } from '@/lib/supabase/server';
 import { normalizeCompanyName } from '@/lib/customers/matchCustomer';
+import { requireApiAuth } from '@/lib/auth/rbac';
 
 export async function GET(request: NextRequest) {
+  const { errorResponse } = await requireApiAuth();
+  if (errorResponse) return errorResponse;
   try {
     const supabase = createServerSupabaseClient();
     const q = (request.nextUrl.searchParams.get('q') || '').trim().toLowerCase();
@@ -37,6 +40,14 @@ export async function GET(request: NextRequest) {
 }
 
 export async function POST(request: NextRequest) {
+  const { errorResponse } = await requireApiAuth([
+    'admin',
+    'calendar_manager',
+    'estimator',
+    'pm',
+    'warehouse',
+  ]);
+  if (errorResponse) return errorResponse;
   try {
     const supabase = createServerSupabaseClient();
     const body = await request.json();

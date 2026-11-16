@@ -7,6 +7,9 @@ import { promisify } from 'util';
 const execAsync = promisify(exec);
 
 export async function GET(request: NextRequest) {
+  const { requireApiAuth } = await import('@/lib/auth/rbac');
+  const { errorResponse } = await requireApiAuth(['admin', 'calendar_manager', 'estimator']);
+  if (errorResponse) return errorResponse;
   try {
     const shouldRetrain = request.nextUrl.searchParams.get('retrain') === 'true';
     const artifactsDir = path.join(process.cwd(), 'ml_artifacts');

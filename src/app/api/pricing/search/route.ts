@@ -2,6 +2,9 @@ import { NextRequest, NextResponse } from 'next/server';
 import { createServerSupabaseClient } from '@/lib/supabase/server';
 
 export async function GET(request: NextRequest) {
+  const { requireApiAuth } = await import('@/lib/auth/rbac');
+  const { errorResponse } = await requireApiAuth(['admin', 'calendar_manager', 'estimator', 'pm']);
+  if (errorResponse) return errorResponse;
   try {
     const q = (request.nextUrl.searchParams.get('q') || '').trim();
     const manufacturer = (request.nextUrl.searchParams.get('manufacturer') || '').trim();
@@ -57,6 +60,9 @@ export async function GET(request: NextRequest) {
 }
 
 export async function PATCH(request: NextRequest) {
+  const { requireApiAuth } = await import('@/lib/auth/rbac');
+  const { errorResponse } = await requireApiAuth(['admin', 'calendar_manager', 'estimator']);
+  if (errorResponse) return errorResponse;
   try {
     const body = await request.json();
     const { id, equivalentGroup, multiplier } = body;

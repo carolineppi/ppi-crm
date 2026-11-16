@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { createServerSupabaseClient } from '@/lib/supabase/server';
 import { normalizeDateToYyyyMmDd } from '@/lib/date-utils';
+import { requireApiAuth } from '@/lib/auth/rbac';
 
 interface ImportEventPayload {
   uid: string;
@@ -14,6 +15,8 @@ interface ImportEventPayload {
 }
 
 export async function POST(request: NextRequest) {
+  const { errorResponse } = await requireApiAuth(['admin', 'calendar_manager']);
+  if (errorResponse) return errorResponse;
   try {
     const body = await request.json();
     const events: ImportEventPayload[] = Array.isArray(body.events) ? body.events : [];

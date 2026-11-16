@@ -67,6 +67,9 @@ export async function GET(
   request: NextRequest,
   { params }: { params: Promise<{ id: string; filename: string }> }
 ) {
+  const { requireApiAuth } = await import('@/lib/auth/rbac');
+  const { errorResponse } = await requireApiAuth(['admin', 'calendar_manager', 'estimator', 'pm']);
+  if (errorResponse) return errorResponse;
   try {
     const { id, filename: rawFilename } = await params;
     const targetFilename = decodeURIComponent(rawFilename).trim();

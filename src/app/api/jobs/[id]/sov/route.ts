@@ -2,11 +2,14 @@ import { NextRequest, NextResponse } from 'next/server';
 import { createServerSupabaseClient } from '@/lib/supabase/server';
 import { round2, syncChangeOrderToSov } from '@/lib/accounting/aia-helpers';
 import { groupItemsBySection } from '@/lib/pricing/quote-sections';
+import { requireApiAuth } from '@/lib/auth/rbac';
 
 export async function GET(
   _request: NextRequest,
   { params }: { params: Promise<{ id: string }> }
 ) {
+  const { errorResponse } = await requireApiAuth(['admin', 'pm', 'accounting']);
+  if (errorResponse) return errorResponse;
   try {
     const { id } = await params;
     const supabase = createServerSupabaseClient();
@@ -31,6 +34,8 @@ export async function POST(
   request: NextRequest,
   { params }: { params: Promise<{ id: string }> }
 ) {
+  const { errorResponse } = await requireApiAuth(['admin', 'pm']);
+  if (errorResponse) return errorResponse;
   try {
     const { id } = await params;
     const supabase = createServerSupabaseClient();
@@ -213,6 +218,8 @@ export async function DELETE(
   request: NextRequest,
   { params }: { params: Promise<{ id: string }> }
 ) {
+  const { errorResponse } = await requireApiAuth(['admin', 'pm']);
+  if (errorResponse) return errorResponse;
   try {
     const { id } = await params;
     const itemId = request.nextUrl.searchParams.get('itemId');

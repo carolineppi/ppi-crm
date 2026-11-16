@@ -2,6 +2,9 @@ import { NextRequest, NextResponse } from 'next/server';
 import { classifyEmailWithML } from '@/lib/ml/classifier';
 
 export async function POST(request: NextRequest) {
+  const { requireApiAuth } = await import('@/lib/auth/rbac');
+  const { errorResponse } = await requireApiAuth(['admin', 'calendar_manager', 'estimator']);
+  if (errorResponse) return errorResponse;
   try {
     const body = await request.json();
     const result = classifyEmailWithML({
