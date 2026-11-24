@@ -27,6 +27,9 @@ import {
   Moon,
   FileCheck2,
   Pencil,
+  FolderOpen,
+  Upload,
+  ExternalLink,
 } from 'lucide-react';
 import InstallCalendarMicroView, {
   CalendarDaySummary,
@@ -162,8 +165,78 @@ export default function JobViewerPage() {
   };
 
   const [suppliersList, setSuppliersList] = useState<Array<{ id: string; name: string }>>([]);
+  const [driveConfigured, setDriveConfigured] = useState<boolean>(true);
+  const [driveFolderUrl, setDriveFolderUrl] = useState<string | null>(null);
+  const [driveFiles, setDriveFiles] = useState<any[]>([]);
+  const [driveCategory, setDriveCategory] = useState<
+    'contracts' | 'scope' | 'submittals' | 'install_photos'
+  >('contracts');
+  const [isDriveBusy, setIsDriveBusy] = useState(false);
+  const [driveError, setDriveError] = useState<string | null>(null);
+
+  const loadDriveFiles = async () => {
+    if (!jobId) return;
+    try {
+      const res = await fetch(`/api/jobs/${jobId}/drive`);
+      const d = await res.json();
+      if (res.ok) {
+        setDriveConfigured(Boolean(d.configured));
+        setDriveFolderUrl(d.folderUrl || null);
+        setDriveFiles(Array.isArray(d.files) ? d.files : []);
+      }
+    } catch {
+      // ignore
+    }
+  };
+
+  const handleInitDriveFolder = async () => {
+    if (!jobId) return;
+    setIsDriveBusy(true);
+    setDriveError(null);
+    try {
+      const res = await fetch(`/api/jobs/${jobId}/drive`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ action: 'init_folder' }),
+      });
+      const d = await res.json();
+      if (!res.ok) {
+        setDriveError(d.error || 'Failed to initialize Google Drive folder.');
+        return;
+      }
+      setDriveFolderUrl(d.folderUrl || null);
+      setDriveFiles(Array.isArray(d.files) ? d.files : []);
+    } finally {
+      setIsDriveBusy(false);
+    }
+  };
+
+  const handleUploadToDrive = async (file: File) => {
+    if (!jobId || !file) return;
+    setIsDriveBusy(true);
+    setDriveError(null);
+    try {
+      const fd = new FormData();
+      fd.append('file', file);
+      fd.append('category', driveCategory);
+      const res = await fetch(`/api/jobs/${jobId}/drive`, {
+        method: 'POST',
+        body: fd,
+      });
+      const d = await res.json();
+      if (!res.ok) {
+        setDriveError(d.error || 'Failed to upload file to Google Drive.');
+        return;
+      }
+      setDriveFolderUrl(d.folderUrl || null);
+      setDriveFiles(Array.isArray(d.files) ? d.files : []);
+    } finally {
+      setIsDriveBusy(false);
+    }
+  };
 
   useEffect(() => {
+    loadDriveFiles();
     fetch('/api/employees')
       .then((r) => r.json())
       .then((d) => {
@@ -1370,6 +1443,129 @@ export default function JobViewerPage() {
               </div>
             );
           })()}
+
+          {/* Google Drive Job Files */}
+          <div className="bg-white rounded-2xl border border-slate-200 shadow-sm overflow-hidden">
+            <div className="p-4 border-b border-slate-200 flex flex-wrap items-center justify-between gap-3">
+              <div>
+                <h2 className="text-sm font-black text-slate-900 flex items-center gap-1.5">
+                  <FolderOpen className="w-4 h-4 text-blue-600" />
+                  <span>Google Drive Job Files ({driveFiles.length})</span>
+                </h2>
+                <p className="text-[11px] text-slate-500">
+                  Stores Contracts, Scope/Quotes, Submittals, and Install Photos directly in Google Drive (zero Supabase storage used).
+                </p>
+              </div>
+              <div className="flex items-center gap-2">
+                {driveFolderUrl ? (
+                  <a
+                    href={driveFolderUrl}
+                    target="_blank"
+                    rel="noopener noreferrer"
+                    className="px-3 py-1.5 rounded-lg bg-blue-600 hover:bg-blue-500 text-white text-xs font-bold inline-flex items-center gap-1"
+                  >
+                    <span>Open in Drive</span>
+                    <ExternalLink className="w-3.5 h-3.5" />
+                  </a>
+                ) : (
+                  <button
+                    type="button"
+                    disabled={isDriveBusy}
+                    onClick={handleInitDriveFolder}
+                    className="px-3 py-1.5 rounded-lg bg-slate-900 hover:bg-slate-800 text-white text-xs font-bold disabled:opacity-50"
+                  >
+                    {isDriveBusy ? 'Creating...' : '+ Create Job Drive Folder'}
+                  </button>
+                )}
+              </div>
+            </div>
+
+            {driveError && (
+              <div className="px-4 py-2 bg-rose-50 border-b border-rose-200 text-xs text-rose-800 font-semibold">
+                {driveError}
+              </div>
+            )}
+
+            {!driveConfigured && (
+              <div className="p-4 bg-amber-50 border-b border-amber-200 text-xs text-amber-900">
+                <strong>Google Drive Setup Needed:</strong> Add{' '}
+                <code className="font-mono">GOOGLE_SERVICE_ACCOUNT_EMAIL</code>,{' '}
+                <code className="font-mono">GOOGLE_SERVICE_ACCOUNT_PRIVATE_KEY</code>, and{' '}
+                <code className="font-mono">GOOGLE_DRIVE_ROOT_FOLDER_ID</code> to your environment variables (and share that root folder with the service account email).
+              </div>
+            )}
+
+            {driveFiles.length > 0 ? (
+              <div className="divide-y divide-slate-100 max-h-60 overflow-y-auto">
+                {driveFiles.map((f) => (
+                  <div
+                    key={f.id}
+                    className="px-4 py-2.5 flex items-center justify-between gap-2 text-xs hover:bg-slate-50"
+                  >
+                    <div className="min-w-0">
+                      <a
+                        href={f.webViewLink}
+                        target="_blank"
+                        rel="noopener noreferrer"
+                        className="font-bold text-blue-700 hover:underline truncate block"
+                      >
+                        {f.name}
+                      </a>
+                      <div className="text-[10px] text-slate-500">
+                        Folder: <strong>{f.folderName}</strong>
+                        {f.size ? ` • ${(f.size / 1024).toFixed(1)} KB` : ''}
+                        {f.modifiedTime
+                          ? ` • ${new Date(f.modifiedTime).toLocaleDateString()}`
+                          : ''}
+                      </div>
+                    </div>
+                    <a
+                      href={f.webViewLink}
+                      target="_blank"
+                      rel="noopener noreferrer"
+                      className="text-slate-400 hover:text-blue-700 shrink-0"
+                      title="Open in Google Drive"
+                    >
+                      <ExternalLink className="w-3.5 h-3.5" />
+                    </a>
+                  </div>
+                ))}
+              </div>
+            ) : (
+              <div className="p-4 text-xs text-slate-500">
+                {driveFolderUrl
+                  ? 'No files uploaded to this Drive folder yet.'
+                  : 'Create the job Drive folder or upload a file below to auto-organize subfolders.'}
+              </div>
+            )}
+
+            <div className="p-3 bg-slate-50 border-t border-slate-200 flex flex-wrap items-center gap-2 text-xs">
+              <select
+                value={driveCategory}
+                onChange={(e) => setDriveCategory(e.target.value as any)}
+                className="px-2.5 py-1.5 rounded-lg border border-slate-300 bg-white font-semibold"
+              >
+                <option value="contracts">01 Contracts &amp; POs</option>
+                <option value="scope">02 Scope &amp; Quotes</option>
+                <option value="submittals">03 Submittals &amp; Shop Drawings</option>
+                <option value="install_photos">04 Install Photos &amp; Closeout</option>
+              </select>
+              <label className="px-3 py-1.5 rounded-lg bg-slate-900 hover:bg-slate-800 text-white font-bold inline-flex items-center gap-1.5 cursor-pointer">
+                <Upload className="w-3.5 h-3.5" />
+                <span>{isDriveBusy ? 'Uploading...' : 'Upload to Drive'}</span>
+                <input
+                  type="file"
+                  disabled={isDriveBusy}
+                  className="hidden"
+                  onChange={(e) => {
+                    const file = e.target.files?.[0];
+                    if (file) handleUploadToDrive(file);
+                    e.target.value = '';
+                  }}
+                />
+              </label>
+            </div>
+          </div>
 
           {/* Submittals & Shop Drawings Tracker */}
           {(() => {

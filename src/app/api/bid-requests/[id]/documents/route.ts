@@ -59,35 +59,70 @@ export async function POST(
 
       if (file && typeof file === 'object' && file.name) {
         const buffer = Buffer.from(await file.arrayBuffer());
-        const safeName = file.name.replace(/[^a-zA-Z0-9._-]/g, '_');
-        const storagePath = `${id}/${Date.now()}_${safeName}`;
-
-        const { error: uploadError } = await supabase.storage
-          .from('bid-documents')
-          .upload(storagePath, buffer, {
-            contentType: file.type || 'application/octet-stream',
-            upsert: true,
-          });
-
-        if (uploadError) {
-          console.error('Supabase storage upload error:', uploadError);
-          return NextResponse.json(
-            { error: 'Failed to upload document to storage', details: uploadError.message },
-            { status: 500 }
-          );
-        }
-
-        const { data: publicUrlData } = supabase.storage
-          .from('bid-documents')
-          .getPublicUrl(storagePath);
-
         const category = categoryParam || categorizeFilename(file.name);
+        let publicUrl = '';
+
+        const {
+          isGoogleDriveConfigured,
+          ensureJobDriveStructure,
+          CATEGORY_TO_SUBFOLDER,
+          uploadFileToDrive,
+        } = await import('@/lib/google/drive');
+
+        if (isGoogleDriveConfigured()) {
+          const driveCategory =
+            category === 'scopes'
+              ? 'scope'
+              : category === 'submittals'
+              ? 'submittals'
+              : 'contracts';
+          const structure = await ensureJobDriveStructure({
+            jobNumber: id.slice(0, 8),
+            projectName: 'Bid Documents',
+            existingFolderUrl: updatedDriveUrl ?? bid.google_drive_folder_url,
+          });
+          if (!bid.google_drive_folder_url && !updatedDriveUrl) {
+            updatedDriveUrl = structure.folderUrl;
+          }
+          const subName = CATEGORY_TO_SUBFOLDER[driveCategory];
+          const targetFolderId = structure.subfolders[subName] || structure.folderId;
+          const uploaded = await uploadFileToDrive({
+            folderId: targetFolderId,
+            filename: file.name,
+            mimeType: file.type || 'application/octet-stream',
+            buffer,
+          });
+          publicUrl = uploaded.webViewLink;
+        } else {
+          const safeName = file.name.replace(/[^a-zA-Z0-9._-]/g, '_');
+          const storagePath = `${id}/${Date.now()}_${safeName}`;
+
+          const { error: uploadError } = await supabase.storage
+            .from('bid-documents')
+            .upload(storagePath, buffer, {
+              contentType: file.type || 'application/octet-stream',
+              upsert: true,
+            });
+
+          if (uploadError) {
+            console.error('Supabase storage upload error:', uploadError);
+            return NextResponse.json(
+              { error: 'Failed to upload document to storage', details: uploadError.message },
+              { status: 500 }
+            );
+          }
+
+          const { data: publicUrlData } = supabase.storage
+            .from('bid-documents')
+            .getPublicUrl(storagePath);
+          publicUrl = publicUrlData.publicUrl;
+        }
 
         newDocumentRecord = {
           filename: file.name,
           size: file.size,
           contentType: file.type || 'application/octet-stream',
-          storageUrl: publicUrlData.publicUrl,
+          storageUrl: publicUrl,
           category,
           uploadedAt: new Date().toISOString(),
           isManualUpload: true,
