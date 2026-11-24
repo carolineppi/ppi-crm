@@ -28,7 +28,7 @@ export async function GET() {
     roles.includes('admin') || roles.includes('calendar_manager') || roles.includes('estimator')
       ? ssr
           .from('bid_requests')
-          .select('id, bid_number, project_name, client_company, bid_due_date, triage_status, estimator_status, raw_payload')
+          .select('id, bid_number, project_name, client_company, bid_due_date, triage_status, estimator_status, assigned_estimator_name:raw_payload->>assigned_estimator_name')
           .order('bid_due_date', { ascending: true, nullsFirst: false })
           .limit(30)
       : Promise.resolve({ data: [] as any[] }),

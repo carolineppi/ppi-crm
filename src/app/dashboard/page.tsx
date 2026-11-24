@@ -449,7 +449,7 @@ function DashboardContent() {
                   w.scope === 'mine' && myName
                     ? (data.bids || []).filter(
                         (b: any) =>
-                          (b.raw_payload?.assigned_estimator_name || '').toLowerCase() === myName
+                          (b.assigned_estimator_name || b.raw_payload?.assigned_estimator_name || '').toLowerCase() === myName
                       )
                     : data.bids || [];
                 return (

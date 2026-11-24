@@ -45,25 +45,68 @@ export async function GET(
     const { id } = await params;
     const supabase = createServerSupabaseClient();
 
+    const relatedSelect = `
+      id,
+      bid_number,
+      project_name,
+      client_company,
+      project_address_city,
+      project_address_state,
+      job_code,
+      assigned_estimator_id,
+      assigned_estimator_name:raw_payload->>assigned_estimator_name,
+      estimator_status,
+      bid_due_date,
+      estimator_notes:raw_payload->>estimator_notes,
+      google_drive_folder_url,
+      email_subject,
+      sender_name,
+      sender_email,
+      email_received_at,
+      created_at,
+      email_intent,
+      scope_summary,
+      ai_scope_summary:ai_analysis->>scopeSummary,
+      ai_project_name:ai_analysis->>projectName,
+      ai_client_company:ai_analysis->>clientCompany,
+      email_body_text,
+      email_body_html,
+      is_forwarded,
+      forwarded_by,
+      original_sender_name,
+      original_sender_email,
+      attachments,
+      bid_documents,
+      duplicate_group_id,
+      duplicate_of_id,
+      matched_bid_id,
+      matched_bid_number,
+      raw_payload_attachments:raw_payload->attachments,
+      raw_payload_body_text:raw_payload->>bodyText,
+      raw_payload_body_html:raw_payload->>bodyHtml,
+      raw_payload_body:raw_payload->>body
+    `.replace(/\s+/g, ' ').trim();
+
     // 1. Fetch the primary bid request
-    const { data: primary, error: primaryError } = await supabase
+    const { data: primaryRaw, error: primaryError } = await supabase
       .from('bid_requests')
-      .select('*')
+      .select(relatedSelect as any)
       .eq('id', id)
       .single();
 
+    const primary = primaryRaw as any;
     if (primaryError || !primary) {
       return NextResponse.json({ error: 'Bid request not found' }, { status: 404 });
     }
 
     // 2. Fetch all related records (group members, child addendums, matched bid numbers)
-    const groupId = primary.duplicate_group_id;
-    const bidNumber = primary.bid_number;
-    const duplicateOfId = primary.duplicate_of_id;
+    const groupId = (primary as any).duplicate_group_id;
+    const bidNumber = (primary as any).bid_number;
+    const duplicateOfId = (primary as any).duplicate_of_id;
 
     let query = supabase
       .from('bid_requests')
-      .select('*');
+      .select(relatedSelect as any);
 
     // Build OR filters
     const orConditions: string[] = [`id.eq.${id}`];
@@ -97,15 +140,15 @@ export async function GET(
       else if (r.email_intent === 'bid_lost') sticker = 'Lost';
       else if (r.email_intent === 'spam_noise') sticker = 'Spam';
 
-      const rawAtts = Array.isArray(r.raw_payload?.attachments)
-        ? r.raw_payload.attachments
+      const rawAtts = Array.isArray(r.raw_payload_attachments)
+        ? r.raw_payload_attachments
         : Array.isArray(r.attachments)
         ? r.attachments
         : [];
 
       return {
         id: r.id,
-        isPrimary: r.id === primary.id,
+        isPrimary: r.id === (primary as any).id,
         subject: r.email_subject || 'Untitled Email',
         senderName: r.sender_name || r.sender_email?.split('@')[0] || 'Unknown Sender',
         senderEmail: r.sender_email || '',
@@ -118,9 +161,9 @@ export async function GET(
         }),
         emailIntent: r.email_intent,
         sticker,
-        scopeSummary: r.scope_summary || r.ai_analysis?.scopeSummary || null,
-        bodyText: r.email_body_text || r.raw_payload?.bodyText || r.raw_payload?.body || '',
-        bodyHtml: r.email_body_html || r.raw_payload?.bodyHtml || null,
+        scopeSummary: r.scope_summary || r.ai_scope_summary || null,
+        bodyText: r.email_body_text || r.raw_payload_body_text || r.raw_payload_body || '',
+        bodyHtml: r.email_body_html || r.raw_payload_body_html || null,
         isForwarded: Boolean(r.is_forwarded),
         forwardedBy: r.forwarded_by,
         originalSenderName: r.original_sender_name,
@@ -146,7 +189,7 @@ export async function GET(
       const combinedDocs: any[] = [];
       if (Array.isArray(r.bid_documents)) combinedDocs.push(...r.bid_documents);
       if (Array.isArray(r.attachments)) combinedDocs.push(...r.attachments);
-      if (Array.isArray(r.raw_payload?.attachments)) combinedDocs.push(...r.raw_payload.attachments);
+      if (Array.isArray(r.raw_payload_attachments)) combinedDocs.push(...r.raw_payload_attachments);
 
       combinedDocs.forEach((a: any) => {
         // Unique key by storageUrl or checksum or filename + size
@@ -203,15 +246,15 @@ export async function GET(
       primaryBid: {
         id: primary.id,
         bidNumber: primary.bid_number,
-        projectName: primary.project_name || primary.ai_analysis?.projectName || 'Untitled Project',
-        clientCompany: primary.client_company || primary.ai_analysis?.clientCompany || 'Unknown GC',
+        projectName: primary.project_name || primary.ai_project_name || 'Untitled Project',
+        clientCompany: primary.client_company || primary.ai_client_company || 'Unknown GC',
         projectAddress: [primary.project_address_city, primary.project_address_state].filter(Boolean).join(', ') || null,
         jobCode: primary.job_code,
-        assignedEstimator: primary.assigned_estimator_name || primary.raw_payload?.assigned_estimator_name || (primary.assigned_estimator_id ? 'Assigned' : null),
+        assignedEstimator: primary.assigned_estimator_name || (primary.assigned_estimator_id ? 'Assigned' : null),
         estimatorStatus: primary.estimator_status || 'unassigned',
         bidDueDate: primary.bid_due_date,
-        scopeSummary: primary.scope_summary || primary.ai_analysis?.scopeSummary,
-        estimatorNotes: primary.raw_payload?.estimator_notes || '',
+        scopeSummary: primary.scope_summary || primary.ai_scope_summary,
+        estimatorNotes: primary.estimator_notes || '',
         googleDriveFolderUrl: primary.google_drive_folder_url || null,
         totalEmailsCount: emails.length,
         totalAttachmentsCount: allAttachments.length,

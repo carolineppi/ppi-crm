@@ -33,7 +33,12 @@ export async function GET(request: NextRequest) {
     }
 
     const [{ data, error }, { data: pos }, { data: cos }, { data: payApps }] = await Promise.all([
-      supabase.from('jobs').select('*').order('created_at', { ascending: false }),
+      supabase
+        .from('jobs')
+        .select(
+          'id, bid_request_id, job_number, project_name, client_name, client_company, client_phone, client_email, address_street, address_city, address_state, address_zip, scope_of_work, estimator_name, project_manager, pm_assigned_at, quote_amount, status, notes, won_confirmed_by, won_confirmed_at, scope_pdf_filename, scope_pdf_url, material_eta, site_available_range, requested_install_date, install_request_status, line_items, submittals, created_at'
+        )
+        .order('created_at', { ascending: false }),
       supabase.from('job_purchase_orders').select('id, job_id, po_number, status, total_cost, items'),
       supabase.from('job_change_orders').select('id, job_id, type, amount, status'),
       supabase.from('job_pay_applications').select('id, job_id, status, current_payment_due'),

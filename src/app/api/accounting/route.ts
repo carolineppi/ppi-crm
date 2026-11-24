@@ -24,7 +24,9 @@ export async function GET(request: NextRequest) {
         .order('created_at', { ascending: false }),
       supabase
         .from('job_pay_applications')
-        .select('*')
+        .select(
+          'id, job_id, application_number, period_to, status, assigned_accountant, requested_at, submitted_at, paid_at, current_payment_due, retainage_amount, total_completed_and_stored, is_retainage_release, notes, updated_at'
+        )
         .order('updated_at', { ascending: false }),
       supabase
         .from('job_change_orders')

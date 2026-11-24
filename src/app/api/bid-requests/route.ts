@@ -9,6 +9,7 @@ export async function GET(request: NextRequest) {
   try {
     const sp = request.nextUrl.searchParams;
     const isSummary = sp.get('summary') === '1';
+    const includeBody = sp.get('includeBody') === '1';
     const scope = sp.get('scope') || 'all'; // 'calendar' | 'estimator' | 'all'
     const estimatorFilter = (sp.get('estimator') || '').trim();
     const q = (sp.get('q') || '').trim();
@@ -30,7 +31,7 @@ export async function GET(request: NextRequest) {
       client_company,
       duplicate_group_id,
       is_flagged_duplicate,
-      duplicate_reasons,
+      ${isSummary ? '' : 'duplicate_reasons,'}
       duplicate_resolution,
       triage_status,
       priority,
@@ -38,16 +39,15 @@ export async function GET(request: NextRequest) {
       assigned_estimator_name:raw_payload->>assigned_estimator_name,
       bid_due_date,
       bid_due_time:raw_payload->>bid_due_time,
-      attachments,
-      ${isSummary ? '' : 'email_body_text,'}
+      ${isSummary ? '' : 'attachments,'}
+      ${includeBody ? 'email_body_text,' : ''}
       email_intent,
       filter_status,
       is_forwarded,
       forwarded_by,
       original_sender_email,
       original_sender_name,
-      scope_summary,
-      intent_explanation,
+      ${isSummary ? '' : 'scope_summary, intent_explanation, ml_llm_review:raw_payload->ml_llm_review,'}
       intent_confidence,
       matched_bid_number,
       match_confidence,
@@ -56,7 +56,6 @@ export async function GET(request: NextRequest) {
       estimator_status,
       estimator_notes:raw_payload->>estimator_notes,
       refused_by:raw_payload->>refused_by,
-      ml_llm_review:raw_payload->ml_llm_review,
       is_human_labeled,
       human_label,
       human_labeled_at,
@@ -117,7 +116,19 @@ export async function GET(request: NextRequest) {
       return NextResponse.json({ error: error.message }, { status: 500 });
     }
 
-    const rows = data || [];
+    const rows = (data || []).map((r: any) => {
+      if (!Array.isArray(r.attachments)) return r;
+      return {
+        ...r,
+        attachments: r.attachments.map((a: any) => ({
+          filename: a.filename,
+          size: a.size,
+          contentType: a.contentType,
+          storageUrl: a.storageUrl,
+          checksum: a.checksum,
+        })),
+      };
+    });
     const totalCount = count ?? rows.length;
 
     if (rows.length > 0) {
